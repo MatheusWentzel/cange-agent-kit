@@ -1,0 +1,49 @@
+{
+  "name": "cange-agent-kit",
+  "version": "0.1.0",
+  "description": "Agent-safe local toolkit for Cange API discovery and mutations",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "cange": "dist/cli/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "AGENTS.md",
+    "docs",
+    "examples"
+  ],
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build:bundle": "tsup src/index.ts src/cli/index.ts --format esm --dts --sourcemap --clean",
+    "dev": "tsx src/cli/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint:types": "tsc --noEmit"
+  },
+  "keywords": [
+    "cange",
+    "agent",
+    "cli",
+    "typescript"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "commander": "^14.0.1",
+    "dotenv": "^16.6.1",
+    "undici": "^7.16.0",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@types/node": "^24.7.2",
+    "tsup": "^8.5.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  }
+}
