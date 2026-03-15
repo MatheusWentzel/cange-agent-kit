@@ -20,7 +20,7 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 
 ## Sequência recomendada para mutações com values
 
-1. `cange my-flows` ou `cange my-registers`
+1. `cange my-flows`, `cange my-registers`, `cange my-tasks` e `cange notifications --is-archived N`
 2. `cange flow get ...` ou `cange register get ...`
 3. `cange fields by-flow ...` ou `cange fields by-register ...`
 4. `cange template flow-create ...` ou `cange template register-create ...`
@@ -32,3 +32,13 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Use `--output json` quando o resultado for consumido por automação.
 - Use `--output pretty` para uso humano local.
 - Em falhas, tratar saída não-zero como erro operacional.
+
+## Base de conhecimento MCP-style
+
+- Guia principal: `docs/agent-mcp-kb.md`
+- Playbooks por cenário: `docs/playbooks/`
+  - tarefas pendentes
+  - notificações
+  - resposta por comentários
+  - execução + conclusão/movimentação
+  - criação de novos cards

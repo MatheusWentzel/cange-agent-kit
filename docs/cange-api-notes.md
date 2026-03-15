@@ -11,8 +11,10 @@
 
 ### Discovery e estrutura
 
-- `GET /my-flows`
-- `GET /my-registers`
+- `GET /flow/my-flows`
+- `GET /register/my-registers`
+- `GET /card/my-tasks`
+- `GET /notification/by-user` (`isArchived=S|N`)
 - `GET /flow` (`id_flow` ou `hash`)
 - `GET /register` (`id_register` ou `hash`)
 - `GET /field/by-flow` (`flow_id`)

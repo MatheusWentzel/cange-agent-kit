@@ -13,6 +13,8 @@ const fields: NormalizedField[] = [
   {
     id: 1,
     name: "customer_name",
+    title: "Nome do cliente",
+    description: "Nome visível para identificar o cliente",
     type: "TEXT_SHORT_FIELD",
     required: true,
     formId: 662,
@@ -21,6 +23,8 @@ const fields: NormalizedField[] = [
   {
     id: 2,
     name: "due_date",
+    title: "Data de vencimento",
+    description: "Data limite para concluir a tarefa",
     type: "DATE_PICKER_FIELD",
     required: false,
     formId: 662,
@@ -91,6 +95,10 @@ describe("payload builder", () => {
 
     expect(template.context.formId).toBe(662);
     expect(template.requiredFields.map((item) => item.name)).toEqual(["customer_name"]);
+    expect(template.requiredFields[0]).toMatchObject({
+      title: "Nome do cliente",
+      description: "Nome visível para identificar o cliente"
+    });
     expect(template.payloadSkeleton).toMatchObject({
       idForm: 662,
       flowId: 192,

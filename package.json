@@ -18,7 +18,8 @@
   "scripts": {
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "build:bundle": "tsup src/index.ts src/cli/index.ts --format esm --dts --sourcemap --clean",
-    "dev": "tsx src/cli/index.ts",
+    "dev": "node --loader tsx src/cli/index.ts",
+    "cli": "node dist/cli/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:types": "tsc --noEmit"

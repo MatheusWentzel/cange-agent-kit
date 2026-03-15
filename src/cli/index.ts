@@ -19,6 +19,8 @@ import { registerTemplateRegisterCreateCommand } from "./commands/field-template
 import { registerFlowGetCommand } from "./commands/flow-get.js";
 import { registerMyFlowsCommand } from "./commands/my-flows.js";
 import { registerMyRegistersCommand } from "./commands/my-registers.js";
+import { registerMyTasksCommand } from "./commands/my-tasks.js";
+import { registerNotificationsCommand } from "./commands/notifications.js";
 import { registerRegisterCreateCommand } from "./commands/register-create.js";
 import { registerRegisterFormAnswerGetCommand } from "./commands/register-form-answer-get.js";
 import { registerRegisterGetCommand } from "./commands/register-get.js";
@@ -36,6 +38,8 @@ export function createProgram(): Command {
   registerAuthCommand(program);
   registerMyFlowsCommand(program);
   registerMyRegistersCommand(program);
+  registerMyTasksCommand(program);
+  registerNotificationsCommand(program);
 
   const flowCommand = program.command("flow").description("Operações de flow");
   registerFlowGetCommand(flowCommand);

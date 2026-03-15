@@ -15,8 +15,8 @@ export const getFieldsByRegisterParamsSchema = z.object({
 export interface NormalizedField {
   id?: number | string;
   name: string;
-  label?: string;
   title?: string;
+  description?: string;
   type: string;
   required: boolean;
   formId?: number | string;
@@ -68,8 +68,8 @@ function normalizeSingleField(item: Record<string, unknown>): NormalizedField | 
   }
 
   const id = pickNumberOrString(item, ["id", "field_id", "id_field"]);
-  const label = pickString(item, ["label"]);
-  const title = pickString(item, ["title", "name_label"]);
+  const title = pickString(item, ["title", "name_label", "label"]);
+  const description = pickString(item, ["description", "help_text", "placeholder"]);
   const requiredRaw = pickUnknown(item, ["required", "is_required", "mandatory"]);
   const formId = pickNumberOrString(item, ["form_id", "formId", "id_form"]);
   const options = pickUnknown(item, ["options", "choices", "values_options", "items"]);
@@ -77,8 +77,8 @@ function normalizeSingleField(item: Record<string, unknown>): NormalizedField | 
   return {
     id,
     name,
-    label,
     title,
+    description,
     type,
     required: parseRequiredLike(requiredRaw),
     formId,

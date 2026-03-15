@@ -20,20 +20,50 @@ export interface RegisterSummary {
 
 export interface CardSummary {
   cardId?: number | string;
+  title?: string;
   flowId?: number | string;
+  flowName?: string;
+  flowHash?: string;
   companyId?: number | string;
   currentStepId?: number | string;
+  stepName?: string;
   dueDate?: string;
+  createdAt?: string;
   responsibleUserId?: number | string;
+  responsibleName?: string;
+  statusDue?: number | string;
   archived?: boolean;
   complete?: boolean;
+}
+
+export interface NotificationSummary {
+  id?: number | string;
+  title?: string;
+  description?: string;
+  type?: string;
+  link?: string;
+  cardId?: number | string;
+  cardTitle?: string;
+  flowId?: number | string;
+  flowName?: string;
+  currentStepId?: number | string;
+  stepName?: string;
+  responsibleUserId?: number | string;
+  responsibleName?: string;
+  commentId?: number | string;
+  commentText?: string;
+  commentAuthorId?: number | string;
+  commentAuthorName?: string;
+  archived?: boolean;
+  read?: boolean;
+  createdAt?: string;
 }
 
 export interface FieldSummaryItem {
   id?: number | string;
   name: string;
-  label?: string;
   title?: string;
+  description?: string;
   type: string;
   required: boolean;
   formId?: number | string;

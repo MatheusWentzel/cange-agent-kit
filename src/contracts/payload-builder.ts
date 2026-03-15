@@ -229,8 +229,8 @@ function toFieldSummary(field: NormalizedField): FieldSummaryItem {
   return {
     id: field.id,
     name: field.name,
-    label: field.label,
     title: field.title,
+    description: field.description,
     type: field.type,
     required: field.required,
     formId: field.formId

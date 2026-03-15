@@ -20,6 +20,8 @@ describe("cli parsing", () => {
 
     expect(commandNames).toContain("my-flows");
     expect(commandNames).toContain("my-registers");
+    expect(commandNames).toContain("my-tasks");
+    expect(commandNames).toContain("notifications");
     expect(commandNames).toContain("card");
     expect(commandNames).toContain("register");
   });

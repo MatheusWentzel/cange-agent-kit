@@ -27,6 +27,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const readOnly = {
     getMyFlows: discovery.getMyFlows,
     getMyRegisters: discovery.getMyRegisters,
+    getMyTasks: discovery.getMyTasks,
+    getNotificationsByUser: discovery.getNotificationsByUser,
     getFlow: flows.getFlow,
     getRegister: registers.getRegister,
     getFieldsByFlow: fields.getFieldsByFlow,

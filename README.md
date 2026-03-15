@@ -44,6 +44,12 @@ Evitar chamadas diretas e repetitivas à API crua do Cange em cada tarefa de age
 
 ## Setup
 
+0. Entre na pasta do projeto:
+
+```bash
+cd cange-agent-kit
+```
+
 1. Instale dependências:
 
 ```bash
@@ -56,17 +62,34 @@ pnpm install
 cp .env.example .env
 ```
 
-3. Build:
+3. Gere o build da CLI:
 
 ```bash
 pnpm build
 ```
 
-4. Rodar CLI local:
+4. Rode a CLI local (modo estável, recomendado):
 
 ```bash
-pnpm dev -- --help
+pnpm cli --help
 ```
+
+5. Opcional: rodar sem build (modo dev):
+
+```bash
+pnpm dev --help
+```
+
+Se aparecer erro `EPERM ... tsx ... pipe` no modo dev, use o modo estável (`pnpm build` + `pnpm cli ...`).
+
+6. Opcional: expor comando global `cange` no seu shell:
+
+```bash
+pnpm link --global
+cange --help
+```
+
+Sem link global, use sempre `pnpm cli <comando>`.
 
 ## Ambiente (`.env`)
 
@@ -88,27 +111,31 @@ Regra de autenticação:
 ## Como autenticar
 
 ```bash
-cange auth login
+pnpm cli auth login
 ```
 
 ## Discovery (obrigatório antes de mutações)
 
+Os comandos abaixo exigem autenticação válida no `.env` (`CANGE_ACCESS_TOKEN` ou `CANGE_EMAIL` + `CANGE_APIKEY`).
+
 ```bash
-cange my-flows
-cange my-registers
-cange flow get --id-flow 192
-cange flow get --hash abc123
-cange register get --id-register 55
-cange register get --hash reg-hash
-cange fields by-flow --flow-id 192
-cange fields by-register --register-id 55 --with-children true
+pnpm cli my-flows
+pnpm cli my-registers
+pnpm cli my-tasks
+pnpm cli notifications --is-archived N
+pnpm cli flow get --id-flow 192
+pnpm cli flow get --hash abc123
+pnpm cli register get --id-register 55
+pnpm cli register get --hash reg-hash
+pnpm cli fields by-flow --flow-id 192
+pnpm cli fields by-register --register-id 55 --with-children true
 ```
 
 ## Inspeção de estrutura e template
 
 ```bash
-cange template flow-create --flow-id 192
-cange template register-create --register-id 55
+pnpm cli template flow-create --flow-id 192
+pnpm cli template register-create --register-id 55
 ```
 
 Os templates já retornam:
@@ -121,11 +148,11 @@ Os templates já retornam:
 ## Operações de card
 
 ```bash
-cange card get --flow-id 192 --card-id 9001
-cange card list --flow-id 192 --archived false --with-pre-answer true --with-time-tracking true
-cange card create --payload ./examples/create-card.example.json --validate-fields --dry-run
-cange card update --payload ./payload.json --dry-run
-cange card update-values --payload ./examples/update-card-values.example.json --validate-fields --dry-run
+pnpm cli card get --flow-id 192 --card-id 9001
+pnpm cli card list --flow-id 192 --archived false --with-pre-answer true --with-time-tracking true
+pnpm cli card create --payload ./examples/create-card.example.json --validate-fields --dry-run
+pnpm cli card update --payload ./payload.json --dry-run
+pnpm cli card update-values --payload ./examples/update-card-values.example.json --validate-fields --dry-run
 ```
 
 Diferença importante:
@@ -136,17 +163,17 @@ Diferença importante:
 ## Operações de comentário e anexo
 
 ```bash
-cange comment create --payload ./payload.json --dry-run
-cange attachment upload --file ./arquivo.pdf
-cange attachment link-card --payload ./payload.json --dry-run
+pnpm cli comment create --payload ./payload.json --dry-run
+pnpm cli attachment upload --file ./arquivo.pdf
+pnpm cli attachment link-card --payload ./payload.json --dry-run
 ```
 
 ## Operações de register
 
 ```bash
-cange register-form-answer get --form-answer-id 100
-cange register create --payload ./examples/create-register.example.json --register-id 55 --validate-fields --dry-run
-cange register update --payload ./payload.json --register-id 55 --validate-fields --dry-run
+pnpm cli register-form-answer get --form-answer-id 100
+pnpm cli register create --payload ./examples/create-register.example.json --register-id 55 --validate-fields --dry-run
+pnpm cli register update --payload ./payload.json --register-id 55 --validate-fields --dry-run
 ```
 
 ## Regras críticas de `values`
@@ -214,6 +241,62 @@ Veja instruções operacionais em [AGENTS.md](./AGENTS.md) e guias em:
 - [docs/cange-agent-usage.md](./docs/cange-agent-usage.md)
 - [docs/cange-api-notes.md](./docs/cange-api-notes.md)
 - [docs/field-types.md](./docs/field-types.md)
+- [docs/agent-mcp-kb.md](./docs/agent-mcp-kb.md)
+- [docs/playbooks/README.md](./docs/playbooks/README.md)
+
+## Uso com Codex e Claude Code
+
+Esta seção é o caminho rápido para usar o `cange-agent-kit` com agentes como Codex ou Claude Code.
+
+### 1. Instalação do projeto (igual para ambos)
+
+```bash
+cd cange-agent-kit
+pnpm install
+cp .env.example .env
+pnpm build
+```
+
+Depois disso, teste:
+
+```bash
+pnpm cli --help
+```
+
+### 2. Skills/base de conhecimento do repositório
+
+Trate estes arquivos como “skills” operacionais do agente:
+
+- skill principal: [docs/agent-mcp-kb.md](./docs/agent-mcp-kb.md)
+- skill de tarefas pendentes: [docs/playbooks/01-pending-tasks.md](./docs/playbooks/01-pending-tasks.md)
+- skill de notificações: [docs/playbooks/02-notifications.md](./docs/playbooks/02-notifications.md)
+- skill de resposta por comentários: [docs/playbooks/03-reply-notifications.md](./docs/playbooks/03-reply-notifications.md)
+- skill de execução/movimentação de card: [docs/playbooks/04-execute-and-move-card.md](./docs/playbooks/04-execute-and-move-card.md)
+- skill de criação de card: [docs/playbooks/05-create-card.md](./docs/playbooks/05-create-card.md)
+
+### 3. Codex (OpenAI)
+
+O Codex lê [AGENTS.md](./AGENTS.md). Para bootstrap rápido, use algo como:
+
+```text
+Leia AGENTS.md, docs/agent-mcp-kb.md e docs/playbooks/README.md antes de agir.
+Use a CLI cange-agent-kit como tool principal, sempre com `pnpm cli --output json`.
+Para mutações, siga discovery -> validate-fields -> dry-run -> execução.
+Nunca invente field.name, IDs ou payload values fora do form_id correto.
+```
+
+### 4. Claude Code
+
+O Claude Code pode usar o arquivo [CLAUDE.md](./CLAUDE.md) deste repositório.
+
+Prompt de bootstrap recomendado:
+
+```text
+Leia CLAUDE.md, docs/agent-mcp-kb.md e docs/playbooks/README.md.
+Use somente comandos `pnpm cli ...` para operar o Cange.
+Priorize os summaries e use o raw apenas para auditoria.
+Em mutações, rode dry-run antes da execução real.
+```
 
 ## Projeto preparado para agentes
 
@@ -231,6 +314,6 @@ Evolução planejada para MCP server:
 
 1. Expor contratos como tools MCP (`read` e `mutation` separados por namespace).
 2. Adicionar modo `agent-safe` com confirmação explícita para qualquer mutação.
-3. Incluir cache local opcional para endpoints de leitura (`my-flows`, `my-registers`, `fields`).
+3. Incluir cache local opcional para endpoints de leitura (`my-flows`, `my-registers`, `my-tasks`, `notifications`, `fields`).
 4. Adicionar auditoria estruturada por comando (sem segredos) para rastreabilidade.
 5. Criar policy layer para bloquear mutações sem discovery prévio quando configurado.

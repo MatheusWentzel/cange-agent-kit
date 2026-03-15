@@ -5,6 +5,7 @@ import type {
   FieldSummaryItem,
   FieldsSummary,
   FlowSummary,
+  NotificationSummary,
   RegisterSummary
 } from "./types.js";
 
@@ -98,29 +99,99 @@ export function summarizeRegister(raw: unknown): RegisterSummary {
 }
 
 export function summarizeCard(raw: unknown): CardSummary {
-  const record = extractPrimaryRecord(raw);
+  const record = extractCardRecord(raw);
   if (!record) {
     return {};
   }
 
-  return {
+  const flow = asRecord(record.flow);
+  const flowStep = asRecord(record.flow_step);
+  const user = asRecord(record.user);
+
+  return compactDefined({
     cardId: pickNumberOrString(record, ["id", "card_id", "id_card"]),
+    title: pickString(record, ["title", "name"]),
     flowId: pickNumberOrString(record, ["flow_id", "id_flow"]),
+    flowName: pickString(flow ?? {}, ["name", "title"]),
+    flowHash: pickString(flow ?? {}, ["hash"]),
     companyId: pickNumberOrString(record, ["company_id", "id_company"]),
-    currentStepId: pickNumberOrString(record, ["step_id", "id_step", "current_step_id"]),
+    currentStepId: pickNumberOrString(record, [
+      "flow_step_id",
+      "step_id",
+      "id_step",
+      "current_step_id"
+    ]) ?? pickNumberOrString(flowStep ?? {}, ["id_step", "step_id"]),
+    stepName: pickString(flowStep ?? {}, ["name", "title"]),
     dueDate: pickString(record, ["dt_due", "due_date"]),
-    responsibleUserId: pickNumberOrString(record, ["user_id", "responsible_user_id"]),
+    createdAt: pickString(record, ["dt_created", "created_at"]),
+    responsibleUserId:
+      pickNumberOrString(record, ["user_id", "responsible_user_id"]) ??
+      pickNumberOrString(user ?? {}, ["id_user", "user_id", "id"]),
+    responsibleName: pickString(user ?? {}, ["name"]),
+    statusDue: pickNumberOrString(record, ["status_dt_due"]),
     archived: pickBoolean(record, ["archived"]),
     complete: pickBoolean(record, ["complete"])
-  };
+  });
+}
+
+export function summarizeNotification(raw: unknown): NotificationSummary {
+  const record = extractNotificationRecord(raw);
+  if (!record) {
+    return {};
+  }
+
+  const card = asRecord(record.card);
+  const comment = asRecord(record.card_comment);
+  const commentUser = asRecord(comment?.user);
+  const responsibleUser = asRecord(card?.user);
+  const flow = asRecord(card?.flow);
+  const flowStep = asRecord(card?.flow_step);
+  const commentText =
+    pickString(comment ?? {}, ["description", "message", "content"]) ??
+    pickString(record, ["description", "message", "content"]);
+
+  return compactDefined({
+    id: pickNumberOrString(record, ["id", "notification_id", "id_notification"]),
+    title:
+      pickString(record, ["title", "name", "subject"]) ??
+      pickString(card ?? {}, ["title", "name"]),
+    description: commentText,
+    type: pickString(record, ["type", "notification_type"]),
+    link: pickString(record, ["link", "url", "href"]),
+    cardId:
+      pickNumberOrString(record, ["card_id", "id_card"]) ??
+      pickNumberOrString(card ?? {}, ["id_card", "card_id"]),
+    cardTitle: pickString(card ?? {}, ["title", "name"]),
+    flowId:
+      pickNumberOrString(record, ["flow_id", "id_flow"]) ??
+      pickNumberOrString(card ?? {}, ["flow_id", "id_flow"]),
+    flowName: pickString(flow ?? {}, ["name", "title"]),
+    currentStepId:
+      pickNumberOrString(card ?? {}, ["flow_step_id", "step_id", "id_step"]) ??
+      pickNumberOrString(flowStep ?? {}, ["id_step", "step_id"]),
+    stepName: pickString(flowStep ?? {}, ["name", "title"]),
+    responsibleUserId:
+      pickNumberOrString(card ?? {}, ["user_id", "responsible_user_id"]) ??
+      pickNumberOrString(responsibleUser ?? {}, ["id_user", "user_id"]),
+    responsibleName: pickString(responsibleUser ?? {}, ["name"]),
+    commentId:
+      pickNumberOrString(record, ["card_comment_id", "comment_id"]) ??
+      pickNumberOrString(comment ?? {}, ["id_card_comment", "card_comment_id"]),
+    commentText,
+    commentAuthorId: pickNumberOrString(commentUser ?? {}, ["id_user", "user_id"]),
+    commentAuthorName: pickString(commentUser ?? {}, ["name"]),
+    archived: pickBoolean(record, ["archived", "isArchived", "is_archived"]),
+    read: pickBoolean(record, ["read", "isRead", "is_read"]),
+    createdAt: pickString(record, ["dt_created", "created_at", "dt_create", "createdAt", "date"])
+  });
 }
 
 export function summarizeFields(fields: NormalizedField[]): FieldsSummary {
   const items: FieldSummaryItem[] = fields.map((field) => ({
     id: field.id,
     name: field.name,
-    label: field.label,
     title: field.title,
+    description: field.description,
     type: field.type,
     required: field.required,
     formId: field.formId
@@ -183,6 +254,106 @@ function pickBoolean(record: Record<string, unknown>, keys: string[]): boolean |
     }
   }
   return undefined;
+}
+
+function extractCardRecord(raw: unknown): Record<string, unknown> | undefined {
+  const direct = asRecord(raw);
+  if (direct && looksLikeCardRecord(direct)) {
+    return direct;
+  }
+
+  const candidates: Record<string, unknown>[] = [];
+  if (direct) {
+    const nested = [direct.card, direct.data, direct.item, direct.result];
+    for (const value of nested) {
+      const nestedRecord = asRecord(value);
+      if (nestedRecord) {
+        candidates.push(nestedRecord);
+      }
+    }
+  }
+
+  for (const arrayItem of extractArray(raw)) {
+    const arrayRecord = asRecord(arrayItem);
+    if (arrayRecord) {
+      candidates.push(arrayRecord);
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (looksLikeCardRecord(candidate)) {
+      return candidate;
+    }
+  }
+
+  return direct ?? candidates[0];
+}
+
+function looksLikeCardRecord(record: Record<string, unknown>): boolean {
+  const cardKeys = [
+    "id_card",
+    "card_id",
+    "flow_id",
+    "company_id",
+    "flow_step_id",
+    "status_dt_due",
+    "dt_due"
+  ];
+  return cardKeys.some((key) => key in record);
+}
+
+function extractNotificationRecord(raw: unknown): Record<string, unknown> | undefined {
+  const direct = asRecord(raw);
+  if (direct && looksLikeNotificationRecord(direct)) {
+    return direct;
+  }
+
+  const candidates: Record<string, unknown>[] = [];
+  if (direct) {
+    const nested = [direct.notification, direct.data, direct.item, direct.result];
+    for (const value of nested) {
+      const nestedRecord = asRecord(value);
+      if (nestedRecord) {
+        candidates.push(nestedRecord);
+      }
+    }
+  }
+
+  for (const arrayItem of extractArray(raw)) {
+    const arrayRecord = asRecord(arrayItem);
+    if (arrayRecord) {
+      candidates.push(arrayRecord);
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (looksLikeNotificationRecord(candidate)) {
+      return candidate;
+    }
+  }
+
+  return direct ?? candidates[0];
+}
+
+function looksLikeNotificationRecord(record: Record<string, unknown>): boolean {
+  const notificationKeys = [
+    "id_notification",
+    "notification_id",
+    "card_comment_id",
+    "dt_created",
+    "type"
+  ];
+  return notificationKeys.some((key) => key in record);
+}
+
+function compactDefined<T extends Record<string, unknown>>(record: T): T {
+  const compact: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(record)) {
+    if (value !== undefined) {
+      compact[key] = value;
+    }
+  }
+  return compact as T;
 }
 
 function isDefined<T>(value: T | undefined): value is T {
