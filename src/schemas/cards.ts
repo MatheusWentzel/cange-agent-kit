@@ -38,6 +38,21 @@ export const updateCardValuesPayloadSchema = z.object({
   values: valuesSchema
 });
 
+export const moveCardStepPayloadSchema = z.object({
+  flowId: z.number().int().positive(),
+  cardId: z.number().int().positive(),
+  fromStepId: z.number().int().positive(),
+  toStepId: z.number().int().positive(),
+  complete: z.enum(["S", "N"]).optional(),
+  isFromCurrentStep: z.boolean().optional(),
+  isTestMode: z.boolean().optional()
+});
+
+export const moveCardStepWithValuesPayloadSchema = moveCardStepPayloadSchema.extend({
+  idForm: z.number().int().positive(),
+  values: valuesSchema
+});
+
 export const getCardParamsSchema = z.object({
   cardId: idLikeSchema,
   flowId: idLikeSchema,

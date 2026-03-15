@@ -35,9 +35,9 @@ export function createAttachmentsContracts(client: CangeClient): AttachmentsCont
       }
 
       const fileName = basename(parsed.data.filePath);
-      const file = new File([new Uint8Array(fileBuffer)], fileName);
+      const file = new Blob([new Uint8Array(fileBuffer)]);
       const formData = new FormData();
-      formData.append("file", file);
+      formData.append("file", file, fileName);
 
       const raw = await client.post<unknown>("/attachment", {
         body: formData,

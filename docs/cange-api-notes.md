@@ -15,6 +15,7 @@
 - `GET /register/my-registers`
 - `GET /card/my-tasks`
 - `GET /notification/by-user` (`isArchived=S|N`)
+- `POST /notification` (`id_notification`, `archived`)
 - `GET /flow` (`id_flow` ou `hash`)
 - `GET /register` (`id_register` ou `hash`)
 - `GET /field/by-flow` (`flow_id`)
@@ -25,6 +26,7 @@
 - `POST /form/new-answer` (create card)
 - `PUT /card` (update card atributos)
 - `PUT /form/answer` (update card values)
+- `POST /card/v2/move-step` (move card step, com ou sem values)
 - `GET /card/`
 - `GET /card/by-flow/`
 

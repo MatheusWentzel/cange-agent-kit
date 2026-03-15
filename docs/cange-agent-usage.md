@@ -18,7 +18,15 @@
 - `cange template flow-create --flow-id <id>`
 - `cange template register-create --register-id <id>`
 - `cange card create --payload ... --validate-fields --dry-run`
+- `cange card move-step-with-values --payload ... --validate-fields --dry-run`
+- `cange notification read --payload ... --dry-run`
 - `cange register create --payload ... --validate-fields --dry-run`
+
+## Convenção de payload
+
+- `--payload` recebe caminho para arquivo `.json` (não aceitar JSON inline).
+- Inputs de mutação fora de `values` usam camelCase (`flowId`, `cardId`, `registerId`, `formAnswerId`).
+- Dentro de `values`, as chaves continuam sendo `field.name`.
 
 ## Regras de ouro
 
@@ -29,6 +37,7 @@
 
 ## Playbooks operacionais
 
+- [00 - Sugestões operacionais para agentes](./playbooks/00-agent-operational-suggestions.md)
 - [01 - Consultar tarefas pendentes](./playbooks/01-pending-tasks.md)
 - [02 - Consultar notificações](./playbooks/02-notifications.md)
 - [03 - Responder notificações via comentários](./playbooks/03-reply-notifications.md)

@@ -12,8 +12,12 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Na criação, preencher todos os campos com `required = "1"` do formulário-alvo.
 - Para card create, usar `flow.form_init_id`.
 - Para register create/update, usar `register.form_id`.
+- Para mover etapa de card, usar `card move-step` ou `card move-step-with-values`.
+- Para marcar notificação como lida/arquivada, usar `notification read`.
 - Usar `template flow-create` e `template register-create` antes de mutações quando necessário.
 - Usar `--validate-fields` e `--dry-run` antes de mutações quando apropriado.
+- `--payload` sempre deve receber caminho de arquivo JSON, nunca JSON inline.
+- Inputs de mutação fora de `values` devem usar camelCase (`flowId`, `cardId`, `registerId` etc).
 - Não inventar IDs.
 - Não inventar chaves de `values`.
 - Se houver falha de autenticação, revisar `CANGE_ACCESS_TOKEN` ou `CANGE_EMAIL` / `CANGE_APIKEY`.
@@ -26,6 +30,27 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 4. `cange template flow-create ...` ou `cange template register-create ...`
 5. mutação com `--validate-fields --dry-run`
 6. mutação final sem `--dry-run`
+
+## Sugestões operacionais importantes
+
+- Antes de executar tarefa ou mover card:
+  - validar se existem requireds no formulário alvo e preencher todos (`required = "1"`).
+  - chamadas sugeridas:
+    - `cange --output json my-tasks`
+    - `cange --output json card get --flow-id <flowId> --card-id <cardId>`
+    - `cange --output json fields by-flow --flow-id <flowId>`
+    - mutação com `--validate-fields --dry-run`
+- Ao executar/mover:
+  - comentar o que foi feito e por quê.
+  - chamadas sugeridas:
+    - `cange comment create --payload ./payloads/execution-note.json --dry-run`
+    - `cange comment create --payload ./payloads/execution-note.json`
+- Ao ler/responder comentário:
+  - marcar notificação relacionada como lida/arquivada.
+  - chamadas sugeridas:
+    - `cange --output json notifications --is-archived N`
+    - `cange notification read --payload ./examples/notification-read.example.json --dry-run`
+    - `cange notification read --payload ./examples/notification-read.example.json`
 
 ## Saída e previsibilidade
 

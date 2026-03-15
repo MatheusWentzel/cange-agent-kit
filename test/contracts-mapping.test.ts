@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createCardsContracts } from "../src/contracts/cards.js";
+import { createNotificationsContracts } from "../src/contracts/notifications.js";
 import { createRegistersContracts } from "../src/contracts/registers.js";
 import type { CangeClient } from "../src/client/http.js";
 
@@ -25,6 +26,7 @@ describe("contracts endpoint mapping", () => {
     vi.mocked(client.put).mockResolvedValue({});
 
     const cards = createCardsContracts(client);
+    const notifications = createNotificationsContracts(client);
     const registers = createRegistersContracts(client);
 
     await cards.createCard({
@@ -34,11 +36,38 @@ describe("contracts endpoint mapping", () => {
       values: { customer_name: "ACME" }
     });
 
+    await cards.moveCardStep({
+      flowId: 192,
+      cardId: 7,
+      fromStepId: 11,
+      toStepId: 12,
+      complete: "N",
+      isFromCurrentStep: true,
+      isTestMode: false
+    });
+
+    await cards.moveCardStepWithValues({
+      flowId: 192,
+      cardId: 7,
+      fromStepId: 12,
+      toStepId: 13,
+      idForm: 662,
+      values: { customer_name: "ACME 3" },
+      complete: "S",
+      isFromCurrentStep: true,
+      isTestMode: false
+    });
+
     await cards.updateCardValues({
       idForm: 662,
       flowId: 192,
       cardId: 7,
       values: { customer_name: "ACME 2" }
+    });
+
+    await notifications.readNotification({
+      notificationId: 48107,
+      archived: "S"
     });
 
     await registers.updateRegister({
@@ -47,12 +76,45 @@ describe("contracts endpoint mapping", () => {
       values: { doc_name: "Contrato" }
     });
 
-    expect(client.post).toHaveBeenCalledWith("/form/new-answer", {
+    expect(client.post).toHaveBeenNthCalledWith(1, "/form/new-answer", {
       body: {
         id_form: 662,
         origin: "/cange-agent-kit",
         values: { customer_name: "ACME" },
         flow_id: 192
+      }
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(2, "/card/v2/move-step", {
+      body: {
+        flow_id: 192,
+        id_card: 7,
+        from_step_id: 11,
+        to_step_id: 12,
+        complete: "N",
+        isFromCurrentStep: true,
+        isTestMode: false
+      }
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(3, "/card/v2/move-step", {
+      body: {
+        flow_id: 192,
+        id_card: 7,
+        from_step_id: 12,
+        to_step_id: 13,
+        id_form: 662,
+        values: { customer_name: "ACME 3" },
+        complete: "S",
+        isFromCurrentStep: true,
+        isTestMode: false
+      }
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(4, "/notification", {
+      body: {
+        id_notification: 48107,
+        archived: "S"
       }
     });
 

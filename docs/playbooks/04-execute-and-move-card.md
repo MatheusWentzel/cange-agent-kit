@@ -4,6 +4,12 @@
 
 Executar a ação necessária no card e finalizar o ciclo operacional.
 
+Convenção importante:
+
+- `--payload` é caminho para arquivo JSON.
+- No `card update`, usar chaves camelCase como `flowId`, `cardId`, `complete`.
+- Para mover etapa com payload dedicado, usar `card move-step` ou `card move-step-with-values`.
+
 ## Fluxo recomendado
 
 1. Identificar card alvo em `my-tasks`:
@@ -18,20 +24,25 @@ pnpm cli --output json my-tasks
 pnpm cli --output json card get --flow-id <flowId> --card-id <cardId>
 ```
 
-3. Executar trabalho no card (conforme tarefa):
+3. Verificar fields e obrigatórios antes de executar/mover:
+
+```bash
+pnpm cli --output json fields by-flow --flow-id <flowId>
+```
+
+Sugestão:
+
+- identificar `idForm` usado na execução/movimentação com `values`
+- garantir preenchimento de requireds (`required = 1`) desse `idForm`
+- usar sempre `--validate-fields --dry-run` antes da mutação real
+
+4. Executar trabalho no card (conforme tarefa):
 
 - atualizar respostas dinâmicas:
 
 ```bash
 pnpm cli card update-values --payload ./payloads/update-values.json --validate-fields --dry-run
 pnpm cli card update-values --payload ./payloads/update-values.json --validate-fields
-```
-
-- adicionar comentário de evidência:
-
-```bash
-pnpm cli comment create --payload ./payloads/execution-note.json --dry-run
-pnpm cli comment create --payload ./payloads/execution-note.json
 ```
 
 - anexar evidência (opcional):
@@ -42,22 +53,40 @@ pnpm cli attachment link-card --payload ./payloads/link-attachment.json --dry-ru
 pnpm cli attachment link-card --payload ./payloads/link-attachment.json
 ```
 
-4. Concluir cartão:
+5. Mover cartão de etapa:
 
 ```json
 {
-  "flowId": 19263,
-  "cardId": 827730,
-  "complete": "S"
+  "flowId": 14531,
+  "cardId": 479486,
+  "fromStepId": 81690,
+  "toStepId": 81691,
+  "complete": "S",
+  "isFromCurrentStep": true,
+  "isTestMode": false
 }
 ```
 
 ```bash
-pnpm cli card update --payload ./payloads/card-complete.json --dry-run
-pnpm cli card update --payload ./payloads/card-complete.json
+pnpm cli card move-step --payload ./payloads/move-card-step.json --dry-run
+pnpm cli card move-step --payload ./payloads/move-card-step.json
 ```
 
-5. Verificar estado final:
+Se a movimentação exigir respostas no payload (recomendado validar):
+
+```bash
+pnpm cli card move-step-with-values --payload ./payloads/move-card-step-with-values.json --validate-fields --dry-run
+pnpm cli card move-step-with-values --payload ./payloads/move-card-step-with-values.json --validate-fields
+```
+
+6. Publicar comentário de evidência (o que foi feito e por quê):
+
+```bash
+pnpm cli comment create --payload ./payloads/execution-note.json --dry-run
+pnpm cli comment create --payload ./payloads/execution-note.json
+```
+
+7. Verificar estado final:
 
 ```bash
 pnpm cli --output json card get --flow-id <flowId> --card-id <cardId>
@@ -66,6 +95,6 @@ pnpm cli --output json my-tasks
 
 ## Importante sobre “mover cartão”
 
-- O kit não expõe comando dedicado para alterar etapa (`flow_step_id`) diretamente.
-- Estratégia suportada: concluir (`complete: "S"`) e depender da regra do fluxo para transição.
-- Se o fluxo exigir movimentação manual sem automação, escalonar para ação humana no app.
+- Use sempre `fromStepId` e `toStepId` válidos para o flow.
+- Se houver `values`, usar `idForm` coerente com os fields do flow e preferir `--validate-fields`.
+- Quando a regra do fluxo exigir ações extras, escalonar para ação humana no app.

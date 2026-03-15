@@ -18,6 +18,13 @@ Comando base recomendado para agentes:
 pnpm cli --output json <comando>
 ```
 
+## Convenções de input (crítico)
+
+- `--payload` sempre recebe caminho de arquivo JSON (ex: `--payload ./payloads/comment.json`).
+- Não enviar JSON inline em `--payload`.
+- Em mutações, chaves de input fora de `values` usam camelCase (`flowId`, `cardId`, `registerId`, `formAnswerId`).
+- Exceção: dentro de `values`, a chave deve ser exatamente `field.name` (pode ser hash/string não legível).
+
 ## Contrato padrão de saída
 
 A maioria dos comandos retorna envelope previsível:
@@ -54,14 +61,93 @@ A maioria dos comandos retorna envelope previsível:
 
 ### Mutações
 
-- `pnpm cli card create --payload <json> [--validate-fields] [--dry-run]`
-- `pnpm cli card update --payload <json> [--dry-run]`
-- `pnpm cli card update-values --payload <json> [--validate-fields] [--dry-run]`
-- `pnpm cli comment create --payload <json> [--dry-run]`
+- `pnpm cli card create --payload <path-to-json> [--validate-fields] [--dry-run]`
+- `pnpm cli card update --payload <path-to-json> [--dry-run]`
+- `pnpm cli card update-values --payload <path-to-json> [--validate-fields] [--dry-run]`
+- `pnpm cli card move-step --payload <path-to-json> [--dry-run]`
+- `pnpm cli card move-step-with-values --payload <path-to-json> [--validate-fields] [--dry-run]`
+- `pnpm cli comment create --payload <path-to-json> [--dry-run]`
+- `pnpm cli notification read --payload <path-to-json> [--dry-run]`
 - `pnpm cli attachment upload --file <path>`
-- `pnpm cli attachment link-card --payload <json> [--dry-run]`
-- `pnpm cli register create --payload <json> [--validate-fields] [--register-id <id>] [--dry-run]`
-- `pnpm cli register update --payload <json> [--validate-fields] [--register-id <id>] [--dry-run]`
+- `pnpm cli attachment link-card --payload <path-to-json> [--dry-run]`
+- `pnpm cli register create --payload <path-to-json> [--validate-fields] [--register-id <id>] [--dry-run]`
+- `pnpm cli register update --payload <path-to-json> [--validate-fields] [--register-id <id>] [--dry-run]`
+
+## Payloads de mutação (exemplos em camelCase)
+
+Exemplos prontos no repositório:
+
+- `examples/create-card.example.json`
+- `examples/update-card.example.json`
+- `examples/update-card-values.example.json`
+- `examples/move-card-step.example.json`
+- `examples/move-card-step-with-values.example.json`
+- `examples/comment-create.example.json`
+- `examples/notification-read.example.json`
+- `examples/create-register.example.json`
+
+`comment create`:
+
+```json
+{
+  "flowId": 19263,
+  "cardId": 827730,
+  "description": "Recebido. Vou executar e retorno em seguida.",
+  "mentions": [76]
+}
+```
+
+`card create`:
+
+```json
+{
+  "idForm": 133863,
+  "flowId": 19263,
+  "origin": "/cange-agent-kit",
+  "values": {
+    "922df39637824f9830d705afcf7f632ac2295938": "Novo card via agente"
+  }
+}
+```
+
+`card update`:
+
+```json
+{
+  "flowId": 19263,
+  "cardId": 827730,
+  "complete": "S"
+}
+```
+
+`card move-step-with-values`:
+
+```json
+{
+  "flowId": 14531,
+  "cardId": 479486,
+  "fromStepId": 81690,
+  "toStepId": 81691,
+  "idForm": 102905,
+  "values": {
+    "3ea5e3e99267205d33776ac435467527dc4fa681": "Tesdoiasjio0219381290"
+  },
+  "complete": "S",
+  "isFromCurrentStep": true,
+  "isTestMode": false
+}
+```
+
+`notification read`:
+
+```json
+{
+  "notificationId": 48107,
+  "archived": "S"
+}
+```
+
+Compatibilidade: também aceita `id_notification`.
 
 ## Estruturas de objeto (summaries)
 
@@ -148,17 +234,39 @@ A maioria dos comandos retorna envelope previsível:
 5. Executar mutação real.
 6. Verificar estado final com comando de leitura.
 
+## Sugestões operacionais (tarefas, movimentos e comentários)
+
+### Antes de executar tarefa ou mover cartão
+
+- Verificar contexto: `my-tasks` + `card get`.
+- Verificar estrutura: `fields by-flow` (e `idForm` alvo).
+- Se houver `values`, preencher obrigatórios (`required = 1`) do formulário alvo.
+- Validar antes de mutar:
+  - `card update-values --validate-fields --dry-run`
+  - `card move-step-with-values --validate-fields --dry-run`
+
+### Após executar ou mover cartão
+
+- Registrar comentário objetivo com o que foi feito e o porquê:
+  - `comment create --payload <path-to-json> --dry-run`
+  - `comment create --payload <path-to-json>`
+
+### Ao ler/responder comentário
+
+- Após tratar a notificação, marcar como lida/arquivada:
+  - `notification read --payload <path-to-json> --dry-run`
+  - `notification read --payload <path-to-json>`
+
+Referência rápida: [Playbook 00](./playbooks/00-agent-operational-suggestions.md).
+
 ## Limites conhecidos
 
-- Não há comando dedicado para mover explicitamente `flow_step_id`.
-- Estratégia suportada:
-  - executar o trabalho (values/comentários/anexos)
-  - concluir cartão com `card update` (`complete: "S"`) quando o fluxo usar isso como transição
-  - verificar no `card get`/`my-tasks`
-  - se o fluxo exigir movimentação manual de etapa, escalonar para operador humano
+- O comando `card move-step`/`card move-step-with-values` depende de `fromStepId` e `toStepId` corretos.
+- Se o fluxo tiver regras adicionais fora do endpoint, a movimentação pode exigir intervenção no app.
 
 ## Playbooks
 
+- [00 - Sugestões operacionais para agentes](./playbooks/00-agent-operational-suggestions.md)
 - [01 - Consultar tarefas pendentes](./playbooks/01-pending-tasks.md)
 - [02 - Consultar notificações](./playbooks/02-notifications.md)
 - [03 - Responder notificações via comentários](./playbooks/03-reply-notifications.md)

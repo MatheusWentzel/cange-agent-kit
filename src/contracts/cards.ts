@@ -4,6 +4,8 @@ import {
   createCardPayloadSchema,
   getCardParamsSchema,
   listCardsByFlowParamsSchema,
+  moveCardStepPayloadSchema,
+  moveCardStepWithValuesPayloadSchema,
   updateCardPayloadSchema,
   updateCardValuesPayloadSchema
 } from "../schemas/cards.js";
@@ -44,6 +46,26 @@ export interface CardsContracts {
     flowId: number;
     cardId: number;
     values: Record<string, unknown>;
+  }) => Promise<{ raw: unknown; summary: CardSummary }>;
+  moveCardStep: (input: {
+    flowId: number;
+    cardId: number;
+    fromStepId: number;
+    toStepId: number;
+    complete?: "S" | "N";
+    isFromCurrentStep?: boolean;
+    isTestMode?: boolean;
+  }) => Promise<{ raw: unknown; summary: CardSummary }>;
+  moveCardStepWithValues: (input: {
+    flowId: number;
+    cardId: number;
+    fromStepId: number;
+    toStepId: number;
+    idForm: number;
+    values: Record<string, unknown>;
+    complete?: "S" | "N";
+    isFromCurrentStep?: boolean;
+    isTestMode?: boolean;
   }) => Promise<{ raw: unknown; summary: CardSummary }>;
 }
 
@@ -156,6 +178,60 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
           flow_id: parsed.data.flowId,
           card_id: parsed.data.cardId,
           values: parsed.data.values
+        }
+      });
+
+      return {
+        raw,
+        summary: summarizeCard(raw)
+      };
+    },
+
+    async moveCardStep(input) {
+      const parsed = moveCardStepPayloadSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new CangeValidationError("Payload inválido para moveCardStep.", {
+          details: parsed.error.format()
+        });
+      }
+
+      const raw = await client.post<unknown>("/card/v2/move-step", {
+        body: {
+          flow_id: parsed.data.flowId,
+          id_card: parsed.data.cardId,
+          from_step_id: parsed.data.fromStepId,
+          to_step_id: parsed.data.toStepId,
+          complete: parsed.data.complete,
+          isFromCurrentStep: parsed.data.isFromCurrentStep,
+          isTestMode: parsed.data.isTestMode
+        }
+      });
+
+      return {
+        raw,
+        summary: summarizeCard(raw)
+      };
+    },
+
+    async moveCardStepWithValues(input) {
+      const parsed = moveCardStepWithValuesPayloadSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new CangeValidationError("Payload inválido para moveCardStepWithValues.", {
+          details: parsed.error.format()
+        });
+      }
+
+      const raw = await client.post<unknown>("/card/v2/move-step", {
+        body: {
+          flow_id: parsed.data.flowId,
+          id_card: parsed.data.cardId,
+          from_step_id: parsed.data.fromStepId,
+          to_step_id: parsed.data.toStepId,
+          id_form: parsed.data.idForm,
+          values: parsed.data.values,
+          complete: parsed.data.complete,
+          isFromCurrentStep: parsed.data.isFromCurrentStep,
+          isTestMode: parsed.data.isTestMode
         }
       });
 

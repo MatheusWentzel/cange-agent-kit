@@ -7,6 +7,7 @@ import { createCommentsContracts } from "./comments.js";
 import { createDiscoveryContracts } from "./discovery.js";
 import { createFieldsContracts } from "./fields.js";
 import { createFlowsContracts } from "./flows.js";
+import { createNotificationsContracts } from "./notifications.js";
 import { createPayloadBuilderContracts } from "./payload-builder.js";
 import { createRegistersContracts } from "./registers.js";
 
@@ -16,6 +17,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const fields = createFieldsContracts(params.client);
   const cards = createCardsContracts(params.client);
   const comments = createCommentsContracts(params.client);
+  const notifications = createNotificationsContracts(params.client);
   const attachments = createAttachmentsContracts(params.client);
   const registers = createRegistersContracts(params.client);
   const payloadBuilder = createPayloadBuilderContracts({
@@ -49,6 +51,9 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     createCard: cards.createCard,
     updateCard: cards.updateCard,
     updateCardValues: cards.updateCardValues,
+    moveCardStep: cards.moveCardStep,
+    moveCardStepWithValues: cards.moveCardStepWithValues,
+    readNotification: notifications.readNotification,
     createCardComment: comments.createCardComment,
     uploadAttachment: attachments.uploadAttachment,
     linkAttachmentToCard: attachments.linkAttachmentToCard,

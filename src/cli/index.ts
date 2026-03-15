@@ -9,6 +9,8 @@ import { registerAuthCommand } from "./commands/auth.js";
 import { registerCardCommentCreateCommand } from "./commands/card-comment-create.js";
 import { registerCardCreateCommand } from "./commands/card-create.js";
 import { registerCardGetCommand } from "./commands/card-get.js";
+import { registerCardMoveStepCommand } from "./commands/card-move-step.js";
+import { registerCardMoveStepWithValuesCommand } from "./commands/card-move-step-with-values.js";
 import { registerCardUpdateCommand } from "./commands/card-update.js";
 import { registerCardUpdateValuesCommand } from "./commands/card-update-values.js";
 import { registerCardsListCommand } from "./commands/cards-list.js";
@@ -20,6 +22,7 @@ import { registerFlowGetCommand } from "./commands/flow-get.js";
 import { registerMyFlowsCommand } from "./commands/my-flows.js";
 import { registerMyRegistersCommand } from "./commands/my-registers.js";
 import { registerMyTasksCommand } from "./commands/my-tasks.js";
+import { registerNotificationReadCommand } from "./commands/notification-read.js";
 import { registerNotificationsCommand } from "./commands/notifications.js";
 import { registerRegisterCreateCommand } from "./commands/register-create.js";
 import { registerRegisterFormAnswerGetCommand } from "./commands/register-form-answer-get.js";
@@ -40,6 +43,9 @@ export function createProgram(): Command {
   registerMyRegistersCommand(program);
   registerMyTasksCommand(program);
   registerNotificationsCommand(program);
+
+  const notificationCommand = program.command("notification").description("Operações de notificação");
+  registerNotificationReadCommand(notificationCommand);
 
   const flowCommand = program.command("flow").description("Operações de flow");
   registerFlowGetCommand(flowCommand);
@@ -63,6 +69,8 @@ export function createProgram(): Command {
   registerCardCreateCommand(cardCommand);
   registerCardUpdateCommand(cardCommand);
   registerCardUpdateValuesCommand(cardCommand);
+  registerCardMoveStepCommand(cardCommand);
+  registerCardMoveStepWithValuesCommand(cardCommand);
 
   const commentCommand = program.command("comment").description("Operações de comentário");
   registerCardCommentCreateCommand(commentCommand);

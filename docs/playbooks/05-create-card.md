@@ -4,6 +4,12 @@
 
 Criar card com segurança, sem inventar `values`, usando estrutura real do flow.
 
+Convenção importante:
+
+- `--payload` é caminho para arquivo JSON.
+- No payload de criação, usar camelCase para chaves fixas (`idForm`, `flowId`, `origin`).
+- Em `values`, a chave continua sendo `field.name`.
+
 ## Fluxo obrigatório
 
 1. Descobrir flow:

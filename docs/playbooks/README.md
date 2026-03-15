@@ -1,5 +1,6 @@
 # Playbooks de Agente
 
+- [00 - Sugestões operacionais para agentes](./00-agent-operational-suggestions.md)
 - [01 - Consultar tarefas pendentes](./01-pending-tasks.md)
 - [02 - Consultar notificações](./02-notifications.md)
 - [03 - Responder notificações via comentários](./03-reply-notifications.md)

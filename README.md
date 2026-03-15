@@ -2,6 +2,60 @@
 
 Toolkit local em Node.js + TypeScript para uso por agentes com a API do Cange, com foco em segurança, previsibilidade, governança e separação entre leitura e mutação.
 
+## Início Rápido Para Agentes (Do Zero)
+
+Use este prompt quando o agente ainda não está no projeto e precisa chegar até um ambiente 100% pronto.
+Premissa: a pessoa já está na pasta raiz onde quer instalar o `cange-agent-kit`.
+
+Prompt recomendado (Codex ou Claude Code, copiar/colar):
+
+```text
+Quero que você prepare o cange-agent-kit do zero para uso imediato.
+
+1) Se a pasta cange-agent-kit ainda não existir aqui, clone o repositório público:
+   git clone https://github.com/MatheusWentzel/cange-agent-kit.git
+
+2) Entre no projeto:
+   cd cange-agent-kit
+
+3) Leia os guias operacionais:
+   - AGENTS.md
+   - CLAUDE.md (se estiver usando Claude Code)
+   - docs/agent-mcp-kb.md
+   - docs/playbooks/README.md
+
+4) Instale e configure:
+   - pnpm install
+   - se .env não existir: cp .env.example .env
+   - valide se .env contém:
+     CANGE_API_BASE_URL, CANGE_APP_ORIGIN e autenticação por CANGE_ACCESS_TOKEN
+     ou por CANGE_EMAIL + CANGE_APIKEY, se não existir, me pergunte que vou lhe passar para criar o env.
+
+5) Valide o projeto:
+   - pnpm lint:types
+   - pnpm build
+   - pnpm test
+
+6) Faça smoke test da CLI:
+   - pnpm cli --help
+   - pnpm cli auth login
+   - pnpm cli --output json my-flows
+   - pnpm cli --output json my-registers
+   - pnpm cli --output json my-tasks
+   - pnpm cli --output json notifications --is-archived N
+
+7) Entregue um relatório final com:
+   - status de cada etapa (ok/falhou)
+   - comandos executados
+   - erros encontrados
+   - ações para corrigir pendências
+
+Regras obrigatórias:
+- Nunca expor token/apikey em logs.
+- Nunca inventar IDs nem chaves de values.
+- Em mutações com values: discovery -> --validate-fields -> --dry-run -> execução real.
+```
+
 ## Objetivo
 
 Evitar chamadas diretas e repetitivas à API crua do Cange em cada tarefa de agente, centralizando:
@@ -44,7 +98,7 @@ Evitar chamadas diretas e repetitivas à API crua do Cange em cada tarefa de age
 
 ## Setup
 
-0. Entre na pasta do projeto:
+1. Entre na pasta do projeto:
 
 ```bash
 cd cange-agent-kit
@@ -56,25 +110,25 @@ cd cange-agent-kit
 pnpm install
 ```
 
-2. Copie o ambiente:
+1. Copie o ambiente:
 
 ```bash
 cp .env.example .env
 ```
 
-3. Gere o build da CLI:
+1. Gere o build da CLI:
 
 ```bash
 pnpm build
 ```
 
-4. Rode a CLI local (modo estável, recomendado):
+1. Rode a CLI local (modo estável, recomendado):
 
 ```bash
 pnpm cli --help
 ```
 
-5. Opcional: rodar sem build (modo dev):
+1. Opcional: rodar sem build (modo dev):
 
 ```bash
 pnpm dev --help
@@ -82,7 +136,7 @@ pnpm dev --help
 
 Se aparecer erro `EPERM ... tsx ... pipe` no modo dev, use o modo estável (`pnpm build` + `pnpm cli ...`).
 
-6. Opcional: expor comando global `cange` no seu shell:
+1. Opcional: expor comando global `cange` no seu shell:
 
 ```bash
 pnpm link --global
@@ -151,22 +205,36 @@ Os templates já retornam:
 pnpm cli card get --flow-id 192 --card-id 9001
 pnpm cli card list --flow-id 192 --archived false --with-pre-answer true --with-time-tracking true
 pnpm cli card create --payload ./examples/create-card.example.json --validate-fields --dry-run
-pnpm cli card update --payload ./payload.json --dry-run
+pnpm cli card update --payload ./examples/update-card.example.json --dry-run
 pnpm cli card update-values --payload ./examples/update-card-values.example.json --validate-fields --dry-run
+pnpm cli card move-step --payload ./examples/move-card-step.example.json --dry-run
+pnpm cli card move-step-with-values --payload ./examples/move-card-step-with-values.example.json --validate-fields --dry-run
 ```
 
 Diferença importante:
 
 - `card update` altera atributos principais do cartão (`responsável`, `due date`, `tag`, `complete`, `archived`)
 - `card update-values` altera respostas dinâmicas do formulário (`values`)
+- `card move-step` move de etapa sem enviar respostas
+- `card move-step-with-values` move de etapa enviando `idForm + values`
 
 ## Operações de comentário e anexo
 
 ```bash
-pnpm cli comment create --payload ./payload.json --dry-run
+pnpm cli comment create --payload ./examples/comment-create.example.json --dry-run
 pnpm cli attachment upload --file ./arquivo.pdf
 pnpm cli attachment link-card --payload ./payload.json --dry-run
 ```
+
+## Operações de notificação
+
+```bash
+pnpm cli notifications --is-archived N
+pnpm cli notification read --payload ./examples/notification-read.example.json --dry-run
+pnpm cli notification read --payload ./examples/notification-read.example.json
+```
+
+Obs.: o payload canônico usa `notificationId` (camelCase), mas o comando também aceita `id_notification` por compatibilidade com o formato raw da API.
 
 ## Operações de register
 
@@ -183,6 +251,14 @@ pnpm cli register update --payload ./payload.json --register-id 55 --validate-fi
 - O valor deve respeitar o `field.type`.
 - Campos fora do formulário correto não devem ser enviados.
 - Na criação, todos os campos com `required = "1"` devem ser preenchidos.
+
+## Convenção de payload de mutação
+
+- `--payload` sempre recebe caminho de arquivo JSON (ex: `./examples/comment-create.example.json`).
+- Não enviar JSON inline no `--payload`.
+- Chaves de input de mutação (fora de `values`) seguem camelCase:
+  - `flowId`, `cardId`, `registerId`, `formAnswerId`, `attachmentId`
+- Exceção: dentro de `values`, as chaves são exatamente `field.name`.
 
 ## Regra de `form_id`
 
@@ -243,6 +319,7 @@ Veja instruções operacionais em [AGENTS.md](./AGENTS.md) e guias em:
 - [docs/field-types.md](./docs/field-types.md)
 - [docs/agent-mcp-kb.md](./docs/agent-mcp-kb.md)
 - [docs/playbooks/README.md](./docs/playbooks/README.md)
+- [docs/playbooks/00-agent-operational-suggestions.md](./docs/playbooks/00-agent-operational-suggestions.md)
 
 ## Uso com Codex e Claude Code
 
@@ -276,26 +353,78 @@ Trate estes arquivos como “skills” operacionais do agente:
 
 ### 3. Codex (OpenAI)
 
-O Codex lê [AGENTS.md](./AGENTS.md). Para bootstrap rápido, use algo como:
+O Codex lê [AGENTS.md](./AGENTS.md). Prompt completo recomendado (copiar/colar):
 
 ```text
-Leia AGENTS.md, docs/agent-mcp-kb.md e docs/playbooks/README.md antes de agir.
-Use a CLI cange-agent-kit como tool principal, sempre com `pnpm cli --output json`.
-Para mutações, siga discovery -> validate-fields -> dry-run -> execução.
-Nunca invente field.name, IDs ou payload values fora do form_id correto.
+Você está no repositório cange-agent-kit e deve deixá-lo 100% pronto para uso.
+
+Siga exatamente esta sequência:
+
+1) Leia os guias: AGENTS.md, docs/agent-mcp-kb.md e docs/playbooks/README.md.
+2) Instale dependências com pnpm.
+3) Verifique se existe .env:
+   - se não existir, crie a partir de .env.example
+   - não exponha secrets no output
+4) Valide se o .env contém chaves esperadas:
+   - CANGE_API_BASE_URL
+   - CANGE_APP_ORIGIN
+   - CANGE_ACCESS_TOKEN ou (CANGE_EMAIL + CANGE_APIKEY)
+5) Rode validações de projeto:
+   - pnpm lint:types
+   - pnpm build
+6) Faça smoke test da CLI:
+   - pnpm cli --help
+   - pnpm cli auth login
+   - pnpm cli --output json my-flows
+   - pnpm cli --output json my-registers
+   - pnpm cli --output json my-tasks
+   - pnpm cli --output json notifications --is-archived N
+7) Se autenticação falhar, explique objetivamente o que falta no .env.
+8) Entregue um relatório final com:
+   - status de cada etapa (ok/falhou)
+   - comando que falhou (se houver)
+   - ação recomendada para corrigir
+
+Regras obrigatórias:
+- Usar somente `pnpm cli ...` para operações Cange.
+- Em mutações com values: discovery -> validate-fields -> dry-run -> execução.
+- Nunca inventar IDs, field.name ou chaves de values.
 ```
 
 ### 4. Claude Code
 
 O Claude Code pode usar o arquivo [CLAUDE.md](./CLAUDE.md) deste repositório.
 
-Prompt de bootstrap recomendado:
+Prompt completo recomendado (copiar/colar):
 
 ```text
-Leia CLAUDE.md, docs/agent-mcp-kb.md e docs/playbooks/README.md.
-Use somente comandos `pnpm cli ...` para operar o Cange.
-Priorize os summaries e use o raw apenas para auditoria.
-Em mutações, rode dry-run antes da execução real.
+Você está no repositório cange-agent-kit. Configure e valide tudo para uso imediato da CLI.
+
+Checklist obrigatório:
+1) Leia CLAUDE.md, docs/agent-mcp-kb.md e docs/playbooks/README.md.
+2) Execute:
+   - pnpm install
+   - se .env não existir: cp .env.example .env
+3) Verifique configuração mínima no .env:
+   - base/origin preenchidos
+   - autenticação por token OU email+apikey
+4) Rode:
+   - pnpm lint:types
+   - pnpm build
+5) Smoke test:
+   - pnpm cli --help
+   - pnpm cli auth login
+   - pnpm cli --output json my-tasks
+   - pnpm cli --output json notifications --is-archived N
+6) Mostre um resumo final com:
+   - o que foi configurado
+   - quais testes passaram
+   - pendências para ficar 100% operacional
+
+Política de operação:
+- Preferir summaries para decisão e raw para auditoria.
+- Não expor credenciais em logs.
+- Em mutações: validar estrutura e usar dry-run antes da execução real.
 ```
 
 ## Projeto preparado para agentes

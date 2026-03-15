@@ -4,6 +4,11 @@
 
 Responder notificações (especialmente `comment_mention`) publicando comentário no card certo.
 
+Convenção importante:
+
+- `--payload` é caminho para arquivo JSON.
+- No payload de comentário, usar camelCase (`flowId`, `cardId`, `description`, `mentions`).
+
 ## Fluxo recomendado
 
 1. Buscar notificações ativas:
@@ -42,6 +47,15 @@ pnpm cli comment create --payload ./payloads/reply-comment.json --dry-run
 pnpm cli comment create --payload ./payloads/reply-comment.json
 ```
 
+7. Marcar notificação como lida/arquivada:
+
+```bash
+pnpm cli notification read --payload ./examples/notification-read.example.json --dry-run
+pnpm cli notification read --payload ./examples/notification-read.example.json
+```
+
+Antes de executar, ajuste o `notificationId` no arquivo de payload para o ID escolhido no `notifications --is-archived N`.
+
 ## Regras de resposta
 
 - Manter resposta objetiva e com próximo passo.
@@ -50,4 +64,4 @@ pnpm cli comment create --payload ./payloads/reply-comment.json
 
 ## Observação
 
-Este kit não possui rota para arquivar notificação. O playbook cobre resposta operacional via comentário.
+Ao marcar como lida, mantenha rastreabilidade: responda/comente primeiro e só depois execute `notification read`.

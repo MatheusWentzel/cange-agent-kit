@@ -22,6 +22,12 @@ export async function readPayloadFile<T>(payloadPath: string): Promise<T> {
   if (!payloadPath || payloadPath.trim().length === 0) {
     throw new CangeCliUsageError("Informe --payload com um caminho de arquivo JSON.");
   }
+  const normalized = payloadPath.trim();
+  if (looksLikeInlineJson(normalized)) {
+    throw new CangeCliUsageError(
+      "O argumento --payload aceita somente caminho de arquivo JSON (ex: ./payloads/create-card.json), não JSON inline."
+    );
+  }
   return readJsonFile<T>(payloadPath);
 }
 
@@ -29,4 +35,11 @@ export function assertValidationResult(valid: boolean, details: unknown): void {
   if (!valid) {
     throw new CangeValidationError("Validação de fields falhou.", { details });
   }
+}
+
+function looksLikeInlineJson(input: string): boolean {
+  return (
+    (input.startsWith("{") && input.endsWith("}")) ||
+    (input.startsWith("[") && input.endsWith("]"))
+  );
 }

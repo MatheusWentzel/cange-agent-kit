@@ -12,6 +12,8 @@ Use este repositório como camada segura para operar o Cange via CLI.
 
 - Usar somente `pnpm cli ...` para operações do Cange.
 - Preferir `--output json` para decisões automatizadas.
+- `--payload` sempre deve apontar para arquivo JSON (não usar JSON inline).
+- Em payloads de mutação fora de `values`, usar chaves camelCase (`flowId`, `cardId`, `registerId` etc).
 - Sempre fazer discovery antes de mutações.
 - Para payloads com `values`:
   - chave = `field.name`
@@ -23,6 +25,8 @@ Use este repositório como camada segura para operar o Cange via CLI.
   2. `--validate-fields` (quando disponível)
   3. `--dry-run`
   4. execução real
+- Para mover etapa de card, preferir `card move-step` ou `card move-step-with-values`.
+- Para marcar notificação como lida/arquivada, usar `notification read`.
 
 ## Fluxos prontos (skills)
 
