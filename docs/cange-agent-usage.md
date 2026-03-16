@@ -33,6 +33,8 @@
 - Nunca inventar chaves dentro de `values`.
 - Nunca enviar campo de outro `form_id`.
 - Sempre preencher obrigatórios (`required = "1"`) na criação.
+- Em movimentação de etapa com `values`, usar `idForm = flow_step.form_id` da etapa atual.
+- Não usar `flow.form_init_id` para mover etapa (ele é do `card create`).
 - Não usar curl direto quando houver comando da CLI.
 
 ## Playbooks operacionais

@@ -50,6 +50,7 @@ const TYPE_GUARDS: Record<string, GuardDefinition> = {
   DOCUMENT_FIELD: stringGuard(),
   DOCUMENTS_FIELD: stringGuard(),
   RICH_TEXT_FIELD: stringGuard(),
+  INPUT_RICH_TEXT_FIELD: stringGuard(),
   HTML_FIELD: stringGuard(),
   LINK_FIELD: stringGuard(),
   URL_FIELD: stringGuard()

@@ -264,7 +264,9 @@ pnpm cli register update --payload ./payload.json --register-id 55 --validate-fi
 
 - Card create: usar `flow.form_init_id`.
 - Register create/update: usar `register.form_id`.
+- Card move-step-with-values: usar `idForm = flow_step.form_id` da etapa atual.
 - Validar sempre com `--validate-fields` quando possível.
+- Se `--validate-fields` falhar com `UNKNOWN_FIELD_TYPE`, repetir com `--dry-run` sem `--validate-fields`.
 
 ## Output e dry-run
 

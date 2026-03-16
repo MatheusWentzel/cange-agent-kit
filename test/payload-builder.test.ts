@@ -135,4 +135,30 @@ describe("payload builder", () => {
 
     expect(valid.valid).toBe(true);
   });
+
+  it("accepts INPUT_RICH_TEXT_FIELD as string", () => {
+    const richTextField: NormalizedField[] = [
+      {
+        id: 10,
+        name: "execution_note",
+        title: "Execução",
+        type: "INPUT_RICH_TEXT_FIELD",
+        required: true,
+        formId: 662,
+        raw: {}
+      }
+    ];
+
+    const valid = validateValuesAgainstFields({
+      values: {
+        execution_note: "<p>Etapa concluída com sucesso.</p>"
+      },
+      fields: richTextField,
+      requireRequiredFields: true,
+      targetFormId: 662
+    });
+
+    expect(valid.valid).toBe(true);
+    expect(valid.issues.length).toBe(0);
+  });
 });

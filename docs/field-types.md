@@ -27,5 +27,9 @@ Fonte de referência: tipologias públicas do Cange ("Tipos de campos"), com map
 ## Observações de implementação
 
 - A validação usa `field.type` com aliases comuns (ex.: `TEXT_SHORT_FIELD`, `DATE_PICKER_FIELD`, `COMBO_BOX_USER_FIELD`).
-- Quando o tipo não está mapeado, o validador retorna `UNKNOWN_FIELD_TYPE` para evitar mutação insegura.
+- Quando o tipo não está mapeado, o validador retorna `UNKNOWN_FIELD_TYPE`.
+- Fluxo recomendado para esse caso:
+  - tentar com `--validate-fields --dry-run`
+  - se falhar por `UNKNOWN_FIELD_TYPE`, repetir com `--dry-run` sem `--validate-fields`
+  - executar mutação real somente após revisar o dry-run
 - A chave em `values` sempre deve ser o `field.name`.

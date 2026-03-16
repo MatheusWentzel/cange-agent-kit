@@ -32,9 +32,11 @@ pnpm cli --output json fields by-flow --flow-id <flowId>
 
 Sugestão:
 
-- identificar `idForm` usado na execução/movimentação com `values`
+- para movimentação com `values`, usar `idForm = flow_step.form_id` da etapa atual
+- não usar `flow.form_init_id` em movimentação (ele é de criação de card)
 - garantir preenchimento de requireds (`required = 1`) desse `idForm`
 - usar sempre `--validate-fields --dry-run` antes da mutação real
+- se `--validate-fields` falhar com `UNKNOWN_FIELD_TYPE`, repetir apenas com `--dry-run`
 
 4. Executar trabalho no card (conforme tarefa):
 
@@ -96,5 +98,6 @@ pnpm cli --output json my-tasks
 ## Importante sobre “mover cartão”
 
 - Use sempre `fromStepId` e `toStepId` válidos para o flow.
-- Se houver `values`, usar `idForm` coerente com os fields do flow e preferir `--validate-fields`.
+- Se houver `values`, usar `idForm = flow_step.form_id` da etapa atual e preferir `--validate-fields`.
+- `flow.form_init_id` deve ser usado em `card create`, não em movimentação de etapa.
 - Quando a regra do fluxo exigir ações extras, escalonar para ação humana no app.

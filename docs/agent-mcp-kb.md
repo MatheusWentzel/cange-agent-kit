@@ -240,10 +240,13 @@ Compatibilidade: também aceita `id_notification`.
 
 - Verificar contexto: `my-tasks` + `card get`.
 - Verificar estrutura: `fields by-flow` (e `idForm` alvo).
+- Em movimentação com `values`, usar `idForm = flow_step.form_id` da etapa atual.
+- `flow.form_init_id` é apenas para criação (`card create`), não para mover etapa.
 - Se houver `values`, preencher obrigatórios (`required = 1`) do formulário alvo.
 - Validar antes de mutar:
   - `card update-values --validate-fields --dry-run`
   - `card move-step-with-values --validate-fields --dry-run`
+  - se falhar com `UNKNOWN_FIELD_TYPE`, repetir com `--dry-run` sem `--validate-fields`
 
 ### Após executar ou mover cartão
 

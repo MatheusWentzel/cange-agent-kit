@@ -12,10 +12,13 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Na criação, preencher todos os campos com `required = "1"` do formulário-alvo.
 - Para card create, usar `flow.form_init_id`.
 - Para register create/update, usar `register.form_id`.
-- Para mover etapa de card, usar `card move-step` ou `card move-step-with-values`.
+- Para mover etapa de card, usar `card move-step-with-values` se a etapa atual tiver campos obrigatórios, ou `card move-step` se não tiver.
+- Ao mover etapa, o `idForm` do payload deve ser o `form_id` da etapa atual (`flow_step.form_id`), não o `form_init_id` do fluxo.
+- Ao mover etapa, preencher todos os campos com `required = "1"` do `form_id` da etapa atual antes de mover.
 - Para marcar notificação como lida/arquivada, usar `notification read`.
 - Usar `template flow-create` e `template register-create` antes de mutações quando necessário.
 - Usar `--validate-fields` e `--dry-run` antes de mutações quando apropriado.
+- Se `--validate-fields` falhar com `UNKNOWN_FIELD_TYPE`, omitir `--validate-fields` e executar apenas com `--dry-run`. Tipos não mapeados na validação local não impedem a mutação na API.
 - `--payload` sempre deve receber caminho de arquivo JSON, nunca JSON inline.
 - Inputs de mutação fora de `values` devem usar camelCase (`flowId`, `cardId`, `registerId` etc).
 - Não inventar IDs.
@@ -34,12 +37,15 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 ## Sugestões operacionais importantes
 
 - Antes de executar tarefa ou mover card:
-  - validar se existem requireds no formulário alvo e preencher todos (`required = "1"`).
+  - obter o card completo para identificar a etapa atual (`flow_step_id`) e o formulário dela (`flow_step.form_id`).
+  - obter os fields do flow e filtrar pelo `form_id` da etapa atual para identificar campos obrigatórios (`required = "1"`).
+  - preencher todos os obrigatórios da etapa atual no `values` do payload de movimentação.
+  - o `idForm` do payload deve ser o `form_id` da etapa atual, não o `form_init_id` do fluxo.
   - chamadas sugeridas:
     - `cange --output json my-tasks`
     - `cange --output json card get --flow-id <flowId> --card-id <cardId>`
     - `cange --output json fields by-flow --flow-id <flowId>`
-    - mutação com `--validate-fields --dry-run`
+    - mutação com `--validate-fields --dry-run` (se falhar com `UNKNOWN_FIELD_TYPE`, usar só `--dry-run`)
 - Ao executar/mover:
   - comentar o que foi feito e por quê.
   - chamadas sugeridas:
