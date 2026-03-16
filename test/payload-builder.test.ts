@@ -97,7 +97,8 @@ describe("payload builder", () => {
     expect(template.requiredFields.map((item) => item.name)).toEqual(["customer_name"]);
     expect(template.requiredFields[0]).toMatchObject({
       title: "Nome do cliente",
-      description: "Nome visível para identificar o cliente"
+      description: "Nome visível para identificar o cliente",
+      expectedFormat: "string"
     });
     expect(template.payloadSkeleton).toMatchObject({
       idForm: 662,
@@ -160,5 +161,92 @@ describe("payload builder", () => {
 
     expect(valid.valid).toBe(true);
     expect(valid.issues.length).toBe(0);
+  });
+
+  it("validates RADIO_BOX_FIELD and COMBO_BOX_FIELD against options", () => {
+    const optionFields: NormalizedField[] = [
+      {
+        id: 20,
+        name: "priority_radio",
+        type: "RADIO_BOX_FIELD",
+        required: true,
+        formId: 662,
+        options: [
+          { id_field_option: 1, value: "low", title: "Baixa" },
+          { id_field_option: 2, value: "high", title: "Alta" }
+        ],
+        raw: {}
+      },
+      {
+        id: 21,
+        name: "status_combo",
+        type: "COMBO_BOX_FIELD",
+        required: false,
+        formId: 662,
+        options: [
+          { id_field_option: 10, value: "todo", title: "To Do" },
+          { id_field_option: 11, value: "done", title: "Done" }
+        ],
+        raw: {}
+      }
+    ];
+
+    const invalid = validateValuesAgainstFields({
+      values: {
+        priority_radio: "medium",
+        status_combo: "doing"
+      },
+      fields: optionFields,
+      requireRequiredFields: true,
+      targetFormId: 662
+    });
+
+    expect(invalid.valid).toBe(false);
+    expect(invalid.issues.filter((issue) => issue.code === "INVALID_TYPE").length).toBe(2);
+
+    const valid = validateValuesAgainstFields({
+      values: {
+        priority_radio: "high",
+        status_combo: "done"
+      },
+      fields: optionFields,
+      requireRequiredFields: true,
+      targetFormId: 662
+    });
+
+    expect(valid.valid).toBe(true);
+  });
+
+  it("validates COMBO_BOX_REGISTER_FIELD as number[]", () => {
+    const registerField: NormalizedField[] = [
+      {
+        id: 30,
+        name: "repository",
+        type: "COMBO_BOX_REGISTER_FIELD",
+        required: true,
+        formId: 662,
+        raw: {}
+      }
+    ];
+
+    const invalid = validateValuesAgainstFields({
+      values: {
+        repository: 8719
+      },
+      fields: registerField,
+      requireRequiredFields: true,
+      targetFormId: 662
+    });
+    expect(invalid.valid).toBe(false);
+
+    const valid = validateValuesAgainstFields({
+      values: {
+        repository: [8719, 8720]
+      },
+      fields: registerField,
+      requireRequiredFields: true,
+      targetFormId: 662
+    });
+    expect(valid.valid).toBe(true);
   });
 });

@@ -18,8 +18,10 @@ const TYPE_GUARDS: Record<string, GuardDefinition> = {
   CHECKBOX_FIELD: stringGuard(),
   CHECK_BOX_FIELD: stringGuard(),
   DATE_PICKER_FIELD: isoDateGuard(),
+  RADIO_BOX_FIELD: singleChoiceGuard(),
   SINGLE_SELECT_FIELD: stringGuard(),
   SELECT_FIELD: stringGuard(),
+  COMBO_BOX_FIELD: singleChoiceGuard(),
   COMBO_BOX_SINGLE_FIELD: stringGuard(),
   COMBO_BOX_MULTI_FIELD: stringArrayGuard(),
   MULTI_SELECT_FIELD: stringArrayGuard(),
@@ -56,6 +58,8 @@ const TYPE_GUARDS: Record<string, GuardDefinition> = {
   URL_FIELD: stringGuard()
 };
 
+const OPTION_BOUND_TYPES = new Set(["RADIO_BOX_FIELD", "COMBO_BOX_FIELD"]);
+
 const PT_BR_ALIASES: Record<string, string> = {
   "texto curto": "TEXT_SHORT_FIELD",
   "texto longo": "TEXT_LONG_FIELD",
@@ -84,7 +88,11 @@ const PT_BR_ALIASES: Record<string, string> = {
   link: "LINK_FIELD"
 };
 
-export function validateValueByFieldType(fieldType: string, value: unknown): TypeValidationResult {
+export function validateValueByFieldType(
+  fieldType: string,
+  value: unknown,
+  options?: unknown
+): TypeValidationResult {
   const normalizedType = normalizeFieldType(fieldType);
   const guardDef = TYPE_GUARDS[normalizedType];
 
@@ -95,6 +103,17 @@ export function validateValueByFieldType(fieldType: string, value: unknown): Typ
       expected: "unknown",
       reason: `Tipo de field não mapeado: ${fieldType}`
     };
+  }
+
+  if (OPTION_BOUND_TYPES.has(normalizedType)) {
+    const allowedValues = extractAllowedOptionValues(options);
+    if (allowedValues.length > 0) {
+      return {
+        valid: isValueInOptions(value, allowedValues),
+        expected: `${guardDef.expected} (one of options)`,
+        normalizedType
+      };
+    }
   }
 
   return {
@@ -123,6 +142,13 @@ function stringGuard(): GuardDefinition {
   return {
     expected: "string",
     guard: (value) => typeof value === "string"
+  };
+}
+
+function singleChoiceGuard(): GuardDefinition {
+  return {
+    expected: "string | number",
+    guard: (value) => typeof value === "string" || typeof value === "number"
   };
 }
 
@@ -181,4 +207,67 @@ function emailGuard(): GuardDefinition {
       value.length > 0 &&
       /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)
   };
+}
+
+function extractAllowedOptionValues(options: unknown): Array<string | number> {
+  if (!Array.isArray(options)) {
+    return [];
+  }
+
+  const allowed: Array<string | number> = [];
+  for (const option of options) {
+    if (typeof option === "string" || typeof option === "number") {
+      allowed.push(option);
+      continue;
+    }
+
+    if (option === null || typeof option !== "object" || Array.isArray(option)) {
+      continue;
+    }
+
+    const record = option as Record<string, unknown>;
+    const keys = [
+      "value",
+      "id",
+      "id_field_option",
+      "field_option_id",
+      "option_id",
+      "name",
+      "title",
+      "label",
+      "text",
+      "key"
+    ];
+    for (const key of keys) {
+      const candidate = record[key];
+      if (typeof candidate === "string" || typeof candidate === "number") {
+        allowed.push(candidate);
+      }
+    }
+  }
+
+  return dedupeValues(allowed);
+}
+
+function dedupeValues(values: Array<string | number>): Array<string | number> {
+  const map = new Map<string, string | number>();
+  for (const value of values) {
+    map.set(String(value), value);
+  }
+  return Array.from(map.values());
+}
+
+function isValueInOptions(value: unknown, allowed: Array<string | number>): boolean {
+  if (typeof value !== "string" && typeof value !== "number") {
+    return false;
+  }
+
+  const valueAsString = String(value);
+  return allowed.some((candidate) => String(candidate) === valueAsString);
+}
+
+export function getExpectedFormatByFieldType(fieldType: string): string {
+  const normalizedType = normalizeFieldType(fieldType);
+  const guardDef = TYPE_GUARDS[normalizedType];
+  return guardDef?.expected ?? "unknown";
 }

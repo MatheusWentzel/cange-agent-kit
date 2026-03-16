@@ -38,20 +38,22 @@ export const updateCardValuesPayloadSchema = z.object({
   values: valuesSchema
 });
 
-export const moveCardStepPayloadSchema = z.object({
+const moveCardStepBasePayloadSchema = z.object({
   flowId: z.number().int().positive(),
   cardId: z.number().int().positive(),
   fromStepId: z.number().int().positive(),
   toStepId: z.number().int().positive(),
+  idForm: z.number().int().positive(),
+  values: valuesSchema,
   complete: z.enum(["S", "N"]).optional(),
   isFromCurrentStep: z.boolean().optional(),
   isTestMode: z.boolean().optional()
 });
 
-export const moveCardStepWithValuesPayloadSchema = moveCardStepPayloadSchema.extend({
-  idForm: z.number().int().positive(),
-  values: valuesSchema
-});
+export const moveCardStepWithValuesPayloadSchema = moveCardStepBasePayloadSchema;
+
+// Deprecated alias: endpoint exige idForm + values em qualquer movimentação.
+export const moveCardStepPayloadSchema = moveCardStepBasePayloadSchema;
 
 export const getCardParamsSchema = z.object({
   cardId: idLikeSchema,

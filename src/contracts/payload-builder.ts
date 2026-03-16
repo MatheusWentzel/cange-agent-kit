@@ -1,6 +1,6 @@
 import { CangeValidationError } from "../client/errors.js";
 import type { NormalizedField } from "../schemas/fields.js";
-import { validateValueByFieldType } from "../utils/fieldTypeGuards.js";
+import { getExpectedFormatByFieldType, validateValueByFieldType } from "../utils/fieldTypeGuards.js";
 import { getRequiredFields } from "../utils/requiredFields.js";
 import { buildValuesSkeleton } from "../utils/valuesBuilder.js";
 
@@ -158,7 +158,7 @@ export function validateValuesAgainstFields(input: ValidateValuesInput): Validat
       continue;
     }
 
-    const typeValidation = validateValueByFieldType(field.type, value);
+    const typeValidation = validateValueByFieldType(field.type, value, field.options);
     if (typeValidation.expected === "unknown") {
       issues.push({
         code: "UNKNOWN_FIELD_TYPE",
@@ -232,6 +232,7 @@ function toFieldSummary(field: NormalizedField): FieldSummaryItem {
     title: field.title,
     description: field.description,
     type: field.type,
+    expectedFormat: getExpectedFormatByFieldType(field.type),
     required: field.required,
     formId: field.formId
   };

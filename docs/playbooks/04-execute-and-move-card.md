@@ -8,7 +8,7 @@ Convenção importante:
 
 - `--payload` é caminho para arquivo JSON.
 - No `card update`, usar chaves camelCase como `flowId`, `cardId`, `complete`.
-- Para mover etapa com payload dedicado, usar `card move-step` ou `card move-step-with-values`.
+- Para mover etapa, usar sempre `card move-step-with-values` (`values` pode ser `{}`).
 
 ## Fluxo recomendado
 
@@ -63,18 +63,13 @@ pnpm cli attachment link-card --payload ./payloads/link-attachment.json
   "cardId": 479486,
   "fromStepId": 81690,
   "toStepId": 81691,
+  "idForm": 102905,
+  "values": {},
   "complete": "S",
   "isFromCurrentStep": true,
   "isTestMode": false
 }
 ```
-
-```bash
-pnpm cli card move-step --payload ./payloads/move-card-step.json --dry-run
-pnpm cli card move-step --payload ./payloads/move-card-step.json
-```
-
-Se a movimentação exigir respostas no payload (recomendado validar):
 
 ```bash
 pnpm cli card move-step-with-values --payload ./payloads/move-card-step-with-values.json --validate-fields --dry-run
@@ -100,4 +95,5 @@ pnpm cli --output json my-tasks
 - Use sempre `fromStepId` e `toStepId` válidos para o flow.
 - Se houver `values`, usar `idForm = flow_step.form_id` da etapa atual e preferir `--validate-fields`.
 - `flow.form_init_id` deve ser usado em `card create`, não em movimentação de etapa.
+- Mesmo sem campos obrigatórios, enviar `values: {}` e manter `idForm`.
 - Quando a regra do fluxo exigir ações extras, escalonar para ação humana no app.

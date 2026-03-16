@@ -51,7 +51,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
           const validation = kit.contracts.validateValuesAgainstFields({
             values: payload.values,
             fields: targetFields,
-            requireRequiredFields: false,
+            requireRequiredFields: true,
             targetFormId: payload.idForm
           });
           assertValidationResult(validation.valid, validation);

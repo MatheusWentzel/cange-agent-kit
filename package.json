@@ -20,6 +20,7 @@
     "build:bundle": "tsup src/index.ts src/cli/index.ts --format esm --dts --sourcemap --clean",
     "dev": "node --loader tsx src/cli/index.ts",
     "cli": "node dist/cli/index.js",
+    "cli:silent": "pnpm --silent cli",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint:types": "tsc --noEmit"

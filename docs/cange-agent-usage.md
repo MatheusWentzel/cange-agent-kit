@@ -27,6 +27,7 @@
 - `--payload` recebe caminho para arquivo `.json` (não aceitar JSON inline).
 - Inputs de mutação fora de `values` usam camelCase (`flowId`, `cardId`, `registerId`, `formAnswerId`).
 - Dentro de `values`, as chaves continuam sendo `field.name`.
+- Para automação de saída JSON, preferir `pnpm --silent cli --output json ...`.
 
 ## Regras de ouro
 
@@ -35,6 +36,7 @@
 - Sempre preencher obrigatórios (`required = "1"`) na criação.
 - Em movimentação de etapa com `values`, usar `idForm = flow_step.form_id` da etapa atual.
 - Não usar `flow.form_init_id` para mover etapa (ele é do `card create`).
+- Em movimentação, usar sempre `card move-step-with-values` e enviar `values: {}` quando não houver campos para preencher.
 - Não usar curl direto quando houver comando da CLI.
 
 ## Playbooks operacionais

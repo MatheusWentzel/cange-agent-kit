@@ -39,10 +39,10 @@ Quero que você prepare o cange-agent-kit do zero para uso imediato.
 6) Faça smoke test da CLI:
    - pnpm cli --help
    - pnpm cli auth login
-   - pnpm cli --output json my-flows
-   - pnpm cli --output json my-registers
-   - pnpm cli --output json my-tasks
-   - pnpm cli --output json notifications --is-archived N
+   - pnpm --silent cli --output json my-flows
+   - pnpm --silent cli --output json my-registers
+   - pnpm --silent cli --output json my-tasks
+   - pnpm --silent cli --output json notifications --is-archived N
 
 7) Entregue um relatório final com:
    - status de cada etapa (ok/falhou)
@@ -145,6 +145,18 @@ cange --help
 
 Sem link global, use sempre `pnpm cli <comando>`.
 
+Para automação e pipes JSON, prefira:
+
+```bash
+pnpm --silent cli --output json <comando>
+```
+
+Ou use o atalho:
+
+```bash
+pnpm cli:silent --output json <comando>
+```
+
 ## Ambiente (`.env`)
 
 ```env
@@ -177,12 +189,13 @@ pnpm cli my-flows
 pnpm cli my-registers
 pnpm cli my-tasks
 pnpm cli notifications --is-archived N
+pnpm cli my-registers --name Reposit
 pnpm cli flow get --id-flow 192
 pnpm cli flow get --hash abc123
 pnpm cli register get --id-register 55
 pnpm cli register get --hash reg-hash
-pnpm cli fields by-flow --flow-id 192
-pnpm cli fields by-register --register-id 55 --with-children true
+pnpm cli fields by-flow --flow-id 192 --form-id 662
+pnpm cli fields by-register --register-id 55 --with-children true --form-id 700
 ```
 
 ## Inspeção de estrutura e template
@@ -203,11 +216,10 @@ Os templates já retornam:
 
 ```bash
 pnpm cli card get --flow-id 192 --card-id 9001
-pnpm cli card list --flow-id 192 --archived false --with-pre-answer true --with-time-tracking true
+pnpm cli card list --flow-id 192 --archived false --with-pre-answer true --with-time-tracking true --step-id 106024 --limit 50
 pnpm cli card create --payload ./examples/create-card.example.json --validate-fields --dry-run
 pnpm cli card update --payload ./examples/update-card.example.json --dry-run
 pnpm cli card update-values --payload ./examples/update-card-values.example.json --validate-fields --dry-run
-pnpm cli card move-step --payload ./examples/move-card-step.example.json --dry-run
 pnpm cli card move-step-with-values --payload ./examples/move-card-step-with-values.example.json --validate-fields --dry-run
 ```
 
@@ -215,8 +227,8 @@ Diferença importante:
 
 - `card update` altera atributos principais do cartão (`responsável`, `due date`, `tag`, `complete`, `archived`)
 - `card update-values` altera respostas dinâmicas do formulário (`values`)
-- `card move-step` move de etapa sem enviar respostas
-- `card move-step-with-values` move de etapa enviando `idForm + values`
+- `card move-step-with-values` move de etapa enviando `idForm + values` (`values` pode ser `{}`)
+- `card move-step` é alias deprecated (compatibilidade)
 
 ## Operações de comentário e anexo
 
@@ -273,6 +285,7 @@ pnpm cli register update --payload ./payload.json --register-id 55 --validate-fi
 - `--output json|pretty`
 - `--dry-run` em mutações: mostra payload e não executa chamada de escrita
 - código de saída não-zero em falha
+- Para JSON limpo em stdout (sem header do pnpm), use `pnpm --silent cli --output json ...`
 
 ## Tratamento de erro
 
@@ -377,10 +390,10 @@ Siga exatamente esta sequência:
 6) Faça smoke test da CLI:
    - pnpm cli --help
    - pnpm cli auth login
-   - pnpm cli --output json my-flows
-   - pnpm cli --output json my-registers
-   - pnpm cli --output json my-tasks
-   - pnpm cli --output json notifications --is-archived N
+   - pnpm --silent cli --output json my-flows
+   - pnpm --silent cli --output json my-registers
+   - pnpm --silent cli --output json my-tasks
+   - pnpm --silent cli --output json notifications --is-archived N
 7) Se autenticação falhar, explique objetivamente o que falta no .env.
 8) Entregue um relatório final com:
    - status de cada etapa (ok/falhou)
@@ -416,8 +429,8 @@ Checklist obrigatório:
 5) Smoke test:
    - pnpm cli --help
    - pnpm cli auth login
-   - pnpm cli --output json my-tasks
-   - pnpm cli --output json notifications --is-archived N
+   - pnpm --silent cli --output json my-tasks
+   - pnpm --silent cli --output json notifications --is-archived N
 6) Mostre um resumo final com:
    - o que foi configurado
    - quais testes passaram

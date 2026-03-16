@@ -33,12 +33,11 @@ Confundir os dois pode causar envio de campos errados ou falha por obrigatórios
 4. executar `--dry-run` (e `--validate-fields` quando disponível)
 5. executar mutação real
 
-### Quando usar cada comando
+### Comando de movimentação
 
-| Situação | Comando |
-|---|---|
-| Etapa atual tem obrigatórios (`required = "1"`) | `card move-step-with-values` |
-| Etapa atual sem obrigatórios para preencher | `card move-step` |
+- Sempre usar `card move-step-with-values`.
+- Mesmo sem obrigatórios, enviar `values: {}`.
+- O comando `card move-step` é apenas alias deprecated para compatibilidade.
 
 ### Chamadas sugeridas
 

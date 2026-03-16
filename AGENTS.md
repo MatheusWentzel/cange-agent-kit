@@ -12,7 +12,8 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Na criação, preencher todos os campos com `required = "1"` do formulário-alvo.
 - Para card create, usar `flow.form_init_id`.
 - Para register create/update, usar `register.form_id`.
-- Para mover etapa de card, usar `card move-step-with-values` se a etapa atual tiver campos obrigatórios, ou `card move-step` se não tiver.
+- Para mover etapa de card, sempre usar `card move-step-with-values`, mesmo sem obrigatórios.
+- Quando não houver campos para preencher, enviar `values: {}`.
 - Ao mover etapa, o `idForm` do payload deve ser o `form_id` da etapa atual (`flow_step.form_id`), não o `form_init_id` do fluxo.
 - Ao mover etapa, preencher todos os campos com `required = "1"` do `form_id` da etapa atual antes de mover.
 - Para marcar notificação como lida/arquivada, usar `notification read`.
@@ -45,7 +46,7 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
     - `cange --output json my-tasks`
     - `cange --output json card get --flow-id <flowId> --card-id <cardId>`
     - `cange --output json fields by-flow --flow-id <flowId>`
-    - mutação com `--validate-fields --dry-run` (se falhar com `UNKNOWN_FIELD_TYPE`, usar só `--dry-run`)
+    - mutação com `card move-step-with-values --validate-fields --dry-run` (se falhar com `UNKNOWN_FIELD_TYPE`, usar só `--dry-run`)
 - Ao executar/mover:
   - comentar o que foi feito e por quê.
   - chamadas sugeridas:
@@ -61,6 +62,7 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 ## Saída e previsibilidade
 
 - Use `--output json` quando o resultado for consumido por automação.
+- Para JSON puro em pipelines, prefira `pnpm --silent cli --output json ...`.
 - Use `--output pretty` para uso humano local.
 - Em falhas, tratar saída não-zero como erro operacional.
 

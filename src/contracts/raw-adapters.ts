@@ -1,4 +1,5 @@
 import type { NormalizedField } from "../schemas/fields.js";
+import { getExpectedFormatByFieldType } from "../utils/fieldTypeGuards.js";
 
 import type {
   CardSummary,
@@ -193,6 +194,7 @@ export function summarizeFields(fields: NormalizedField[]): FieldsSummary {
     title: field.title,
     description: field.description,
     type: field.type,
+    expectedFormat: getExpectedFormatByFieldType(field.type),
     required: field.required,
     formId: field.formId
   }));

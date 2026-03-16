@@ -41,6 +41,8 @@ describe("contracts endpoint mapping", () => {
       cardId: 7,
       fromStepId: 11,
       toStepId: 12,
+      idForm: 662,
+      values: {},
       complete: "N",
       isFromCurrentStep: true,
       isTestMode: false
@@ -91,6 +93,8 @@ describe("contracts endpoint mapping", () => {
         id_card: 7,
         from_step_id: 11,
         to_step_id: 12,
+        id_form: 662,
+        values: {},
         complete: "N",
         isFromCurrentStep: true,
         isTestMode: false

@@ -26,7 +26,7 @@
 - `POST /form/new-answer` (create card)
 - `PUT /card` (update card atributos)
 - `PUT /form/answer` (update card values)
-- `POST /card/v2/move-step` (move card step, com ou sem values)
+- `POST /card/v2/move-step` (move card step; enviar sempre `id_form` e `values`, mesmo `values = {}`)
 - `GET /card/`
 - `GET /card/by-flow/`
 

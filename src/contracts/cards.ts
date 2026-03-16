@@ -52,6 +52,8 @@ export interface CardsContracts {
     cardId: number;
     fromStepId: number;
     toStepId: number;
+    idForm: number;
+    values: Record<string, unknown>;
     complete?: "S" | "N";
     isFromCurrentStep?: boolean;
     isTestMode?: boolean;
@@ -201,6 +203,8 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
           id_card: parsed.data.cardId,
           from_step_id: parsed.data.fromStepId,
           to_step_id: parsed.data.toStepId,
+          id_form: parsed.data.idForm,
+          values: parsed.data.values,
           complete: parsed.data.complete,
           isFromCurrentStep: parsed.data.isFromCurrentStep,
           isTestMode: parsed.data.isTestMode

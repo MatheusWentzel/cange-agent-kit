@@ -65,6 +65,7 @@ export interface FieldSummaryItem {
   title?: string;
   description?: string;
   type: string;
+  expectedFormat?: string;
   required: boolean;
   formId?: number | string;
 }

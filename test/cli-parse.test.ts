@@ -131,6 +131,58 @@ describe("cli parsing", () => {
     expect(output).toContain("\"flowId\": 192");
   });
 
+  it("runs deprecated card move-step alias with idForm and values", async () => {
+    process.env.CANGE_ACCESS_TOKEN = "token";
+
+    const payloadPath = join(tmpdir(), `cange-card-move-step-alias-${Date.now()}.json`);
+    await writeFile(
+      payloadPath,
+      JSON.stringify(
+        {
+          flowId: 192,
+          cardId: 7,
+          fromStepId: 11,
+          toStepId: 12,
+          idForm: 662,
+          values: {},
+          complete: "S",
+          isFromCurrentStep: true,
+          isTestMode: false
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      writes.push(String(chunk));
+      return true;
+    });
+
+    try {
+      const program = createProgram();
+      await program.parseAsync([
+        "node",
+        "cange",
+        "--output",
+        "json",
+        "card",
+        "move-step",
+        "--payload",
+        payloadPath,
+        "--dry-run"
+      ]);
+    } finally {
+      await unlink(payloadPath);
+    }
+
+    const output = writes.join("");
+    expect(output).toContain("\"dryRun\": true");
+    expect(output).toContain("deprecated");
+  });
+
   it("runs notification read in dry-run without mutating", async () => {
     process.env.CANGE_ACCESS_TOKEN = "token";
 

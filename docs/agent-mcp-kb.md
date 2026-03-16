@@ -15,8 +15,12 @@ Este guia capacita agentes a usarem a CLI `cange` como se fosse um conjunto de t
 Comando base recomendado para agentes:
 
 ```bash
-pnpm cli --output json <comando>
+pnpm --silent cli --output json <comando>
 ```
+
+Observação:
+
+- Para automação via pipe (`| jq`, `python json.load`), prefira `pnpm --silent cli ...` para evitar header do pnpm no stdout.
 
 ## Convenções de input (crítico)
 
@@ -52,20 +56,21 @@ A maioria dos comandos retorna envelope previsível:
 - `pnpm cli notifications --is-archived N`
 - `pnpm cli flow get --id-flow <id>`
 - `pnpm cli register get --id-register <id>`
-- `pnpm cli fields by-flow --flow-id <id>`
-- `pnpm cli fields by-register --register-id <id>`
+- `pnpm cli fields by-flow --flow-id <id> [--form-id <id>]`
+- `pnpm cli fields by-register --register-id <id> [--form-id <id>]`
 - `pnpm cli template flow-create --flow-id <id>`
 - `pnpm cli template register-create --register-id <id>`
 - `pnpm cli card get --flow-id <id> --card-id <id>`
-- `pnpm cli card list --flow-id <id>`
+- `pnpm cli card list --flow-id <id> [--step-id <id>] [--limit <n>]`
+- `pnpm cli my-registers [--name <search>]`
 
 ### Mutações
 
 - `pnpm cli card create --payload <path-to-json> [--validate-fields] [--dry-run]`
 - `pnpm cli card update --payload <path-to-json> [--dry-run]`
 - `pnpm cli card update-values --payload <path-to-json> [--validate-fields] [--dry-run]`
-- `pnpm cli card move-step --payload <path-to-json> [--dry-run]`
 - `pnpm cli card move-step-with-values --payload <path-to-json> [--validate-fields] [--dry-run]`
+- `pnpm cli card move-step --payload <path-to-json> [--validate-fields] [--dry-run]` (deprecated alias)
 - `pnpm cli comment create --payload <path-to-json> [--dry-run]`
 - `pnpm cli notification read --payload <path-to-json> [--dry-run]`
 - `pnpm cli attachment upload --file <path>`
@@ -209,6 +214,7 @@ Compatibilidade: também aceita `id_notification`.
   title?: string;
   description?: string;      // contexto para agente
   type: string;
+  expectedFormat?: string;   // ex: string, number[], boolean
   required: boolean;
   formId?: number | string;
 }
@@ -242,6 +248,8 @@ Compatibilidade: também aceita `id_notification`.
 - Verificar estrutura: `fields by-flow` (e `idForm` alvo).
 - Em movimentação com `values`, usar `idForm = flow_step.form_id` da etapa atual.
 - `flow.form_init_id` é apenas para criação (`card create`), não para mover etapa.
+- Sempre usar `card move-step-with-values`, nunca `card move-step` como escolha principal.
+- O endpoint da API exige `id_form` e `values` em toda movimentação; quando não houver campos para preencher, usar `values: {}`.
 - Se houver `values`, preencher obrigatórios (`required = 1`) do formulário alvo.
 - Validar antes de mutar:
   - `card update-values --validate-fields --dry-run`
@@ -264,7 +272,8 @@ Referência rápida: [Playbook 00](./playbooks/00-agent-operational-suggestions.
 
 ## Limites conhecidos
 
-- O comando `card move-step`/`card move-step-with-values` depende de `fromStepId` e `toStepId` corretos.
+- O comando recomendado para movimentação é `card move-step-with-values`; `card move-step` existe apenas como alias deprecated.
+- A movimentação depende de `fromStepId` e `toStepId` corretos.
 - Se o fluxo tiver regras adicionais fora do endpoint, a movimentação pode exigir intervenção no app.
 
 ## Playbooks
