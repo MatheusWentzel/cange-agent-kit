@@ -32,6 +32,8 @@ export interface CardSummary {
   responsibleUserId?: number | string;
   responsibleName?: string;
   statusDue?: number | string;
+  fieldValues?: Record<string, unknown>;
+  fields?: Record<string, unknown>;
   archived?: boolean;
   complete?: boolean;
 }
@@ -78,10 +80,12 @@ export interface FieldsSummary {
 }
 
 export interface TemplateContext {
-  kind: "flow" | "register";
+  kind: "flow" | "register" | "flow-step-move";
   flowId?: number | string;
   registerId?: number | string;
   formId?: number | string;
+  fromStepId?: number | string;
+  toStepId?: number | string;
 }
 
 export interface ValuesTemplateResult {
@@ -99,9 +103,11 @@ export interface ValidationIssue {
     | "UNKNOWN_FIELD"
     | "MISSING_REQUIRED"
     | "INVALID_TYPE"
+    | "INVALID_OPTION"
     | "FIELD_OUT_OF_FORM"
     | "UNKNOWN_FIELD_TYPE";
   fieldName: string;
+  fieldTitle?: string;
   message: string;
   expected?: string;
   receivedType?: string;

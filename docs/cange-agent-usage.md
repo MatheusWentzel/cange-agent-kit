@@ -17,7 +17,10 @@
 
 - `cange template flow-create --flow-id <id>`
 - `cange template register-create --register-id <id>`
+- `cange template step-move --flow-id <id> --from-step-id <id> --to-step-id <id>`
+- `cange step-form --flow-id <id> --step-id <id>`
 - `cange card create --payload ... --validate-fields --dry-run`
+- `cange card move-step-with-values --discover-required --flow-id <id> --form-id <id>`
 - `cange card move-step-with-values --payload ... --validate-fields --dry-run`
 - `cange notification read --payload ... --dry-run`
 - `cange register create --payload ... --validate-fields --dry-run`
@@ -37,6 +40,10 @@
 - Em movimentação de etapa com `values`, usar `idForm = flow_step.form_id` da etapa atual.
 - Não usar `flow.form_init_id` para mover etapa (ele é do `card create`).
 - Em movimentação, usar sempre `card move-step-with-values` e enviar `values: {}` quando não houver campos para preencher.
+- Para reduzir tentativa/erro em movimentação, usar `--discover-required` antes de montar `values`.
+- Para reduzir tentativa/erro em movimentação, usar `step-form` para descobrir requireds da etapa.
+- Para reduzir parsing manual de card, usar `card get --field-ids <id1,id2> --summary-only` e ler `summary.fields`.
+- Para contexto de tarefas, filtrar `my-tasks` por `--flow-id` e `--step-id`.
 - Não usar curl direto quando houver comando da CLI.
 
 ## Playbooks operacionais

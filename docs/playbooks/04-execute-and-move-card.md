@@ -22,12 +22,15 @@ pnpm cli --output json my-tasks
 
 ```bash
 pnpm cli --output json card get --flow-id <flowId> --card-id <cardId>
+pnpm cli --output json card get --flow-id <flowId> --card-id <cardId> --field-ids <fieldId1,fieldId2> --summary-only
 ```
 
 3. Verificar fields e obrigatórios antes de executar/mover:
 
 ```bash
 pnpm cli --output json fields by-flow --flow-id <flowId>
+pnpm cli template step-move --flow-id <flowId> --from-step-id <fromStepId> --to-step-id <toStepId>
+pnpm cli card move-step-with-values --discover-required --flow-id <flowId> --form-id <idForm>
 ```
 
 Sugestão:

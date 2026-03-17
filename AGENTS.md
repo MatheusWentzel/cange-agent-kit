@@ -16,8 +16,9 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Quando não houver campos para preencher, enviar `values: {}`.
 - Ao mover etapa, o `idForm` do payload deve ser o `form_id` da etapa atual (`flow_step.form_id`), não o `form_init_id` do fluxo.
 - Ao mover etapa, preencher todos os campos com `required = "1"` do `form_id` da etapa atual antes de mover.
+- Usar `step-form --flow-id <id> --step-id <id>` para descobrir obrigatórios da etapa antes de montar payload.
 - Para marcar notificação como lida/arquivada, usar `notification read`.
-- Usar `template flow-create` e `template register-create` antes de mutações quando necessário.
+- Usar `template flow-create`, `template register-create` e `template step-move` antes de mutações quando necessário.
 - Usar `--validate-fields` e `--dry-run` antes de mutações quando apropriado.
 - Se `--validate-fields` falhar com `UNKNOWN_FIELD_TYPE`, omitir `--validate-fields` e executar apenas com `--dry-run`. Tipos não mapeados na validação local não impedem a mutação na API.
 - `--payload` sempre deve receber caminho de arquivo JSON, nunca JSON inline.
@@ -39,13 +40,17 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 
 - Antes de executar tarefa ou mover card:
   - obter o card completo para identificar a etapa atual (`flow_step_id`) e o formulário dela (`flow_step.form_id`).
+  - quando precisar de campos específicos do card, usar `card get --field-ids <id1,id2,...> --summary-only`.
   - obter os fields do flow e filtrar pelo `form_id` da etapa atual para identificar campos obrigatórios (`required = "1"`).
+  - usar `card move-step-with-values --discover-required` para listar requireds do `form_id` antes de montar o payload final.
   - preencher todos os obrigatórios da etapa atual no `values` do payload de movimentação.
   - o `idForm` do payload deve ser o `form_id` da etapa atual, não o `form_init_id` do fluxo.
   - chamadas sugeridas:
-    - `cange --output json my-tasks`
-    - `cange --output json card get --flow-id <flowId> --card-id <cardId>`
+    - `cange --output json my-tasks --flow-id <flowId> --step-id <stepId>`
+    - `cange --output json card get --flow-id <flowId> --card-id <cardId> --field-ids <fieldId1,fieldId2> --summary-only`
+    - `cange --output json step-form --flow-id <flowId> --step-id <stepId>`
     - `cange --output json fields by-flow --flow-id <flowId>`
+    - `cange card move-step-with-values --discover-required --flow-id <flowId> --form-id <formId>`
     - mutação com `card move-step-with-values --validate-fields --dry-run` (se falhar com `UNKNOWN_FIELD_TYPE`, usar só `--dry-run`)
 - Ao executar/mover:
   - comentar o que foi feito e por quê.
@@ -69,6 +74,7 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 ## Base de conhecimento MCP-style
 
 - Guia principal: `docs/agent-mcp-kb.md`
+- Changelog para atualização de playbooks: `docs/agent-changelog.md`
 - Playbooks por cenário: `docs/playbooks/`
   - tarefas pendentes
   - notificações

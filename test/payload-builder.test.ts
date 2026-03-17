@@ -137,6 +137,24 @@ describe("payload builder", () => {
     expect(valid.valid).toBe(true);
   });
 
+  it("includes fieldTitle on validation issues", () => {
+    const invalid = validateValuesAgainstFields({
+      values: {},
+      fields: fields.filter((item) => item.formId === 662),
+      requireRequiredFields: true,
+      targetFormId: 662
+    });
+
+    expect(invalid.valid).toBe(false);
+    const missingRequiredIssue = invalid.issues.find((issue) => issue.code === "MISSING_REQUIRED");
+    expect(missingRequiredIssue).toMatchObject({
+      code: "MISSING_REQUIRED",
+      fieldName: "customer_name",
+      fieldTitle: "Nome do cliente"
+    });
+    expect(missingRequiredIssue?.message).toContain("Nome do cliente");
+  });
+
   it("accepts INPUT_RICH_TEXT_FIELD as string", () => {
     const richTextField: NormalizedField[] = [
       {
@@ -202,7 +220,10 @@ describe("payload builder", () => {
     });
 
     expect(invalid.valid).toBe(false);
-    expect(invalid.issues.filter((issue) => issue.code === "INVALID_TYPE").length).toBe(2);
+    expect(invalid.issues.filter((issue) => issue.code === "INVALID_OPTION").length).toBe(2);
+    expect(invalid.issues[0]?.message).toContain("Opções válidas");
+    expect(invalid.issues[0]?.message).toContain("\"low\" (Baixa)");
+    expect(invalid.issues[0]?.message).toContain("\"high\" (Alta)");
 
     const valid = validateValuesAgainstFields({
       values: {
@@ -248,5 +269,148 @@ describe("payload builder", () => {
       targetFormId: 662
     });
     expect(valid.valid).toBe(true);
+  });
+
+  it("does not accept option label as value in RADIO_BOX_FIELD", () => {
+    const optionField: NormalizedField[] = [
+      {
+        id: 40,
+        name: "passed_test",
+        title: "Passou no teste?",
+        type: "RADIO_BOX_FIELD",
+        required: true,
+        formId: 662,
+        options: [
+          { id_field_option: 1, value: "1", title: "Sim" },
+          { id_field_option: 2, value: "2", title: "Não" }
+        ],
+        raw: {}
+      }
+    ];
+
+    const invalid = validateValuesAgainstFields({
+      values: {
+        passed_test: "Sim"
+      },
+      fields: optionField,
+      requireRequiredFields: true,
+      targetFormId: 662
+    });
+
+    expect(invalid.valid).toBe(false);
+    expect(invalid.issues[0]).toMatchObject({
+      code: "INVALID_OPTION",
+      fieldName: "passed_test",
+      fieldTitle: "Passou no teste?"
+    });
+    expect(invalid.issues[0]?.message).toContain("\"1\" (Sim)");
+    expect(invalid.issues[0]?.message).toContain("\"2\" (Não)");
+  });
+
+  it("builds step-move template from step form_id", async () => {
+    const flows: FlowsContracts = {
+      getFlow: async () => ({
+        raw: {
+          id_flow: 192,
+          flow_steps: [
+            { id_step: 487, name: "A Fazer", form_id: 660 },
+            { id_step: 87742, name: "Concluído", form_id: 661 }
+          ]
+        },
+        summary: {
+          id: 192,
+          formInitId: 662
+        }
+      })
+    };
+
+    const fieldsContracts: FieldsContracts = {
+      getFieldsByFlow: async () => ({
+        raw: {},
+        fields: [
+          {
+            id: 10,
+            name: "result_test",
+            title: "Resultado do Teste",
+            type: "TEXT_LONG_FIELD",
+            required: true,
+            formId: 660,
+            raw: {}
+          },
+          {
+            id: 11,
+            name: "notes",
+            title: "Notas",
+            type: "INPUT_RICH_TEXT_FIELD",
+            required: false,
+            formId: 660,
+            raw: {}
+          },
+          {
+            id: 12,
+            name: "other_form",
+            title: "Outro",
+            type: "TEXT_SHORT_FIELD",
+            required: true,
+            formId: 999,
+            raw: {}
+          }
+        ],
+        summary: {
+          total: 3,
+          requiredCount: 2,
+          groupedByFormId: {},
+          items: []
+        }
+      }),
+      getFieldsByRegister: async () => ({
+        raw: {},
+        fields: [],
+        summary: {
+          total: 0,
+          requiredCount: 0,
+          groupedByFormId: {},
+          items: []
+        }
+      })
+    };
+
+    const registers: RegistersContracts = {
+      getRegister: async () => ({
+        raw: {},
+        summary: { formId: 700 }
+      }),
+      getRegisterFormAnswer: async () => ({ raw: {} }),
+      createRegister: async () => ({ raw: {}, summary: {} }),
+      updateRegister: async () => ({ raw: {}, summary: {} })
+    };
+
+    const contracts = createPayloadBuilderContracts({
+      flows,
+      fields: fieldsContracts,
+      registers
+    });
+
+    const template = await contracts.buildCardStepMoveTemplate({
+      flowId: 192,
+      fromStepId: 487,
+      toStepId: 87742
+    });
+
+    expect(template.context).toMatchObject({
+      kind: "flow-step-move",
+      flowId: 192,
+      fromStepId: 487,
+      toStepId: 87742,
+      formId: 660
+    });
+    expect(template.requiredFields.map((item) => item.name)).toEqual(["result_test"]);
+    expect(template.optionalFields.map((item) => item.name)).toEqual(["notes"]);
+    expect(template.payloadSkeleton).toMatchObject({
+      flowId: 192,
+      fromStepId: 487,
+      toStepId: 87742,
+      idForm: 660
+    });
   });
 });

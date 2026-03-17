@@ -3,6 +3,7 @@ export interface TypeValidationResult {
   expected: string;
   normalizedType: string;
   reason?: string;
+  allowedOptions?: OptionDescriptor[];
 }
 
 type GuardFn = (value: unknown) => boolean;
@@ -10,6 +11,11 @@ type GuardFn = (value: unknown) => boolean;
 interface GuardDefinition {
   expected: string;
   guard: GuardFn;
+}
+
+interface OptionDescriptor {
+  value: string | number;
+  label?: string;
 }
 
 const TYPE_GUARDS: Record<string, GuardDefinition> = {
@@ -106,12 +112,16 @@ export function validateValueByFieldType(
   }
 
   if (OPTION_BOUND_TYPES.has(normalizedType)) {
-    const allowedValues = extractAllowedOptionValues(options);
+    const optionDescriptors = extractAllowedOptionDescriptors(options);
+    const allowedValues = optionDescriptors.map((item) => item.value);
     if (allowedValues.length > 0) {
+      const valid = isValueInOptions(value, allowedValues);
       return {
-        valid: isValueInOptions(value, allowedValues),
+        valid,
         expected: `${guardDef.expected} (one of options)`,
-        normalizedType
+        normalizedType,
+        reason: valid ? undefined : buildInvalidOptionReason(value, optionDescriptors),
+        allowedOptions: optionDescriptors
       };
     }
   }
@@ -209,15 +219,17 @@ function emailGuard(): GuardDefinition {
   };
 }
 
-function extractAllowedOptionValues(options: unknown): Array<string | number> {
+function extractAllowedOptionDescriptors(options: unknown): OptionDescriptor[] {
   if (!Array.isArray(options)) {
     return [];
   }
 
-  const allowed: Array<string | number> = [];
+  const allowed: OptionDescriptor[] = [];
   for (const option of options) {
     if (typeof option === "string" || typeof option === "number") {
-      allowed.push(option);
+      allowed.push({
+        value: option
+      });
       continue;
     }
 
@@ -226,33 +238,55 @@ function extractAllowedOptionValues(options: unknown): Array<string | number> {
     }
 
     const record = option as Record<string, unknown>;
-    const keys = [
-      "value",
-      "id",
-      "id_field_option",
-      "field_option_id",
-      "option_id",
-      "name",
-      "title",
-      "label",
-      "text",
-      "key"
-    ];
-    for (const key of keys) {
-      const candidate = record[key];
-      if (typeof candidate === "string" || typeof candidate === "number") {
-        allowed.push(candidate);
-      }
+    const label = pickOptionLabel(record);
+    const valueCandidates = pickOptionValueCandidates(record);
+    for (const valueCandidate of valueCandidates) {
+      allowed.push({
+        value: valueCandidate,
+        label
+      });
     }
   }
 
-  return dedupeValues(allowed);
+  return dedupeOptionDescriptors(allowed);
 }
 
-function dedupeValues(values: Array<string | number>): Array<string | number> {
-  const map = new Map<string, string | number>();
+function pickOptionValueCandidates(record: Record<string, unknown>): Array<string | number> {
+  const keys = ["value", "id", "id_field_option", "field_option_id", "option_id", "key"];
+  const values: Array<string | number> = [];
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" || typeof candidate === "number") {
+      values.push(candidate);
+    }
+  }
+  return values;
+}
+
+function pickOptionLabel(record: Record<string, unknown>): string | undefined {
+  const keys = ["title", "label", "name", "text"];
+  for (const key of keys) {
+    const candidate = record[key];
+    if (typeof candidate === "string" && candidate.trim().length > 0) {
+      return candidate.trim();
+    }
+  }
+  return undefined;
+}
+
+function dedupeOptionDescriptors(values: OptionDescriptor[]): OptionDescriptor[] {
+  const map = new Map<string, OptionDescriptor>();
   for (const value of values) {
-    map.set(String(value), value);
+    const key = String(value.value);
+    if (!map.has(key)) {
+      map.set(key, value);
+      continue;
+    }
+
+    const existing = map.get(key);
+    if (existing && !existing.label && value.label) {
+      map.set(key, value);
+    }
   }
   return Array.from(map.values());
 }
@@ -270,4 +304,18 @@ export function getExpectedFormatByFieldType(fieldType: string): string {
   const normalizedType = normalizeFieldType(fieldType);
   const guardDef = TYPE_GUARDS[normalizedType];
   return guardDef?.expected ?? "unknown";
+}
+
+function buildInvalidOptionReason(
+  attemptedValue: unknown,
+  options: OptionDescriptor[]
+): string {
+  const attempted =
+    typeof attemptedValue === "string" || typeof attemptedValue === "number"
+      ? String(attemptedValue)
+      : JSON.stringify(attemptedValue);
+  const optionValues = options.map((item) =>
+    item.label ? `${String(item.value)} (${item.label})` : String(item.value)
+  );
+  return `Valor "${attempted}" inválido para opções do field. Opções válidas: ${optionValues.join(", ")}`;
 }

@@ -13,7 +13,7 @@
 
 - `GET /flow/my-flows`
 - `GET /register/my-registers`
-- `GET /card/my-tasks`
+- `GET /card/my-tasks` (`flow_id?`, `step_id?`)
 - `GET /notification/by-user` (`isArchived=S|N`)
 - `POST /notification` (`id_notification`, `archived`)
 - `GET /flow` (`id_flow` ou `hash`)

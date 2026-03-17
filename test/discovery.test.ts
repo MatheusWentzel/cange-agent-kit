@@ -56,7 +56,22 @@ describe("discovery contracts", () => {
             status_dt_due: 4,
             flow: { id_flow: 1, name: "Tarefas", hash: "flow-hash" },
             flow_step: { id_step: 33, name: "A Fazer" },
-            user: { id_user: 8805, name: "Bot - Maggie" }
+            user: { id_user: 8805, name: "Bot - Maggie" },
+            form_answers: [
+              {
+                id_form_answer: 1,
+                form_answer_fields: [
+                  {
+                    field_id: 332831,
+                    value: "https://github.com/acme/repo/pull/442"
+                  },
+                  {
+                    field_id: 269733,
+                    value: "fix/drag-steps"
+                  }
+                ]
+              }
+            ]
           }
         ]
       })
@@ -124,7 +139,15 @@ describe("discovery contracts", () => {
       responsibleUserId: 8805,
       responsibleName: "Bot - Maggie",
       statusDue: 4,
-      complete: false
+      complete: false,
+      fieldValues: {
+        "269733": "fix/drag-steps",
+        "332831": "https://github.com/acme/repo/pull/442"
+      },
+      fields: {
+        "269733": "fix/drag-steps",
+        "332831": "https://github.com/acme/repo/pull/442"
+      }
     });
     expect(notifications.summaries[0]).toMatchObject({
       id: 12,
@@ -149,6 +172,45 @@ describe("discovery contracts", () => {
     expect(client.get).toHaveBeenNthCalledWith(3, "/card/my-tasks");
     expect(client.get).toHaveBeenNthCalledWith(4, "/notification/by-user", {
       query: { isArchived: "N" }
+    });
+  });
+
+  it("supports my-tasks filtering by flow and step", async () => {
+    const client = createMockClient();
+    vi.mocked(client.get).mockResolvedValue([
+      {
+        id_card: 1,
+        flow_id: 99,
+        flow_step_id: 88
+      },
+      {
+        id_card: 2,
+        flow_id: 77,
+        flow_step_id: 88
+      }
+    ]);
+
+    const discovery = createDiscoveryContracts({
+      client,
+      config
+    });
+
+    const tasks = await discovery.getMyTasks({
+      flowId: 99,
+      stepId: 88
+    });
+
+    expect(client.get).toHaveBeenCalledWith("/card/my-tasks", {
+      query: {
+        flow_id: 99,
+        step_id: 88
+      }
+    });
+    expect(tasks.summaries).toHaveLength(1);
+    expect(tasks.summaries[0]).toMatchObject({
+      cardId: 1,
+      flowId: 99,
+      currentStepId: 88
     });
   });
 });

@@ -8,12 +8,14 @@ Descobrir quais cards estão pendentes para o usuário autenticado e priorizar e
 
 ```bash
 pnpm cli --output json my-tasks
+pnpm cli --output json my-tasks --flow-id <flowId> --step-id <stepId>
 ```
 
 Opcional para enriquecer contexto do card:
 
 ```bash
 pnpm cli --output json card get --flow-id <flowId> --card-id <cardId>
+pnpm cli --output json card get --flow-id <flowId> --card-id <cardId> --field-ids <fieldId1,fieldId2> --summary-only
 ```
 
 ## Como interpretar
@@ -27,6 +29,8 @@ Campos-chave:
 - `stepName`, `currentStepId`
 - `dueDate`, `statusDue`
 - `responsibleUserId`, `responsibleName`
+- `fieldValues` (flat por `field_id`, quando existir no `card get`)
+- `fields` (alias flat por `field_id`; recomendado para playbooks legados)
 
 ## Estratégia de priorização recomendada
 

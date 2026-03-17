@@ -24,14 +24,15 @@ Confundir os dois pode causar envio de campos errados ou falha por obrigatórios
 
 1. `card get` para identificar etapa atual (`flow_step_id`) e seu formulário (`flow_step.form_id`)
 2. `fields by-flow` para filtrar os fields do `form_id` da etapa atual
-3. montar payload:
+3. opcionalmente usar `template step-move` e `--discover-required` para listar os obrigatórios antes de montar o payload
+4. montar payload:
    - `flowId`, `cardId`
    - `fromStepId` = etapa atual
    - `toStepId` = etapa destino
    - `idForm` = `flow_step.form_id` da etapa atual
    - `values` com todos os `required = "1"` preenchidos
-4. executar `--dry-run` (e `--validate-fields` quando disponível)
-5. executar mutação real
+5. executar `--dry-run` (e `--validate-fields` quando disponível)
+6. executar mutação real
 
 ### Comando de movimentação
 
@@ -42,8 +43,12 @@ Confundir os dois pode causar envio de campos errados ou falha por obrigatórios
 ### Chamadas sugeridas
 
 ```bash
-pnpm cli --output json card get --flow-id <flowId> --card-id <cardId>
+pnpm cli --output json my-tasks --flow-id <flowId> --step-id <flowStepId>
+pnpm cli --output json card get --flow-id <flowId> --card-id <cardId> --field-ids <fieldId1,fieldId2> --summary-only
 pnpm cli --output json fields by-flow --flow-id <flowId>
+pnpm cli --output json step-form --flow-id <flowId> --step-id <flowStepId>
+pnpm cli template step-move --flow-id <flowId> --from-step-id <fromStepId> --to-step-id <toStepId>
+pnpm cli card move-step-with-values --discover-required --flow-id <flowId> --form-id <idForm>
 pnpm cli card move-step-with-values --payload ./payloads/move-step.json --validate-fields --dry-run
 pnpm cli card move-step-with-values --payload ./payloads/move-step.json
 ```

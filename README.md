@@ -22,6 +22,7 @@ Quero que você prepare o cange-agent-kit do zero para uso imediato.
    - AGENTS.md
    - CLAUDE.md (se estiver usando Claude Code)
    - docs/agent-mcp-kb.md
+   - docs/agent-changelog.md
    - docs/playbooks/README.md
 
 4) Instale e configure:
@@ -188,6 +189,8 @@ Os comandos abaixo exigem autenticação válida no `.env` (`CANGE_ACCESS_TOKEN`
 pnpm cli my-flows
 pnpm cli my-registers
 pnpm cli my-tasks
+pnpm cli my-tasks --flow-id 192 --step-id 106024
+pnpm cli step-form --flow-id 192 --step-id 106024
 pnpm cli notifications --is-archived N
 pnpm cli my-registers --name Reposit
 pnpm cli flow get --id-flow 192
@@ -203,6 +206,7 @@ pnpm cli fields by-register --register-id 55 --with-children true --form-id 700
 ```bash
 pnpm cli template flow-create --flow-id 192
 pnpm cli template register-create --register-id 55
+pnpm cli template step-move --flow-id 192 --from-step-id 106024 --to-step-id 106025
 ```
 
 Os templates já retornam:
@@ -216,10 +220,13 @@ Os templates já retornam:
 
 ```bash
 pnpm cli card get --flow-id 192 --card-id 9001
+pnpm cli card get --flow-id 192 --card-id 9001 --field-ids 332831,269733
+pnpm cli card get --flow-id 192 --card-id 9001 --field-ids 332831,269733 --summary-only
 pnpm cli card list --flow-id 192 --archived false --with-pre-answer true --with-time-tracking true --step-id 106024 --limit 50
 pnpm cli card create --payload ./examples/create-card.example.json --validate-fields --dry-run
 pnpm cli card update --payload ./examples/update-card.example.json --dry-run
 pnpm cli card update-values --payload ./examples/update-card-values.example.json --validate-fields --dry-run
+pnpm cli card move-step-with-values --discover-required --flow-id 192 --form-id 660
 pnpm cli card move-step-with-values --payload ./examples/move-card-step-with-values.example.json --validate-fields --dry-run
 ```
 
@@ -228,7 +235,16 @@ Diferença importante:
 - `card update` altera atributos principais do cartão (`responsável`, `due date`, `tag`, `complete`, `archived`)
 - `card update-values` altera respostas dinâmicas do formulário (`values`)
 - `card move-step-with-values` move de etapa enviando `idForm + values` (`values` pode ser `{}`)
+- `card move-step-with-values --discover-required` lista campos obrigatórios do `form_id` antes de montar payload
 - `card move-step` é alias deprecated (compatibilidade)
+
+Observação sobre `card get`:
+
+- `summary.fieldValues` retorna mapa flat `{ "<field_id>": <valor> }` para evitar parsing manual de `form_answers`.
+- `summary.fields` é alias de `summary.fieldValues` para playbooks legados.
+- Use `--field-ids` para retornar apenas os campos de interesse no summary.
+- Com `--field-ids`, fields não encontrados retornam `null` no mapa.
+- Use `--summary-only` para retornar somente o summary e eliminar parsing de `raw`.
 
 ## Operações de comentário e anexo
 
@@ -303,6 +319,8 @@ A normalização inclui:
 - método
 - mensagem amigável
 - detalhes seguros (sem token/apikey)
+- em erros de validação de `values`, cada issue pode incluir `fieldTitle` quando disponível
+- para campos de seleção (`RADIO_BOX_FIELD`/`COMBO_BOX_FIELD`), a validação checa valores reais das opções e retorna `INVALID_OPTION` quando necessário
 
 ## Testes
 
@@ -333,6 +351,7 @@ Veja instruções operacionais em [AGENTS.md](./AGENTS.md) e guias em:
 - [docs/cange-api-notes.md](./docs/cange-api-notes.md)
 - [docs/field-types.md](./docs/field-types.md)
 - [docs/agent-mcp-kb.md](./docs/agent-mcp-kb.md)
+- [docs/agent-changelog.md](./docs/agent-changelog.md)
 - [docs/playbooks/README.md](./docs/playbooks/README.md)
 - [docs/playbooks/00-agent-operational-suggestions.md](./docs/playbooks/00-agent-operational-suggestions.md)
 

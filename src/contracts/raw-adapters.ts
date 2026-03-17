@@ -108,6 +108,7 @@ export function summarizeCard(raw: unknown): CardSummary {
   const flow = asRecord(record.flow);
   const flowStep = asRecord(record.flow_step);
   const user = asRecord(record.user);
+  const flattenedFields = extractCardFieldValues(record);
 
   return compactDefined({
     cardId: pickNumberOrString(record, ["id", "card_id", "id_card"]),
@@ -130,6 +131,8 @@ export function summarizeCard(raw: unknown): CardSummary {
       pickNumberOrString(user ?? {}, ["id_user", "user_id", "id"]),
     responsibleName: pickString(user ?? {}, ["name"]),
     statusDue: pickNumberOrString(record, ["status_dt_due"]),
+    fieldValues: flattenedFields,
+    fields: flattenedFields,
     archived: pickBoolean(record, ["archived"]),
     complete: pickBoolean(record, ["complete"])
   });
@@ -258,6 +261,22 @@ function pickBoolean(record: Record<string, unknown>, keys: string[]): boolean |
   return undefined;
 }
 
+function pickUnknown(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    if (key in record) {
+      return record[key];
+    }
+  }
+  return undefined;
+}
+
+function toRecordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map(asRecord).filter(isDefined);
+}
+
 function extractCardRecord(raw: unknown): Record<string, unknown> | undefined {
   const direct = asRecord(raw);
   if (direct && looksLikeCardRecord(direct)) {
@@ -289,6 +308,38 @@ function extractCardRecord(raw: unknown): Record<string, unknown> | undefined {
   }
 
   return direct ?? candidates[0];
+}
+
+function extractCardFieldValues(record: Record<string, unknown>): Record<string, unknown> | undefined {
+  const formAnswers = toRecordArray(record.form_answers);
+  if (formAnswers.length === 0) {
+    return undefined;
+  }
+
+  const flattened: Record<string, unknown> = {};
+  for (const answer of formAnswers) {
+    const answerFields = toRecordArray(answer.form_answer_fields);
+    for (const answerField of answerFields) {
+      const field = asRecord(answerField.field);
+      const fieldId =
+        pickNumberOrString(answerField, ["field_id", "id_field", "id"]) ??
+        pickNumberOrString(field ?? {}, ["id_field", "field_id", "id"]);
+      if (fieldId === undefined) {
+        continue;
+      }
+
+      const value =
+        pickUnknown(answerField, ["valueString", "value_string", "value"]) ??
+        pickUnknown(answerField, ["field_option_id", "option_id"]);
+      if (value === undefined) {
+        continue;
+      }
+
+      flattened[String(fieldId)] = value;
+    }
+  }
+
+  return Object.keys(flattened).length > 0 ? flattened : undefined;
 }
 
 function looksLikeCardRecord(record: Record<string, unknown>): boolean {

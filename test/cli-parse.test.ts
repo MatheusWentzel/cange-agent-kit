@@ -21,10 +21,52 @@ describe("cli parsing", () => {
     expect(commandNames).toContain("my-flows");
     expect(commandNames).toContain("my-registers");
     expect(commandNames).toContain("my-tasks");
+    expect(commandNames).toContain("step-form");
     expect(commandNames).toContain("notifications");
     expect(commandNames).toContain("notification");
     expect(commandNames).toContain("card");
     expect(commandNames).toContain("register");
+    expect(commandNames).toContain("template");
+  });
+
+  it("registers card get field filter and template step-move command", () => {
+    const program = createProgram();
+
+    const cardCommand = program.commands.find((command) => command.name() === "card");
+    expect(cardCommand).toBeDefined();
+
+    const cardGet = cardCommand?.commands.find((command) => command.name() === "get");
+    expect(cardGet).toBeDefined();
+    const hasFieldIdsOption = cardGet?.options.some((option) => option.long === "--field-ids");
+    expect(hasFieldIdsOption).toBe(true);
+    const hasSummaryOnly = cardGet?.options.some((option) => option.long === "--summary-only");
+    expect(hasSummaryOnly).toBe(true);
+
+    const templateCommand = program.commands.find((command) => command.name() === "template");
+    expect(templateCommand).toBeDefined();
+    const templateStepMove = templateCommand?.commands.find((command) => command.name() === "step-move");
+    expect(templateStepMove).toBeDefined();
+
+    const moveStepWithValues = cardCommand?.commands.find(
+      (command) => command.name() === "move-step-with-values"
+    );
+    expect(moveStepWithValues).toBeDefined();
+    const hasDiscoverRequired = moveStepWithValues?.options.some(
+      (option) => option.long === "--discover-required"
+    );
+    expect(hasDiscoverRequired).toBe(true);
+  });
+
+  it("registers my-tasks filters for flow and step", () => {
+    const program = createProgram();
+    const myTasks = program.commands.find((command) => command.name() === "my-tasks");
+    expect(myTasks).toBeDefined();
+
+    const hasFlowId = myTasks?.options.some((option) => option.long === "--flow-id");
+    const hasStepId = myTasks?.options.some((option) => option.long === "--step-id");
+
+    expect(hasFlowId).toBe(true);
+    expect(hasStepId).toBe(true);
   });
 
   it("runs card create in dry-run without mutating", async () => {

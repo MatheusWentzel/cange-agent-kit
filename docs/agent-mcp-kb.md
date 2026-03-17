@@ -52,7 +52,8 @@ A maioria dos comandos retorna envelope previsível:
 
 - `pnpm cli my-flows`
 - `pnpm cli my-registers`
-- `pnpm cli my-tasks`
+- `pnpm cli my-tasks [--flow-id <id>] [--step-id <id>]`
+- `pnpm cli step-form --flow-id <id> --step-id <id>`
 - `pnpm cli notifications --is-archived N`
 - `pnpm cli flow get --id-flow <id>`
 - `pnpm cli register get --id-register <id>`
@@ -60,7 +61,8 @@ A maioria dos comandos retorna envelope previsível:
 - `pnpm cli fields by-register --register-id <id> [--form-id <id>]`
 - `pnpm cli template flow-create --flow-id <id>`
 - `pnpm cli template register-create --register-id <id>`
-- `pnpm cli card get --flow-id <id> --card-id <id>`
+- `pnpm cli template step-move --flow-id <id> --from-step-id <id> --to-step-id <id>`
+- `pnpm cli card get --flow-id <id> --card-id <id> [--field-ids <id1,id2>] [--summary-only]`
 - `pnpm cli card list --flow-id <id> [--step-id <id>] [--limit <n>]`
 - `pnpm cli my-registers [--name <search>]`
 
@@ -70,6 +72,7 @@ A maioria dos comandos retorna envelope previsível:
 - `pnpm cli card update --payload <path-to-json> [--dry-run]`
 - `pnpm cli card update-values --payload <path-to-json> [--validate-fields] [--dry-run]`
 - `pnpm cli card move-step-with-values --payload <path-to-json> [--validate-fields] [--dry-run]`
+- `pnpm cli card move-step-with-values --discover-required --flow-id <id> --form-id <id>`
 - `pnpm cli card move-step --payload <path-to-json> [--validate-fields] [--dry-run]` (deprecated alias)
 - `pnpm cli comment create --payload <path-to-json> [--dry-run]`
 - `pnpm cli notification read --payload <path-to-json> [--dry-run]`
@@ -173,10 +176,18 @@ Compatibilidade: também aceita `id_notification`.
   responsibleUserId?: number | string;
   responsibleName?: string;
   statusDue?: number | string;
+  fieldValues?: Record<string, unknown>; // flat por field_id
+  fields?: Record<string, unknown>;      // alias de compatibilidade
   archived?: boolean;
   complete?: boolean;
 }
 ```
+
+Comportamento útil:
+
+- `--field-ids` retorna apenas os fields pedidos.
+- ids não encontrados retornam `null` no mapa.
+- `--summary-only` evita parsing de `raw` para agentes.
 
 ### Notification summary (`notifications`)
 
@@ -250,6 +261,9 @@ Compatibilidade: também aceita `id_notification`.
 - `flow.form_init_id` é apenas para criação (`card create`), não para mover etapa.
 - Sempre usar `card move-step-with-values`, nunca `card move-step` como escolha principal.
 - O endpoint da API exige `id_form` e `values` em toda movimentação; quando não houver campos para preencher, usar `values: {}`.
+- Antes de montar payload de movimentação, pode rodar:
+  - `card move-step-with-values --discover-required --flow-id <id> --form-id <id>`
+  - `step-form --flow-id <id> --step-id <id>`
 - Se houver `values`, preencher obrigatórios (`required = 1`) do formulário alvo.
 - Validar antes de mutar:
   - `card update-values --validate-fields --dry-run`
@@ -275,9 +289,12 @@ Referência rápida: [Playbook 00](./playbooks/00-agent-operational-suggestions.
 - O comando recomendado para movimentação é `card move-step-with-values`; `card move-step` existe apenas como alias deprecated.
 - A movimentação depende de `fromStepId` e `toStepId` corretos.
 - Se o fluxo tiver regras adicionais fora do endpoint, a movimentação pode exigir intervenção no app.
+- `CangeValidationError` de `--validate-fields` pode incluir `fieldTitle` por issue quando o título estiver disponível.
+- Para seleção (`RADIO_BOX_FIELD`, `COMBO_BOX_FIELD`), payload inválido pode retornar `INVALID_OPTION` com lista de opções válidas.
 
 ## Playbooks
 
+- [Agent Changelog](./agent-changelog.md)
 - [00 - Sugestões operacionais para agentes](./playbooks/00-agent-operational-suggestions.md)
 - [01 - Consultar tarefas pendentes](./playbooks/01-pending-tasks.md)
 - [02 - Consultar notificações](./playbooks/02-notifications.md)

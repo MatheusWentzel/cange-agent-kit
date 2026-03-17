@@ -18,6 +18,7 @@ import { registerFieldsByFlowCommand } from "./commands/fields-by-flow.js";
 import { registerFieldsByRegisterCommand } from "./commands/fields-by-register.js";
 import { registerTemplateFlowCreateCommand } from "./commands/field-template-flow.js";
 import { registerTemplateRegisterCreateCommand } from "./commands/field-template-register.js";
+import { registerTemplateStepMoveCommand } from "./commands/field-template-step-move.js";
 import { registerFlowGetCommand } from "./commands/flow-get.js";
 import { registerMyFlowsCommand } from "./commands/my-flows.js";
 import { registerMyRegistersCommand } from "./commands/my-registers.js";
@@ -28,6 +29,7 @@ import { registerRegisterCreateCommand } from "./commands/register-create.js";
 import { registerRegisterFormAnswerGetCommand } from "./commands/register-form-answer-get.js";
 import { registerRegisterGetCommand } from "./commands/register-get.js";
 import { registerRegisterUpdateCommand } from "./commands/register-update.js";
+import { registerStepFormCommand } from "./commands/step-form.js";
 
 export function createProgram(): Command {
   const program = new Command();
@@ -42,6 +44,7 @@ export function createProgram(): Command {
   registerMyFlowsCommand(program);
   registerMyRegistersCommand(program);
   registerMyTasksCommand(program);
+  registerStepFormCommand(program);
   registerNotificationsCommand(program);
 
   const notificationCommand = program.command("notification").description("Operações de notificação");
@@ -62,6 +65,7 @@ export function createProgram(): Command {
   const templateCommand = program.command("template").description("Templates seguros de payload");
   registerTemplateFlowCreateCommand(templateCommand);
   registerTemplateRegisterCreateCommand(templateCommand);
+  registerTemplateStepMoveCommand(templateCommand);
 
   const cardCommand = program.command("card").description("Operações de card");
   registerCardGetCommand(cardCommand);
