@@ -24,6 +24,10 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   - `summary.fieldValues` (map flat por `field_id`)
   - `summary.fields` (alias de compatibilidade)
 - Quando `--field-ids` é usado, ids não encontrados retornam `null` no mapa.
+- `summaries` de card/task agora expõem aliases em snake_case:
+  - `id_card`
+  - `flow_id`
+  - `step_id`
 
 ### Melhorias de validação
 

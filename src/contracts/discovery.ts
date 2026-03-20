@@ -64,12 +64,18 @@ export function createDiscoveryContracts(params: {
       let summaries = extractArray(raw).map((item) => summarizeCard(item));
       if (parsed.data.flowId !== undefined) {
         summaries = summaries.filter(
-          (item) => item.flowId !== undefined && String(item.flowId) === String(parsed.data.flowId)
+          (item) => {
+            const summaryFlowId = item.flowId ?? item.flow_id;
+            return summaryFlowId !== undefined && String(summaryFlowId) === String(parsed.data.flowId);
+          }
         );
       }
       if (parsed.data.stepId !== undefined) {
         summaries = summaries.filter(
-          (item) => item.currentStepId !== undefined && String(item.currentStepId) === String(parsed.data.stepId)
+          (item) => {
+            const summaryStepId = item.currentStepId ?? item.step_id;
+            return summaryStepId !== undefined && String(summaryStepId) === String(parsed.data.stepId);
+          }
         );
       }
 

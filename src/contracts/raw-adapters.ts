@@ -109,20 +109,23 @@ export function summarizeCard(raw: unknown): CardSummary {
   const flowStep = asRecord(record.flow_step);
   const user = asRecord(record.user);
   const flattenedFields = extractCardFieldValues(record);
+  const cardId = pickNumberOrString(record, ["id", "card_id", "id_card"]);
+  const flowId = pickNumberOrString(record, ["flow_id", "id_flow"]);
+  const stepId =
+    pickNumberOrString(record, ["flow_step_id", "step_id", "id_step", "current_step_id"]) ??
+    pickNumberOrString(flowStep ?? {}, ["id_step", "step_id"]);
 
   return compactDefined({
-    cardId: pickNumberOrString(record, ["id", "card_id", "id_card"]),
+    cardId,
+    id_card: cardId,
     title: pickString(record, ["title", "name"]),
-    flowId: pickNumberOrString(record, ["flow_id", "id_flow"]),
+    flowId,
+    flow_id: flowId,
     flowName: pickString(flow ?? {}, ["name", "title"]),
     flowHash: pickString(flow ?? {}, ["hash"]),
     companyId: pickNumberOrString(record, ["company_id", "id_company"]),
-    currentStepId: pickNumberOrString(record, [
-      "flow_step_id",
-      "step_id",
-      "id_step",
-      "current_step_id"
-    ]) ?? pickNumberOrString(flowStep ?? {}, ["id_step", "step_id"]),
+    currentStepId: stepId,
+    step_id: stepId,
     stepName: pickString(flowStep ?? {}, ["name", "title"]),
     dueDate: pickString(record, ["dt_due", "due_date"]),
     createdAt: pickString(record, ["dt_created", "created_at"]),

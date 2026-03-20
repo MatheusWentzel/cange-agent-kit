@@ -20,12 +20,15 @@ export interface RegisterSummary {
 
 export interface CardSummary {
   cardId?: number | string;
+  id_card?: number | string;
   title?: string;
   flowId?: number | string;
+  flow_id?: number | string;
   flowName?: string;
   flowHash?: string;
   companyId?: number | string;
   currentStepId?: number | string;
+  step_id?: number | string;
   stepName?: string;
   dueDate?: string;
   createdAt?: string;

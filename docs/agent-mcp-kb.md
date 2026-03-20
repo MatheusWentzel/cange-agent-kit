@@ -164,12 +164,15 @@ Compatibilidade: também aceita `id_notification`.
 ```ts
 {
   cardId?: number | string;
+  id_card?: number | string;      // alias
   title?: string;
   flowId?: number | string;
+  flow_id?: number | string;      // alias
   flowName?: string;
   flowHash?: string;
   companyId?: number | string;
   currentStepId?: number | string;
+  step_id?: number | string;      // alias
   stepName?: string;
   dueDate?: string;          // ISO
   createdAt?: string;        // ISO
@@ -188,6 +191,7 @@ Comportamento útil:
 - `--field-ids` retorna apenas os fields pedidos.
 - ids não encontrados retornam `null` no mapa.
 - `--summary-only` evita parsing de `raw` para agentes.
+- `my-tasks` e `card get` incluem aliases snake_case (`id_card`, `flow_id`, `step_id`) para compatibilidade.
 
 ### Notification summary (`notifications`)
 

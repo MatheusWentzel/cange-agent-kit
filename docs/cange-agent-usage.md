@@ -44,6 +44,7 @@
 - Para reduzir tentativa/erro em movimentação, usar `step-form` para descobrir requireds da etapa.
 - Para reduzir parsing manual de card, usar `card get --field-ids <id1,id2> --summary-only` e ler `summary.fields`.
 - Para contexto de tarefas, filtrar `my-tasks` por `--flow-id` e `--step-id`.
+- Para compatibilidade com playbooks antigos, `summaries` também expõe `id_card`, `flow_id` e `step_id`.
 - Não usar curl direto quando houver comando da CLI.
 
 ## Playbooks operacionais

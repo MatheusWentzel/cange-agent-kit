@@ -245,6 +245,7 @@ Observação sobre `card get`:
 - Use `--field-ids` para retornar apenas os campos de interesse no summary.
 - Com `--field-ids`, fields não encontrados retornam `null` no mapa.
 - Use `--summary-only` para retornar somente o summary e eliminar parsing de `raw`.
+- `summary` também inclui aliases em snake_case para compatibilidade (`id_card`, `flow_id`, `step_id`).
 
 ## Operações de comentário e anexo
 

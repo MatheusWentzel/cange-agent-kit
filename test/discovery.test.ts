@@ -127,12 +127,15 @@ describe("discovery contracts", () => {
     });
     expect(tasks.summaries[0]).toMatchObject({
       cardId: 400,
+      id_card: 400,
       title: "Follow up cliente",
       flowId: 1,
+      flow_id: 1,
       flowName: "Tarefas",
       flowHash: "flow-hash",
       companyId: 67,
       currentStepId: 33,
+      step_id: 33,
       stepName: "A Fazer",
       createdAt: "2026-03-15T09:00:00.000Z",
       dueDate: "2026-03-15T10:00:00.000Z",
@@ -209,8 +212,11 @@ describe("discovery contracts", () => {
     expect(tasks.summaries).toHaveLength(1);
     expect(tasks.summaries[0]).toMatchObject({
       cardId: 1,
+      id_card: 1,
       flowId: 99,
-      currentStepId: 88
+      flow_id: 99,
+      currentStepId: 88,
+      step_id: 88
     });
   });
 });
