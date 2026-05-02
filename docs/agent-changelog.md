@@ -12,6 +12,13 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   - retorna `raw`, `summaries[]` (id, cardId, userId, userName, description, dtCreated, dtCreatedFormatted, fixed, attachmentsCount) e `total`
   - útil em playbooks para checar se uma dúvida já foi respondida antes de bloquear
 
+- `time-tracking create` (mutação):
+  - `cange time-tracking create --payload <path-to-json> [--dry-run]`
+  - cria registro de time tracking via `POST /time-tracking`
+  - **obrigatório** antes de mover cartões de etapas com `flow_step.isRequiredTrack="1"` (ex: etapa Em execução do `[CNG] Roadmap`, step 486)
+  - payload: `flowId`, `cardId`, `flowStepId`, `source` (string, ex: `"manual"`), `dtStart`/`dtEnd` (ISO 8601), `duration` (em **segundos**), `billable` (`"S"`/`"N"`), `title`/`description` opcionais
+  - sem o track, `card move-step-with-values` falha com `404 — Nesta etapa é obrigatório rastreamento de tempo`
+
 ## 2026-03-17
 
 ### Novos comandos e flags

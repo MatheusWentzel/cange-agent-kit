@@ -31,6 +31,7 @@ import { registerRegisterFormAnswerGetCommand } from "./commands/register-form-a
 import { registerRegisterGetCommand } from "./commands/register-get.js";
 import { registerRegisterUpdateCommand } from "./commands/register-update.js";
 import { registerStepFormCommand } from "./commands/step-form.js";
+import { registerTimeTrackingCreateCommand } from "./commands/time-tracking-create.js";
 
 export function createProgram(): Command {
   const program = new Command();
@@ -89,6 +90,11 @@ export function createProgram(): Command {
     .command("register-form-answer")
     .description("Operações de resposta de formulário de register");
   registerRegisterFormAnswerGetCommand(registerFormAnswerCommand);
+
+  const timeTrackingCommand = program
+    .command("time-tracking")
+    .description("Operações de time tracking");
+  registerTimeTrackingCreateCommand(timeTrackingCommand);
 
   return program;
 }

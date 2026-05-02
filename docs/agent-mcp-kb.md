@@ -77,6 +77,7 @@ A maioria dos comandos retorna envelope previsível:
 - `pnpm cli card move-step --payload <path-to-json> [--validate-fields] [--dry-run]` (deprecated alias)
 - `pnpm cli comment create --payload <path-to-json> [--dry-run]`
 - `pnpm cli notification read --payload <path-to-json> [--dry-run]`
+- `pnpm cli time-tracking create --payload <path-to-json> [--dry-run]`
 - `pnpm cli attachment upload --file <path>`
 - `pnpm cli attachment link-card --payload <path-to-json> [--dry-run]`
 - `pnpm cli register create --payload <path-to-json> [--validate-fields] [--register-id <id>] [--dry-run]`

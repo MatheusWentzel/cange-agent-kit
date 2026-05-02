@@ -10,6 +10,7 @@ import { createFlowsContracts } from "./flows.js";
 import { createNotificationsContracts } from "./notifications.js";
 import { createPayloadBuilderContracts } from "./payload-builder.js";
 import { createRegistersContracts } from "./registers.js";
+import { createTimeTrackingContracts } from "./timeTracking.js";
 
 export function createContracts(params: { client: CangeClient; config: CangeResolvedConfig }) {
   const discovery = createDiscoveryContracts(params);
@@ -20,6 +21,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const notifications = createNotificationsContracts(params.client);
   const attachments = createAttachmentsContracts(params.client);
   const registers = createRegistersContracts(params.client);
+  const timeTracking = createTimeTrackingContracts(params.client);
   const payloadBuilder = createPayloadBuilderContracts({
     flows,
     fields,
@@ -62,7 +64,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     uploadAttachment: attachments.uploadAttachment,
     linkAttachmentToCard: attachments.linkAttachmentToCard,
     createRegister: registers.createRegister,
-    updateRegister: registers.updateRegister
+    updateRegister: registers.updateRegister,
+    createTimeTracking: timeTracking.createTimeTracking
   };
 
   return {
