@@ -64,6 +64,7 @@ A maioria dos comandos retorna envelope previsível:
 - `pnpm cli template step-move --flow-id <id> --from-step-id <id> --to-step-id <id>`
 - `pnpm cli card get --flow-id <id> --card-id <id> [--field-ids <id1,id2>] [--summary-only]`
 - `pnpm cli card list --flow-id <id> [--step-id <id>] [--limit <n>]`
+- `pnpm cli comment list --flow-id <id> --card-id <id> [--summary-only]`
 - `pnpm cli my-registers [--name <search>]`
 
 ### Mutações

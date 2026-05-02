@@ -2,6 +2,16 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-05-02
+
+### Novos comandos
+
+- `comment list` (read-only):
+  - `cange comment list --flow-id <id> --card-id <id> [--summary-only]`
+  - lê comentários de um card via `GET /card-comment/by-card`
+  - retorna `raw`, `summaries[]` (id, cardId, userId, userName, description, dtCreated, dtCreatedFormatted, fixed, attachmentsCount) e `total`
+  - útil em playbooks para checar se uma dúvida já foi respondida antes de bloquear
+
 ## 2026-03-17
 
 ### Novos comandos e flags

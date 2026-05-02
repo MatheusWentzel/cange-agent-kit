@@ -47,7 +47,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     validateValuesAgainstFields: payloadBuilder.validateValuesAgainstFields,
     getCard: cards.getCard,
     listCardsByFlow: cards.listCardsByFlow,
-    getRegisterFormAnswer: registers.getRegisterFormAnswer
+    getRegisterFormAnswer: registers.getRegisterFormAnswer,
+    listCommentsByCard: comments.listCommentsByCard
   };
 
   const mutations = {

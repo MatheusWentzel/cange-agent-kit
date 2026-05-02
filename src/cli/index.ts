@@ -7,6 +7,7 @@ import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-ca
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
 import { registerAuthCommand } from "./commands/auth.js";
 import { registerCardCommentCreateCommand } from "./commands/card-comment-create.js";
+import { registerCardCommentListCommand } from "./commands/card-comment-list.js";
 import { registerCardCreateCommand } from "./commands/card-create.js";
 import { registerCardGetCommand } from "./commands/card-get.js";
 import { registerCardMoveStepCommand } from "./commands/card-move-step.js";
@@ -77,6 +78,7 @@ export function createProgram(): Command {
   registerCardMoveStepWithValuesCommand(cardCommand);
 
   const commentCommand = program.command("comment").description("Operações de comentário");
+  registerCardCommentListCommand(commentCommand);
   registerCardCommentCreateCommand(commentCommand);
 
   const attachmentCommand = program.command("attachment").description("Operações de attachment");
