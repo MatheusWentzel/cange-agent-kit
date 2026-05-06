@@ -37,15 +37,13 @@ export class CangeError extends Error {
   }
 
   public toJSON(): CangeErrorSerialized {
-    return {
-      name: this.name,
-      message: this.message,
-      status: this.status,
-      endpoint: this.endpoint,
-      method: this.method,
-      code: this.code,
-      details: this.details
-    };
+    const out: CangeErrorSerialized = { name: this.name, message: this.message };
+    if (this.status !== undefined) out.status = this.status;
+    if (this.endpoint !== undefined) out.endpoint = this.endpoint;
+    if (this.method !== undefined) out.method = this.method;
+    if (this.code !== undefined) out.code = this.code;
+    if (this.details !== undefined) out.details = this.details;
+    return out;
   }
 }
 

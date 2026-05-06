@@ -22,7 +22,8 @@ export function createCommandAction<TArgs extends unknown[]>(
     const ctx = await createContext(command);
 
     try {
-      if (options.requiresAuth ?? true) {
+      const requiresAuth = (options.requiresAuth ?? true) && !isDryRunInvocation(args);
+      if (requiresAuth) {
         await ctx.ensureAuth();
       }
 
@@ -67,4 +68,14 @@ function getCommandFromArgs(args: unknown[]): Command {
     throw new CangeCliUsageError("Falha interna ao resolver contexto do comando.");
   }
   return maybeCommand;
+}
+
+function isDryRunInvocation(args: unknown[]): boolean {
+  const first = args[0];
+  return (
+    !!first &&
+    typeof first === "object" &&
+    "dryRun" in first &&
+    (first as { dryRun?: unknown }).dryRun === true
+  );
 }
