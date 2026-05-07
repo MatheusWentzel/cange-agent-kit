@@ -38,6 +38,12 @@ export const updateCardValuesPayloadSchema = z.object({
   values: valuesSchema
 });
 
+export const addCardLabelPayloadSchema = z.object({
+  flowId: z.number().int().positive(),
+  cardId: z.number().int().positive(),
+  flowTagId: z.number().int().positive()
+});
+
 const moveCardStepBasePayloadSchema = z.object({
   flowId: z.number().int().positive(),
   cardId: z.number().int().positive(),

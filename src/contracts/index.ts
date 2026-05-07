@@ -59,6 +59,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     updateCardValues: cards.updateCardValues,
     moveCardStep: cards.moveCardStep,
     moveCardStepWithValues: cards.moveCardStepWithValues,
+    addCardLabel: cards.addCardLabel,
     readNotification: notifications.readNotification,
     createCardComment: comments.createCardComment,
     uploadAttachment: attachments.uploadAttachment,

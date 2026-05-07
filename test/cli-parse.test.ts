@@ -225,6 +225,54 @@ describe("cli parsing", () => {
     expect(output).toContain("deprecated");
   });
 
+  it("runs card add-label in dry-run without mutating", async () => {
+    process.env.CANGE_ACCESS_TOKEN = "token";
+
+    const payloadPath = join(tmpdir(), `cange-card-add-label-${Date.now()}.json`);
+    await writeFile(
+      payloadPath,
+      JSON.stringify(
+        {
+          flowId: 9000,
+          cardId: 210721,
+          flowTagId: 15543
+        },
+        null,
+        2
+      ),
+      "utf8"
+    );
+
+    const writes: string[] = [];
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      writes.push(String(chunk));
+      return true;
+    });
+
+    try {
+      const program = createProgram();
+      await program.parseAsync([
+        "node",
+        "cange",
+        "--output",
+        "json",
+        "card",
+        "add-label",
+        "--payload",
+        payloadPath,
+        "--dry-run"
+      ]);
+    } finally {
+      await unlink(payloadPath);
+    }
+
+    const output = writes.join("");
+    expect(output).toContain("\"dryRun\": true");
+    expect(output).toContain("\"executed\": false");
+    expect(output).toContain("\"flowTagId\": 15543");
+    expect(output).toContain("\"cardId\": 210721");
+  });
+
   it("runs notification read in dry-run without mutating", async () => {
     process.env.CANGE_ACCESS_TOKEN = "token";
 

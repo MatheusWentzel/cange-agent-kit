@@ -2,6 +2,21 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-05-07
+
+### Novos comandos
+
+- `card add-label` (mutação):
+  - `cange card add-label --payload <path-to-json> [--dry-run]`
+  - vincula uma etiqueta (flow_tag) a um card via `POST /flow-tag/card`
+  - payload: `flowId`, `cardId`, `flowTagId` (todos `number`, camelCase como demais mutações)
+  - resposta `raw` traz `card_id`, `flow_tag_id` e `id_card_flow_tag` (id da relação criada)
+
+### Mudanças de comportamento
+
+- `--dry-run` agora pula `ensureAuth` em **todos** os comandos de mutação. Permite validar payload offline (sem `CANGE_ACCESS_TOKEN`/`CANGE_EMAIL`+`CANGE_APIKEY`) — útil em CI e geração de payload em pipeline.
+- `CangeError.toJSON()` omite campos `undefined` (`status`, `endpoint`, `method`, `code`, `details`). Saída fica enxuta — `name` e `message` em destaque, sem `details: undefined` poluindo o output.
+
 ## 2026-05-02
 
 ### Novos comandos

@@ -6,6 +6,7 @@ import { createCliPrinter } from "../utils/output.js";
 import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-card.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
 import { registerAuthCommand } from "./commands/auth.js";
+import { registerCardAddLabelCommand } from "./commands/card-add-label.js";
 import { registerCardCommentCreateCommand } from "./commands/card-comment-create.js";
 import { registerCardCommentListCommand } from "./commands/card-comment-list.js";
 import { registerCardCreateCommand } from "./commands/card-create.js";
@@ -77,6 +78,7 @@ export function createProgram(): Command {
   registerCardUpdateValuesCommand(cardCommand);
   registerCardMoveStepCommand(cardCommand);
   registerCardMoveStepWithValuesCommand(cardCommand);
+  registerCardAddLabelCommand(cardCommand);
 
   const commentCommand = program.command("comment").description("Operações de comentário");
   registerCardCommentListCommand(commentCommand);

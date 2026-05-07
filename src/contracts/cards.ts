@@ -1,6 +1,7 @@
 import { CangeValidationError } from "../client/errors.js";
 import type { CangeClient } from "../client/http.js";
 import {
+  addCardLabelPayloadSchema,
   createCardPayloadSchema,
   getCardParamsSchema,
   listCardsByFlowParamsSchema,
@@ -69,6 +70,11 @@ export interface CardsContracts {
     isFromCurrentStep?: boolean;
     isTestMode?: boolean;
   }) => Promise<{ raw: unknown; summary: CardSummary }>;
+  addCardLabel: (input: {
+    flowId: number;
+    cardId: number;
+    flowTagId: number;
+  }) => Promise<{ raw: unknown }>;
 }
 
 export function createCardsContracts(client: CangeClient): CardsContracts {
@@ -243,6 +249,24 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         raw,
         summary: summarizeCard(raw)
       };
+    },
+
+    async addCardLabel(input) {
+      const parsed = addCardLabelPayloadSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new CangeValidationError("Payload inválido para addCardLabel.", {
+          details: parsed.error.format()
+        });
+      }
+
+      const raw = await client.post<unknown>("/flow-tag/card", {
+        body: {
+          flow_id: parsed.data.flowId,
+          card_id: parsed.data.cardId,
+          flow_tag_id: parsed.data.flowTagId
+        }
+      });
+      return { raw };
     }
   };
 }
