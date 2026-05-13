@@ -1,0 +1,12 @@
+{
+  "name": "Triagem",
+  "form_name": "STP Triagem",
+  "index": 0,
+  "color": "#f59e0b",
+  "icon": "FaBookmark",
+  "isAddable": "1",
+  "isEndStep": "0",
+  "isRequiredTrack": "0",
+  "isRestrictMove": "0",
+  "description": "Etapa inicial de triagem do cliente"
+}

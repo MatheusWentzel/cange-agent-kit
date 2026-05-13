@@ -28,6 +28,10 @@ Use este repositório como camada segura para operar o Cange via CLI.
   4. execução real
 - Para mover etapa de card, sempre usar `card move-step-with-values` com `idForm` (`flow_step.form_id`) e `values` (usar `{}` quando não houver campos obrigatórios).
 - Para marcar notificação como lida/arquivada, usar `notification read`.
+- Para construir fluxos (fluxo, etapas, campos, relacionamentos), usar `cange flow-build ...` (Flow V2 Build API):
+  - bodies são **strict** — não enviar chaves extras.
+  - antes de criar campos, descobrir tipos com `flow-build field-types list` / `flow-build field-types get --type <TIPO>`.
+  - exige admin do fluxo (`flow_user.type = 'A'`); 404 com `FLOW_NOT_FOUND` indica falta de permissão.
 
 ## Fluxos prontos (skills)
 
@@ -36,3 +40,4 @@ Use este repositório como camada segura para operar o Cange via CLI.
 - responder notificações: `docs/playbooks/03-reply-notifications.md`
 - executar e concluir/mover card: `docs/playbooks/04-execute-and-move-card.md`
 - criar novo card: `docs/playbooks/05-create-card.md`
+- construir fluxo (Flow V2 Build): `docs/playbooks/06-build-flow.md`

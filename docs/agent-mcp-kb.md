@@ -83,6 +83,46 @@ A maioria dos comandos retorna envelope previsível:
 - `pnpm cli register create --payload <path-to-json> [--validate-fields] [--register-id <id>] [--dry-run]`
 - `pnpm cli register update --payload <path-to-json> [--validate-fields] [--register-id <id>] [--dry-run]`
 
+### Construção de fluxos (Flow V2 Build API — `/flow/v2/build`)
+
+Pré-requisito: para qualquer comando com `--id-flow`, o token precisa ser administrador do fluxo (`flow_user.type = 'A'`). 404 com `FLOW_NOT_FOUND` indica falta de permissão. Bodies são **strict**: chaves extras causam `VALIDATION_FAILED`.
+
+Read-only:
+
+- `pnpm cli flow-build ping`
+- `pnpm cli flow-build field-types list`
+- `pnpm cli flow-build field-types get --type <TIPO>`
+- `pnpm cli flow-build step-relationship list --id-flow <id>`
+- `pnpm cli flow-build step-relationship from --id-flow <id> --id-step <parent>`
+
+Mutações:
+
+- `pnpm cli flow-build flow create --payload <path-to-json> [--dry-run]`
+- `pnpm cli flow-build flow update --id-flow <id> --payload <path-to-json> [--dry-run]`
+- `pnpm cli flow-build step create --id-flow <id> --payload <path-to-json> [--dry-run]`
+- `pnpm cli flow-build step update --id-flow <id> --id-step <id> --payload <path-to-json> [--dry-run]`
+- `pnpm cli flow-build step reorder --id-flow <id> --payload <path-to-json> [--dry-run]`
+- `pnpm cli flow-build field create --id-flow <id> (--id-step <id> | --form-id <id>) --payload <path-to-json> [--dry-run]`
+- `pnpm cli flow-build field update --id-flow <id> [--id-step <id> | --form-id <id>] --id-field <id> --payload <path-to-json> [--dry-run]`
+- `pnpm cli flow-build step-relationship set --id-flow <id> --payload <path-to-json> [--dry-run]`
+
+Ordem recomendada de construção:
+
+1. `flow create` → guardar `id_flow` e `form_init_id`.
+2. (opcional) `flow update` para nome/cor/privacidade.
+3. `step create` por etapa → guardar `id_step` e `form_id` da etapa.
+4. (opcional) `step reorder` para ajustar índices.
+5. `step-relationship set` por aresta (`isActive: '1'` permite; `'0'` bloqueia).
+6. `field create` em cada `form_init_id` ou em cada `step` (use somente um entre `--form-id` e `--id-step`).
+7. Verificar com `step-relationship list --id-flow <id>`.
+
+Regras especiais:
+
+- Tipos sem resposta (`BUTTON_FIELD`, `TITLE_FIELD`, `DESCRIPTION_FIELD`, `DIVIDER_FIELD`): `required` deve ser `'0'` (não `'N'`) e sem `validations` `type: "required"`.
+- `FORMULA_FIELD`: `formula` não pode conter `[` nem `]`; placeholders usam `{nome_do_campo}`.
+- `COMBO_BOX_FIELD`, `RADIO_BOX_FIELD`, `CHECK_BOX_FIELD`: `options[]` obrigatório e não vazio (`{ value, label, hide?, order?, id_field_option? }`).
+- Tipos fora do catálogo (rejeitados): `PASSWORD_FIELD`, `COMBO_BOX_REGISTER_FIELD`, `COMBO_BOX_FLOW_FIELD`.
+
 ## Payloads de mutação (exemplos em camelCase)
 
 Exemplos prontos no repositório:
@@ -95,6 +135,17 @@ Exemplos prontos no repositório:
 - `examples/comment-create.example.json`
 - `examples/notification-read.example.json`
 - `examples/create-register.example.json`
+- `examples/flow-build-create-flow.example.json`
+- `examples/flow-build-update-flow.example.json`
+- `examples/flow-build-create-step.example.json`
+- `examples/flow-build-update-step.example.json`
+- `examples/flow-build-reorder-step.example.json`
+- `examples/flow-build-create-field-text.example.json`
+- `examples/flow-build-create-field-combo.example.json`
+- `examples/flow-build-create-field-formula.example.json`
+- `examples/flow-build-create-field-title.example.json`
+- `examples/flow-build-update-field.example.json`
+- `examples/flow-build-step-relationship.example.json`
 
 `comment create`:
 

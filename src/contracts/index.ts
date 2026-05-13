@@ -6,6 +6,7 @@ import { createCardsContracts } from "./cards.js";
 import { createCommentsContracts } from "./comments.js";
 import { createDiscoveryContracts } from "./discovery.js";
 import { createFieldsContracts } from "./fields.js";
+import { createFlowV2BuildContracts } from "./flowV2Build.js";
 import { createFlowsContracts } from "./flows.js";
 import { createNotificationsContracts } from "./notifications.js";
 import { createPayloadBuilderContracts } from "./payload-builder.js";
@@ -22,6 +23,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const attachments = createAttachmentsContracts(params.client);
   const registers = createRegistersContracts(params.client);
   const timeTracking = createTimeTrackingContracts(params.client);
+  const flowV2Build = createFlowV2BuildContracts(params.client);
   const payloadBuilder = createPayloadBuilderContracts({
     flows,
     fields,
@@ -50,7 +52,12 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getCard: cards.getCard,
     listCardsByFlow: cards.listCardsByFlow,
     getRegisterFormAnswer: registers.getRegisterFormAnswer,
-    listCommentsByCard: comments.listCommentsByCard
+    listCommentsByCard: comments.listCommentsByCard,
+    flowBuildPing: flowV2Build.ping,
+    listFlowBuildFieldTypes: flowV2Build.listFieldTypes,
+    getFlowBuildFieldTypeDescriptor: flowV2Build.getFieldTypeDescriptor,
+    listFlowBuildStepRelationshipsByFlow: flowV2Build.listStepRelationshipsByFlow,
+    listFlowBuildStepRelationshipsFromStep: flowV2Build.listStepRelationshipsFromStep
   };
 
   const mutations = {
@@ -66,7 +73,18 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     linkAttachmentToCard: attachments.linkAttachmentToCard,
     createRegister: registers.createRegister,
     updateRegister: registers.updateRegister,
-    createTimeTracking: timeTracking.createTimeTracking
+    createTimeTracking: timeTracking.createTimeTracking,
+    createFlowBuildFlow: flowV2Build.createFlow,
+    updateFlowBuildFlow: flowV2Build.updateFlow,
+    createFlowBuildStep: flowV2Build.createStep,
+    updateFlowBuildStep: flowV2Build.updateStep,
+    reorderFlowBuildStep: flowV2Build.reorderStep,
+    createFlowBuildFieldByStep: flowV2Build.createFieldByStep,
+    createFlowBuildFieldByForm: flowV2Build.createFieldByForm,
+    patchFlowBuildFieldByFlow: flowV2Build.patchFieldByFlow,
+    patchFlowBuildFieldByStep: flowV2Build.patchFieldByStep,
+    patchFlowBuildFieldByForm: flowV2Build.patchFieldByForm,
+    upsertFlowBuildStepRelationship: flowV2Build.upsertStepRelationship
   };
 
   return {

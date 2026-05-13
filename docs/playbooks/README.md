@@ -7,3 +7,4 @@
 - [03 - Responder notificações via comentários](./03-reply-notifications.md)
 - [04 - Executar tarefa e concluir/mover cartão](./04-execute-and-move-card.md)
 - [05 - Criar novos cartões](./05-create-card.md)
+- [06 - Construir fluxo do zero (Flow V2 Build)](./06-build-flow.md)

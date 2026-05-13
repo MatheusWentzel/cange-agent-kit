@@ -12,6 +12,10 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Na criação, preencher todos os campos com `required = "1"` do formulário-alvo.
 - Para card create, usar `flow.form_init_id`.
 - Para register create/update, usar `register.form_id`.
+- Para construir fluxos (criar/alterar fluxo, etapas, campos, relacionamentos), usar **somente** `cange flow-build ...` (Flow V2 Build API, prefixo `/flow/v2/build`).
+- Bodies da Flow V2 Build são **strict**: chaves extras causam `VALIDATION_FAILED` — envie apenas o que o schema aceita.
+- Para qualquer rota com `:id_flow` em `flow-build`, o token precisa ser administrador (`flow_user.type = 'A'`). 404 com `FLOW_NOT_FOUND` indica falta de permissão ou ID inexistente — não inferir dados.
+- Antes de criar campos via `flow-build field create`, descobrir o catálogo com `flow-build field-types list` / `flow-build field-types get --type <TIPO>`.
 - Para mover etapa de card, sempre usar `card move-step-with-values`, mesmo sem obrigatórios.
 - Quando não houver campos para preencher, enviar `values: {}`.
 - Ao mover etapa, o `idForm` do payload deve ser o `form_id` da etapa atual (`flow_step.form_id`), não o `form_init_id` do fluxo.
@@ -81,3 +85,4 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
   - resposta por comentários
   - execução + conclusão/movimentação
   - criação de novos cards
+  - construção de fluxo do zero (Flow V2 Build)

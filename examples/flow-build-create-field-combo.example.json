@@ -1,0 +1,12 @@
+{
+  "name": "customer_segment",
+  "type": "COMBO_BOX_FIELD",
+  "title": "Segmento do cliente",
+  "index": 1,
+  "required": "1",
+  "options": [
+    { "value": "smb", "label": "Pequeno e Médio", "order": 0 },
+    { "value": "mid", "label": "Mid-market", "order": 1 },
+    { "value": "ent", "label": "Enterprise", "order": 2 }
+  ]
+}

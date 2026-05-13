@@ -1,0 +1,9 @@
+{
+  "name": "customer_name",
+  "type": "TEXT_SHORT_FIELD",
+  "title": "Nome do cliente",
+  "index": 0,
+  "description": "Nome completo do cliente",
+  "placeholder": "Ex: ACME LTDA",
+  "required": "1"
+}

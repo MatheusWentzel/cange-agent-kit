@@ -1,0 +1,10 @@
+{
+  "name": "Triagem (revisada)",
+  "color": "#10b981",
+  "icon": "FaCheckCircle",
+  "isEndStep": "0",
+  "description": "Triagem expandida com SLA",
+  "due_time_type": 1,
+  "due_time": 24,
+  "due_time_bd": "S"
+}

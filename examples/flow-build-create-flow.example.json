@@ -1,0 +1,10 @@
+{
+  "workspace_id": 1234,
+  "name": "Fluxo Onboarding Clientes",
+  "color": "#f23b5c",
+  "icon": "FaCodeBranch",
+  "button_add_name": "Novo onboarding",
+  "isPrivate": "1",
+  "isAllowedArchive": "S",
+  "isAllowedDelete": "S"
+}

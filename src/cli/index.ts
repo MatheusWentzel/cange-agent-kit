@@ -21,6 +21,12 @@ import { registerFieldsByRegisterCommand } from "./commands/fields-by-register.j
 import { registerTemplateFlowCreateCommand } from "./commands/field-template-flow.js";
 import { registerTemplateRegisterCreateCommand } from "./commands/field-template-register.js";
 import { registerTemplateStepMoveCommand } from "./commands/field-template-step-move.js";
+import { registerFlowBuildFieldCommands } from "./commands/flow-build/field.js";
+import { registerFlowBuildFieldTypesCommand } from "./commands/flow-build/field-types.js";
+import { registerFlowBuildFlowCommands } from "./commands/flow-build/flow.js";
+import { registerFlowBuildPingCommand } from "./commands/flow-build/ping.js";
+import { registerFlowBuildStepCommands } from "./commands/flow-build/step.js";
+import { registerFlowBuildStepRelationshipCommands } from "./commands/flow-build/step-relationship.js";
 import { registerFlowGetCommand } from "./commands/flow-get.js";
 import { registerMyFlowsCommand } from "./commands/my-flows.js";
 import { registerMyRegistersCommand } from "./commands/my-registers.js";
@@ -97,6 +103,18 @@ export function createProgram(): Command {
     .command("time-tracking")
     .description("Operações de time tracking");
   registerTimeTrackingCreateCommand(timeTrackingCommand);
+
+  const flowBuildCommand = program
+    .command("flow-build")
+    .description(
+      "Construção de fluxos via Flow V2 Build API (/flow/v2/build): fluxo, etapas, campos e relacionamentos"
+    );
+  registerFlowBuildPingCommand(flowBuildCommand);
+  registerFlowBuildFieldTypesCommand(flowBuildCommand);
+  registerFlowBuildFlowCommands(flowBuildCommand);
+  registerFlowBuildStepCommands(flowBuildCommand);
+  registerFlowBuildFieldCommands(flowBuildCommand);
+  registerFlowBuildStepRelationshipCommands(flowBuildCommand);
 
   return program;
 }

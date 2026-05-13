@@ -2,6 +2,43 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-05-12
+
+### Novos comandos: Flow V2 Build API (`/flow/v2/build`)
+
+Agentes agora podem **construir fluxos completos** (fluxo, etapas, campos, relacionamentos) via CLI. Todos os comandos sob `cange flow-build ...`. Playbook: `docs/playbooks/06-build-flow.md`.
+
+Bodies são **strict** (Zod): qualquer chave extra → `VALIDATION_FAILED`. Rotas com `:id_flow` exigem que o token seja administrador do fluxo (`flow_user.type = 'A'`); 404 com `FLOW_NOT_FOUND` indica falta de permissão.
+
+Read-only:
+
+- `flow-build ping` — health do router.
+- `flow-build field-types list` — catálogo de tipos de campo aceitos.
+- `flow-build field-types get --type <TIPO>` — descritor (`properties[]`, `valueType`, `enumValues`, etc.).
+- `flow-build step-relationship list --id-flow <id>` — todas as etapas com `relationship_steps` e `conditionals`.
+- `flow-build step-relationship from --id-flow <id> --id-step <parent>` — vista a partir da etapa pai.
+
+Mutações (todas com `--dry-run` para validação offline):
+
+- `flow-build flow create --payload <path>`
+- `flow-build flow update --id-flow <id> --payload <path>`
+- `flow-build step create --id-flow <id> --payload <path>`
+- `flow-build step update --id-flow <id> --id-step <id> --payload <path>`
+- `flow-build step reorder --id-flow <id> --payload <path>` (`{ id_step, upDown: 'up' | 'down' }`)
+- `flow-build field create --id-flow <id> (--id-step <id> | --form-id <id>) --payload <path>`
+- `flow-build field update --id-flow <id> [--id-step <id> | --form-id <id>] --id-field <id> --payload <path>`
+- `flow-build step-relationship set --id-flow <id> --payload <path>` (`{ flow_step_id, step_available_id, isActive: '0'|'1' }`)
+
+Regras especiais para campos:
+
+- Tipos sem resposta (`BUTTON_FIELD`, `TITLE_FIELD`, `DESCRIPTION_FIELD`, `DIVIDER_FIELD`): `required` deve ser `'0'` (não `'N'`); sem validações `type: "required"`.
+- `FORMULA_FIELD`: `formula` não pode conter `[` nem `]`; placeholders usam `{nome_do_campo}`.
+- `COMBO_BOX_FIELD`, `RADIO_BOX_FIELD`, `CHECK_BOX_FIELD`: `options[]` obrigatório e não vazio.
+- `type` é imutável após criação (não enviar em `field update`).
+- Tipos rejeitados pelo catálogo da API: `PASSWORD_FIELD`, `COMBO_BOX_REGISTER_FIELD`, `COMBO_BOX_FLOW_FIELD`.
+
+Exemplos em `examples/flow-build-*.example.json`.
+
 ## 2026-05-07
 
 ### Novos comandos

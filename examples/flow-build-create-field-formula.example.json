@@ -1,0 +1,8 @@
+{
+  "name": "valor_total",
+  "type": "FORMULA_FIELD",
+  "title": "Valor total",
+  "index": 5,
+  "formula": "{valor_unitario} * {quantidade}",
+  "required": "0"
+}
