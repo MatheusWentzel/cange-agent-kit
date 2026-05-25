@@ -22,11 +22,12 @@ Quero que você prepare o cange-agent-kit do zero para uso imediato.
    - AGENTS.md
    - CLAUDE.md (se estiver usando Claude Code)
    - docs/agent-mcp-kb.md
-   - docs/agent-changelog.md
    - docs/playbooks/README.md
 
 4) Instale e configure:
    - pnpm install
+   - se aparecer `[ERR_PNPM_IGNORED_BUILDS]`, rode `pnpm approve-builds`, aprove `esbuild` e rode `pnpm install` novamente
+   - nunca apagar `pnpm-lock.yaml` para "forçar" instalação
    - se .env não existir: cp .env.example .env
    - valide se .env contém:
      CANGE_API_BASE_URL, CANGE_APP_ORIGIN e autenticação por CANGE_ACCESS_TOKEN
@@ -40,10 +41,10 @@ Quero que você prepare o cange-agent-kit do zero para uso imediato.
 6) Faça smoke test da CLI:
    - pnpm cli --help
    - pnpm cli auth login
-   - pnpm --silent cli --output json my-flows
-   - pnpm --silent cli --output json my-registers
-   - pnpm --silent cli --output json my-tasks
-   - pnpm --silent cli --output json notifications --is-archived N
+   - pnpm cli --output json my-flows
+   - pnpm cli --output json my-registers
+   - pnpm cli --output json my-tasks
+   - pnpm cli --output json notifications --is-archived N
 
 7) Entregue um relatório final com:
    - status de cada etapa (ok/falhou)
@@ -111,6 +112,17 @@ cd cange-agent-kit
 pnpm install
 ```
 
+Se ocorrer `[ERR_PNPM_IGNORED_BUILDS]` (pnpm v10/v11):
+
+```bash
+pnpm approve-builds
+pnpm install
+```
+
+Observação:
+- o repositório já inclui `pnpm-workspace.yaml` com allowlist de build script para `esbuild`.
+- não delete `pnpm-lock.yaml` como workaround; mantenha o lockfile versionado.
+
 1. Copie o ambiente:
 
 ```bash
@@ -146,18 +158,6 @@ cange --help
 
 Sem link global, use sempre `pnpm cli <comando>`.
 
-Para automação e pipes JSON, prefira:
-
-```bash
-pnpm --silent cli --output json <comando>
-```
-
-Ou use o atalho:
-
-```bash
-pnpm cli:silent --output json <comando>
-```
-
 ## Ambiente (`.env`)
 
 ```env
@@ -189,16 +189,13 @@ Os comandos abaixo exigem autenticação válida no `.env` (`CANGE_ACCESS_TOKEN`
 pnpm cli my-flows
 pnpm cli my-registers
 pnpm cli my-tasks
-pnpm cli my-tasks --flow-id 192 --step-id 106024
-pnpm cli step-form --flow-id 192 --step-id 106024
 pnpm cli notifications --is-archived N
-pnpm cli my-registers --name Reposit
 pnpm cli flow get --id-flow 192
 pnpm cli flow get --hash abc123
 pnpm cli register get --id-register 55
 pnpm cli register get --hash reg-hash
-pnpm cli fields by-flow --flow-id 192 --form-id 662
-pnpm cli fields by-register --register-id 55 --with-children true --form-id 700
+pnpm cli fields by-flow --flow-id 192
+pnpm cli fields by-register --register-id 55 --with-children true
 ```
 
 ## Inspeção de estrutura e template
@@ -206,7 +203,6 @@ pnpm cli fields by-register --register-id 55 --with-children true --form-id 700
 ```bash
 pnpm cli template flow-create --flow-id 192
 pnpm cli template register-create --register-id 55
-pnpm cli template step-move --flow-id 192 --from-step-id 106024 --to-step-id 106025
 ```
 
 Os templates já retornam:
@@ -220,13 +216,11 @@ Os templates já retornam:
 
 ```bash
 pnpm cli card get --flow-id 192 --card-id 9001
-pnpm cli card get --flow-id 192 --card-id 9001 --field-ids 332831,269733
-pnpm cli card get --flow-id 192 --card-id 9001 --field-ids 332831,269733 --summary-only
-pnpm cli card list --flow-id 192 --archived false --with-pre-answer true --with-time-tracking true --step-id 106024 --limit 50
+pnpm cli card list --flow-id 192 --archived false --with-pre-answer true --with-time-tracking true
 pnpm cli card create --payload ./examples/create-card.example.json --validate-fields --dry-run
 pnpm cli card update --payload ./examples/update-card.example.json --dry-run
 pnpm cli card update-values --payload ./examples/update-card-values.example.json --validate-fields --dry-run
-pnpm cli card move-step-with-values --discover-required --flow-id 192 --form-id 660
+pnpm cli card move-step --payload ./examples/move-card-step.example.json --dry-run
 pnpm cli card move-step-with-values --payload ./examples/move-card-step-with-values.example.json --validate-fields --dry-run
 ```
 
@@ -234,18 +228,8 @@ Diferença importante:
 
 - `card update` altera atributos principais do cartão (`responsável`, `due date`, `tag`, `complete`, `archived`)
 - `card update-values` altera respostas dinâmicas do formulário (`values`)
-- `card move-step-with-values` move de etapa enviando `idForm + values` (`values` pode ser `{}`)
-- `card move-step-with-values --discover-required` lista campos obrigatórios do `form_id` antes de montar payload
-- `card move-step` é alias deprecated (compatibilidade)
-
-Observação sobre `card get`:
-
-- `summary.fieldValues` retorna mapa flat `{ "<field_id>": <valor> }` para evitar parsing manual de `form_answers`.
-- `summary.fields` é alias de `summary.fieldValues` para playbooks legados.
-- Use `--field-ids` para retornar apenas os campos de interesse no summary.
-- Com `--field-ids`, fields não encontrados retornam `null` no mapa.
-- Use `--summary-only` para retornar somente o summary e eliminar parsing de `raw`.
-- `summary` também inclui aliases em snake_case para compatibilidade (`id_card`, `flow_id`, `step_id`).
+- `card move-step` move de etapa sem enviar respostas
+- `card move-step-with-values` move de etapa enviando `idForm + values`
 
 ## Operações de comentário e anexo
 
@@ -302,7 +286,6 @@ pnpm cli register update --payload ./payload.json --register-id 55 --validate-fi
 - `--output json|pretty`
 - `--dry-run` em mutações: mostra payload e não executa chamada de escrita
 - código de saída não-zero em falha
-- Para JSON limpo em stdout (sem header do pnpm), use `pnpm --silent cli --output json ...`
 
 ## Tratamento de erro
 
@@ -320,8 +303,6 @@ A normalização inclui:
 - método
 - mensagem amigável
 - detalhes seguros (sem token/apikey)
-- em erros de validação de `values`, cada issue pode incluir `fieldTitle` quando disponível
-- para campos de seleção (`RADIO_BOX_FIELD`/`COMBO_BOX_FIELD`), a validação checa valores reais das opções e retorna `INVALID_OPTION` quando necessário
 
 ## Testes
 
@@ -352,7 +333,6 @@ Veja instruções operacionais em [AGENTS.md](./AGENTS.md) e guias em:
 - [docs/cange-api-notes.md](./docs/cange-api-notes.md)
 - [docs/field-types.md](./docs/field-types.md)
 - [docs/agent-mcp-kb.md](./docs/agent-mcp-kb.md)
-- [docs/agent-changelog.md](./docs/agent-changelog.md)
 - [docs/playbooks/README.md](./docs/playbooks/README.md)
 - [docs/playbooks/00-agent-operational-suggestions.md](./docs/playbooks/00-agent-operational-suggestions.md)
 
@@ -368,6 +348,15 @@ pnpm install
 cp .env.example .env
 pnpm build
 ```
+
+Se o `pnpm install` falhar com `[ERR_PNPM_IGNORED_BUILDS]`:
+
+```bash
+pnpm approve-builds
+pnpm install
+```
+
+Aprove apenas `esbuild` e mantenha `pnpm-lock.yaml` intacto.
 
 Depois disso, teste:
 
@@ -397,6 +386,8 @@ Siga exatamente esta sequência:
 
 1) Leia os guias: AGENTS.md, docs/agent-mcp-kb.md e docs/playbooks/README.md.
 2) Instale dependências com pnpm.
+   - se aparecer ERR_PNPM_IGNORED_BUILDS, rode `pnpm approve-builds`, aprove `esbuild` e rode `pnpm install` novamente.
+   - nunca delete `pnpm-lock.yaml` como workaround.
 3) Verifique se existe .env:
    - se não existir, crie a partir de .env.example
    - não exponha secrets no output
@@ -410,10 +401,10 @@ Siga exatamente esta sequência:
 6) Faça smoke test da CLI:
    - pnpm cli --help
    - pnpm cli auth login
-   - pnpm --silent cli --output json my-flows
-   - pnpm --silent cli --output json my-registers
-   - pnpm --silent cli --output json my-tasks
-   - pnpm --silent cli --output json notifications --is-archived N
+   - pnpm cli --output json my-flows
+   - pnpm cli --output json my-registers
+   - pnpm cli --output json my-tasks
+   - pnpm cli --output json notifications --is-archived N
 7) Se autenticação falhar, explique objetivamente o que falta no .env.
 8) Entregue um relatório final com:
    - status de cada etapa (ok/falhou)
@@ -439,6 +430,8 @@ Checklist obrigatório:
 1) Leia CLAUDE.md, docs/agent-mcp-kb.md e docs/playbooks/README.md.
 2) Execute:
    - pnpm install
+   - se aparecer ERR_PNPM_IGNORED_BUILDS: pnpm approve-builds, aprovar esbuild e rodar pnpm install de novo
+   - nunca remover pnpm-lock.yaml
    - se .env não existir: cp .env.example .env
 3) Verifique configuração mínima no .env:
    - base/origin preenchidos
@@ -449,8 +442,8 @@ Checklist obrigatório:
 5) Smoke test:
    - pnpm cli --help
    - pnpm cli auth login
-   - pnpm --silent cli --output json my-tasks
-   - pnpm --silent cli --output json notifications --is-archived N
+   - pnpm cli --output json my-tasks
+   - pnpm cli --output json notifications --is-archived N
 6) Mostre um resumo final com:
    - o que foi configurado
    - quais testes passaram

@@ -1,0 +1,10 @@
+packages:
+  - .
+
+# pnpm v11 build script policy
+allowBuilds:
+  esbuild: true
+
+# pnpm v10 compatibility for approve-builds output
+onlyBuiltDependencies:
+  - esbuild

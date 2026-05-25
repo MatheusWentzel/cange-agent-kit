@@ -1,5 +1,11 @@
 # Uso por agentes
 
+## Setup seguro (pnpm)
+
+1. Rodar `pnpm install`.
+2. Se ocorrer `ERR_PNPM_IGNORED_BUILDS`, rodar `pnpm approve-builds`, aprovar `esbuild` e rodar `pnpm install` novamente.
+3. Nunca remover `pnpm-lock.yaml` para tentar corrigir instalação.
+
 ## Fluxo seguro obrigatório para mutações com `values`
 
 1. Descobrir contexto (`my-flows`, `my-registers`, `my-tasks`, `notifications`).
@@ -17,10 +23,7 @@
 
 - `cange template flow-create --flow-id <id>`
 - `cange template register-create --register-id <id>`
-- `cange template step-move --flow-id <id> --from-step-id <id> --to-step-id <id>`
-- `cange step-form --flow-id <id> --step-id <id>`
 - `cange card create --payload ... --validate-fields --dry-run`
-- `cange card move-step-with-values --discover-required --flow-id <id> --form-id <id>`
 - `cange card move-step-with-values --payload ... --validate-fields --dry-run`
 - `cange notification read --payload ... --dry-run`
 - `cange register create --payload ... --validate-fields --dry-run`
@@ -30,7 +33,6 @@
 - `--payload` recebe caminho para arquivo `.json` (não aceitar JSON inline).
 - Inputs de mutação fora de `values` usam camelCase (`flowId`, `cardId`, `registerId`, `formAnswerId`).
 - Dentro de `values`, as chaves continuam sendo `field.name`.
-- Para automação de saída JSON, preferir `pnpm --silent cli --output json ...`.
 
 ## Regras de ouro
 
@@ -39,12 +41,6 @@
 - Sempre preencher obrigatórios (`required = "1"`) na criação.
 - Em movimentação de etapa com `values`, usar `idForm = flow_step.form_id` da etapa atual.
 - Não usar `flow.form_init_id` para mover etapa (ele é do `card create`).
-- Em movimentação, usar sempre `card move-step-with-values` e enviar `values: {}` quando não houver campos para preencher.
-- Para reduzir tentativa/erro em movimentação, usar `--discover-required` antes de montar `values`.
-- Para reduzir tentativa/erro em movimentação, usar `step-form` para descobrir requireds da etapa.
-- Para reduzir parsing manual de card, usar `card get --field-ids <id1,id2> --summary-only` e ler `summary.fields`.
-- Para contexto de tarefas, filtrar `my-tasks` por `--flow-id` e `--step-id`.
-- Para compatibilidade com playbooks antigos, `summaries` também expõe `id_card`, `flow_id` e `step_id`.
 - Não usar curl direto quando houver comando da CLI.
 
 ## Playbooks operacionais
