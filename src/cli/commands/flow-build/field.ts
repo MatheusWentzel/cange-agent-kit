@@ -1,6 +1,8 @@
 import type { Command } from "commander";
 
 import { CangeCliUsageError, CangeValidationError } from "../../../client/errors.js";
+import { filterFieldsByForm } from "../../../contracts/fields.js";
+import { summarizeFields } from "../../../contracts/raw-adapters.js";
 import {
   createFieldPayloadSchema,
   patchFieldPayloadSchema
@@ -26,10 +28,22 @@ interface FieldUpdateOptions {
   dryRun?: boolean;
 }
 
+interface FieldDeleteOptions {
+  idFlow?: string;
+  idStep?: string;
+  idField?: string;
+  dryRun?: boolean;
+}
+
+interface FieldListOptions {
+  idFlow?: string;
+  formId?: string;
+}
+
 export function registerFlowBuildFieldCommands(flowBuildCommand: Command): void {
   const command = flowBuildCommand
     .command("field")
-    .description("Operações de criação/atualização de campos (build)");
+    .description("Operações de criação/atualização/remoção/listagem de campos (build)");
 
   command
     .command("create")
@@ -143,6 +157,66 @@ export function registerFlowBuildFieldCommands(flowBuildCommand: Command): void 
           idField: options.idField,
           payload: parsed.data
         });
+      })
+    );
+
+  command
+    .command("delete")
+    .description(
+      "MUTAÇÃO: remove um campo do flow. Use --id-step para restringir o escopo à etapa. DELETE /flows/:id_flow/(steps/:id_step/)fields/:id_field"
+    )
+    .requiredOption("--id-flow <id>", "ID do flow")
+    .requiredOption("--id-field <id>", "ID do campo a remover")
+    .option("--id-step <id>", "ID da etapa (restringe a remoção ao form da etapa)")
+    .option("--dry-run", "Valida parâmetros localmente sem chamar API")
+    .action(
+      createCommandAction(async ({ kit }, options: FieldDeleteOptions) => {
+        if (!options.idFlow || !options.idField) {
+          throw new CangeCliUsageError("Informe --id-flow e --id-field.");
+        }
+        if (options.dryRun) {
+          return createDryRunResult({
+            idFlow: options.idFlow,
+            idStep: options.idStep,
+            idField: options.idField,
+            route: options.idStep ? "by-step" : "by-flow"
+          });
+        }
+        if (options.idStep) {
+          return kit.contracts.deleteFlowBuildFieldByStep({
+            idFlow: options.idFlow,
+            idStep: options.idStep,
+            idField: options.idField
+          });
+        }
+        return kit.contracts.deleteFlowBuildFieldByFlow({
+          idFlow: options.idFlow,
+          idField: options.idField
+        });
+      })
+    );
+
+  command
+    .command("list")
+    .description(
+      "Lista os campos do flow (sumarizados por form) — útil para detectar duplicata/fantasma pós-lote. Reusa GET /field/by-flow."
+    )
+    .requiredOption("--id-flow <id>", "ID do flow")
+    .option("--form-id <id>", "Filtra campos por form_id")
+    .action(
+      createCommandAction(async ({ kit }, options: FieldListOptions) => {
+        if (!options.idFlow) {
+          throw new CangeCliUsageError("Informe --id-flow.");
+        }
+        const result = await kit.contracts.getFieldsByFlow({ flowId: options.idFlow });
+        const filteredFields = filterFieldsByForm(result.fields, options.formId);
+        const filteredSummary = summarizeFields(filteredFields);
+        return {
+          raw: result.raw,
+          summaries: filteredSummary.items,
+          total: filteredSummary.total,
+          groupedByFormId: filteredSummary.groupedByFormId
+        };
       })
     );
 }

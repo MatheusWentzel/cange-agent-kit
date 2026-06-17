@@ -181,15 +181,26 @@ export const reorderStepPayloadSchema = z
 
 export type ReorderStepPayload = z.infer<typeof reorderStepPayloadSchema>;
 
+/**
+ * `order` é aceito como número OU string numérica. O servidor (rota
+ * `/flow/v2/build`) espera `order` como string; o contrato normaliza para string
+ * na borda (ver `serializeFieldOptions` em `contracts/flowV2Build.ts`), então o
+ * chamador pode passar `0` ou `"0"` indiferentemente. Strings não-numéricas são
+ * rejeitadas aqui — não afrouxamos para qualquer string.
+ */
+const orderSchema = z.union([z.string().regex(/^\d+$/), z.number().int().nonnegative()]);
+
 const fieldOptionSchema = z
   .object({
     value: z.union([z.string(), z.number()]),
     label: z.string(),
     hide: z.union([z.string(), z.boolean()]).optional(),
-    order: z.number().int().nonnegative().optional(),
+    order: orderSchema.optional(),
     id_field_option: z.number().int().positive().optional()
   })
   .strict();
+
+export type FieldOptionPayload = z.infer<typeof fieldOptionSchema>;
 
 const fieldValidationSchema = z
   .object({

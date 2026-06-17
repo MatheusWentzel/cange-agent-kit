@@ -200,7 +200,7 @@ describe("flow-build CLI registration", () => {
 
     const field = flowBuild?.commands.find((command) => command.name() === "field");
     expect(field?.commands.map((command) => command.name())).toEqual(
-      expect.arrayContaining(["create", "update"])
+      expect.arrayContaining(["create", "update", "delete", "list"])
     );
 
     const rel = flowBuild?.commands.find((command) => command.name() === "step-relationship");
@@ -259,6 +259,8 @@ describe("flow-build contracts URL paths", () => {
     await contracts.patchFieldByFlow({ idFlow: 11, idField: 44, payload: { title: "x" } });
     await contracts.patchFieldByStep({ idFlow: 11, idStep: 22, idField: 44, payload: { title: "x" } });
     await contracts.patchFieldByForm({ idFlow: 11, formId: 33, idField: 44, payload: { title: "x" } });
+    await contracts.deleteFieldByFlow({ idFlow: 11, idField: 44 });
+    await contracts.deleteFieldByStep({ idFlow: 11, idStep: 22, idField: 44 });
     await contracts.listStepRelationshipsByFlow({ idFlow: 11 });
     await contracts.listStepRelationshipsFromStep({ idFlow: 11, idStep: 22 });
     await contracts.upsertStepRelationship({
@@ -282,6 +284,8 @@ describe("flow-build contracts URL paths", () => {
       "PATCH /flow/v2/build/flows/11/fields/44",
       "PATCH /flow/v2/build/flows/11/steps/22/fields/44",
       "PATCH /flow/v2/build/flows/11/forms/33/fields/44",
+      "DELETE /flow/v2/build/flows/11/fields/44",
+      "DELETE /flow/v2/build/flows/11/steps/22/fields/44",
       "GET /flow/v2/build/flows/11/step-relationships/by-flow",
       "GET /flow/v2/build/flows/11/step-relationships",
       "POST /flow/v2/build/flows/11/step-relationships"
@@ -297,6 +301,136 @@ describe("flow-build contracts URL paths", () => {
 
     const reorderCall = calls.find((c) => c.path === "/flow/v2/build/flows/11/steps/reorder");
     expect(reorderCall?.body).toEqual({ id_step: 22, upDown: "up" });
+  });
+});
+
+describe("flow-build CR-1 options[].order serialization", () => {
+  function mockClient(): {
+    client: CangeClient;
+    calls: Array<{ method: string; path: string; body?: unknown }>;
+  } {
+    const calls: Array<{ method: string; path: string; body?: unknown }> = [];
+    const record = (method: string) => async (path: string, options?: { body?: unknown }) => {
+      calls.push({ method, path, body: options?.body });
+      return {};
+    };
+    const client = {
+      get: record("GET"),
+      post: record("POST"),
+      put: record("PUT"),
+      patch: record("PATCH"),
+      delete: record("DELETE"),
+      request: record("REQUEST"),
+      setAccessToken: () => {},
+      clearAccessToken: () => {},
+      getAccessToken: () => undefined
+    } as unknown as CangeClient;
+    return { client, calls };
+  }
+
+  const comboPayload = (order: number | string) => ({
+    name: "status",
+    type: "COMBO_BOX_FIELD" as const,
+    title: "Status",
+    index: 0,
+    options: [{ value: "1", label: "Aberto", order }]
+  });
+
+  it("accepts options[].order as numeric value", () => {
+    expect(createFieldPayloadSchema.safeParse(comboPayload(0)).success).toBe(true);
+  });
+
+  it("accepts options[].order as numeric string", () => {
+    expect(createFieldPayloadSchema.safeParse(comboPayload("0")).success).toBe(true);
+  });
+
+  it("rejects options[].order as non-numeric string", () => {
+    const parsed = createFieldPayloadSchema.safeParse({
+      name: "status",
+      type: "COMBO_BOX_FIELD",
+      title: "Status",
+      index: 0,
+      options: [{ value: "1", label: "Aberto", order: "first" }]
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("serializes numeric order to string in the body sent to the server (createFieldByStep)", async () => {
+    const { client, calls } = mockClient();
+    const contracts = createFlowV2BuildContracts(client);
+
+    await contracts.createFieldByStep({
+      idFlow: 11,
+      idStep: 22,
+      payload: comboPayload(0)
+    });
+
+    const call = calls.find((c) => c.method === "POST");
+    const body = call?.body as { options?: Array<{ order?: unknown }> };
+    expect(body?.options?.[0]?.order).toBe("0");
+    expect(typeof body?.options?.[0]?.order).toBe("string");
+  });
+
+  it("serializes numeric order to string in the body sent to the server (createFieldByForm)", async () => {
+    const { client, calls } = mockClient();
+    const contracts = createFlowV2BuildContracts(client);
+
+    await contracts.createFieldByForm({
+      idFlow: 11,
+      formId: 33,
+      payload: {
+        name: "prioridade",
+        type: "RADIO_BOX_FIELD",
+        title: "Prioridade",
+        index: 1,
+        options: [
+          { value: "1", label: "Alta", order: 0 },
+          { value: "2", label: "Baixa", order: 1 }
+        ]
+      }
+    });
+
+    const call = calls.find((c) => c.method === "POST");
+    const body = call?.body as { options?: Array<{ order?: unknown }> };
+    expect(body?.options?.map((o) => o.order)).toEqual(["0", "1"]);
+  });
+
+  it("serializes numeric order to string on patch (update of combo options)", async () => {
+    const { client, calls } = mockClient();
+    const contracts = createFlowV2BuildContracts(client);
+
+    await contracts.patchFieldByFlow({
+      idFlow: 11,
+      idField: 44,
+      payload: {
+        options: [{ value: "1", label: "Aberto", order: 2 }]
+      }
+    });
+
+    const call = calls.find((c) => c.method === "PATCH");
+    const body = call?.body as { options?: Array<{ order?: unknown }> };
+    expect(body?.options?.[0]?.order).toBe("2");
+  });
+
+  it("keeps options without order untouched (server fills by position)", async () => {
+    const { client, calls } = mockClient();
+    const contracts = createFlowV2BuildContracts(client);
+
+    await contracts.createFieldByStep({
+      idFlow: 11,
+      idStep: 22,
+      payload: {
+        name: "status",
+        type: "COMBO_BOX_FIELD",
+        title: "Status",
+        index: 0,
+        options: [{ value: "1", label: "Aberto" }]
+      }
+    });
+
+    const call = calls.find((c) => c.method === "POST");
+    const body = call?.body as { options?: Array<{ order?: unknown }> };
+    expect(body?.options?.[0]).not.toHaveProperty("order");
   });
 });
 
