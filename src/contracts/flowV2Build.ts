@@ -4,6 +4,7 @@ import {
   type CreateFieldPayload,
   type CreateFlowPayload,
   type CreateStepPayload,
+  type FieldOptionPayload,
   type PatchFieldPayload,
   type ReorderStepPayload,
   type StepRelationshipBodyPayload,
@@ -36,6 +37,29 @@ function flowPath(idFlow: number | string, suffix = ""): string {
 
 function failValidation(message: string, details: unknown): never {
   throw new CangeValidationError(message, { details });
+}
+
+/**
+ * CR-1 — serializa `options[].order` para string na borda do contrato.
+ *
+ * O servidor da Flow V2 Build API espera `order` como string; o schema local
+ * aceita number OU string numérica (ver `orderSchema` em `schemas/flowV2Build.ts`)
+ * para não vazar essa exigência ao chamador. Aqui, imediatamente antes do
+ * `client.post`/`client.patch`, convertemos cada `order` presente para
+ * `String(order)`. Options sem `order` ficam intactas (o servidor preenche pela
+ * posição). Centralizar num único helper evita divergência entre os 5 pontos
+ * que enviam options (2 create + 3 patch).
+ */
+function serializeFieldOptions<T extends { options?: FieldOptionPayload[] }>(payload: T): T {
+  if (!payload.options) {
+    return payload;
+  }
+  return {
+    ...payload,
+    options: payload.options.map((option) =>
+      option.order === undefined ? option : { ...option, order: String(option.order) }
+    )
+  };
 }
 
 export interface FlowV2BuildContracts {
@@ -83,6 +107,15 @@ export interface FlowV2BuildContracts {
     formId: number | string;
     idField: number | string;
     payload: PatchFieldPayload;
+  }) => Promise<{ raw: unknown }>;
+  deleteFieldByFlow: (input: {
+    idFlow: number | string;
+    idField: number | string;
+  }) => Promise<{ raw: unknown }>;
+  deleteFieldByStep: (input: {
+    idFlow: number | string;
+    idStep: number | string;
+    idField: number | string;
   }) => Promise<{ raw: unknown }>;
   listStepRelationshipsByFlow: (input: { idFlow: number | string }) => Promise<{ raw: unknown }>;
   listStepRelationshipsFromStep: (input: {
@@ -213,7 +246,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
       }
       const raw = await client.post<unknown>(
         flowPath(params.data.idFlow, `/steps/${toNumber(params.data.idStep)}/fields`),
-        { body: body.data }
+        { body: serializeFieldOptions(body.data) }
       );
       return { raw };
     },
@@ -232,7 +265,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
       }
       const raw = await client.post<unknown>(
         flowPath(params.data.idFlow, `/forms/${toNumber(params.data.formId)}/fields`),
-        { body: body.data }
+        { body: serializeFieldOptions(body.data) }
       );
       return { raw };
     },
@@ -251,7 +284,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
       }
       const raw = await client.patch<unknown>(
         flowPath(params.data.idFlow, `/fields/${toNumber(params.data.idField)}`),
-        { body: body.data }
+        { body: serializeFieldOptions(body.data) }
       );
       return { raw };
     },
@@ -274,7 +307,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
           params.data.idFlow,
           `/steps/${toNumber(params.data.idStep)}/fields/${toNumber(params.data.idField)}`
         ),
-        { body: body.data }
+        { body: serializeFieldOptions(body.data) }
       );
       return { raw };
     },
@@ -297,7 +330,39 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
           params.data.idFlow,
           `/forms/${toNumber(params.data.formId)}/fields/${toNumber(params.data.idField)}`
         ),
-        { body: body.data }
+        { body: serializeFieldOptions(body.data) }
+      );
+      return { raw };
+    },
+
+    async deleteFieldByFlow(input) {
+      const params = idFlowFieldParamSchema.safeParse({
+        idFlow: input.idFlow,
+        idField: input.idField
+      });
+      if (!params.success) {
+        failValidation("Parâmetros inválidos para deleteFieldByFlow.", params.error.format());
+      }
+      const raw = await client.delete<unknown>(
+        flowPath(params.data.idFlow, `/fields/${toNumber(params.data.idField)}`)
+      );
+      return { raw };
+    },
+
+    async deleteFieldByStep(input) {
+      const params = idFlowStepFieldParamSchema.safeParse({
+        idFlow: input.idFlow,
+        idStep: input.idStep,
+        idField: input.idField
+      });
+      if (!params.success) {
+        failValidation("Parâmetros inválidos para deleteFieldByStep.", params.error.format());
+      }
+      const raw = await client.delete<unknown>(
+        flowPath(
+          params.data.idFlow,
+          `/steps/${toNumber(params.data.idStep)}/fields/${toNumber(params.data.idField)}`
+        )
       );
       return { raw };
     },

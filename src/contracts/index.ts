@@ -84,6 +84,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     patchFlowBuildFieldByFlow: flowV2Build.patchFieldByFlow,
     patchFlowBuildFieldByStep: flowV2Build.patchFieldByStep,
     patchFlowBuildFieldByForm: flowV2Build.patchFieldByForm,
+    deleteFlowBuildFieldByFlow: flowV2Build.deleteFieldByFlow,
+    deleteFlowBuildFieldByStep: flowV2Build.deleteFieldByStep,
     upsertFlowBuildStepRelationship: flowV2Build.upsertStepRelationship
   };
 
