@@ -44,6 +44,38 @@ export const addCardLabelPayloadSchema = z.object({
   flowTagId: z.number().int().positive()
 });
 
+// Leitura confiável da relação pai-filho (COMBO_BOX_FLOW_FIELD / "Meus Fluxos").
+// `flowId` é o flow ALVO do campo de vínculo; `cardId` é o card cujo id está
+// armazenado no `form_answer_field.value`. Retorna os cards que o referenciam
+// (direção filho -> pai). Os read-models (card get / FlowQuery V2) NÃO expõem
+// esse vínculo; esta é a leitura correta.
+export const cardRelationshipParamsSchema = z.object({
+  flowId: idLikeSchema,
+  cardId: idLikeSchema,
+  withCards: z.boolean().optional()
+});
+
+// Cria um card filho em outro fluxo e o vincula ao campo "Meus Fluxos" do pai.
+// O campo é MULTI-VALOR e o update é REPLACE — por isso `parent.existingChildIds`
+// deve trazer os filhos atuais (read-modify-write); o comando envia
+// [...existingChildIds, novoId] de uma vez. Omitir existingChildIds = só o novo
+// (caso "primeiro marco"); para preservar vínculos existentes, é OBRIGATÓRIO passá-los.
+export const addChildCardPayloadSchema = z.object({
+  child: z.object({
+    flowId: z.number().int().positive(),
+    idForm: z.number().int().positive(),
+    origin: nonEmptyStringSchema,
+    values: valuesSchema
+  }),
+  parent: z.object({
+    flowId: z.number().int().positive(),
+    cardId: z.number().int().positive(),
+    idForm: z.number().int().positive(),
+    linkField: nonEmptyStringSchema,
+    existingChildIds: z.array(z.number().int().positive()).optional()
+  })
+});
+
 const moveCardStepBasePayloadSchema = z.object({
   flowId: z.number().int().positive(),
   cardId: z.number().int().positive(),

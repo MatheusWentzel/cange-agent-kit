@@ -2,6 +2,8 @@ import { CangeValidationError } from "../client/errors.js";
 import type { CangeClient } from "../client/http.js";
 import {
   addCardLabelPayloadSchema,
+  addChildCardPayloadSchema,
+  cardRelationshipParamsSchema,
   createCardPayloadSchema,
   getCardParamsSchema,
   listCardsByFlowParamsSchema,
@@ -75,6 +77,27 @@ export interface CardsContracts {
     cardId: number;
     flowTagId: number;
   }) => Promise<{ raw: unknown }>;
+  getCardRelationship: (input: {
+    flowId: number | string;
+    cardId: number | string;
+    withCards?: boolean;
+  }) => Promise<{ raw: unknown; cards: CardSummary[] }>;
+  addChildCard: (input: {
+    child: { flowId: number; idForm: number; origin: string; values: Record<string, unknown> };
+    parent: {
+      flowId: number;
+      cardId: number;
+      idForm: number;
+      linkField: string;
+      existingChildIds?: number[];
+    };
+  }) => Promise<{
+    raw: unknown;
+    childCardId: number | undefined;
+    linkedChildIds: number[];
+    childRaw: unknown;
+    linkRaw: unknown;
+  }>;
 }
 
 export function createCardsContracts(client: CangeClient): CardsContracts {
@@ -267,6 +290,95 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         }
       });
       return { raw };
+    },
+
+    async getCardRelationship(input) {
+      const parsed = cardRelationshipParamsSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new CangeValidationError("Parâmetros inválidos para getCardRelationship.", {
+          details: parsed.error.format()
+        });
+      }
+
+      const raw = await client.get<unknown>("/card/relationship", {
+        query: {
+          flow_id: toNumber(parsed.data.flowId),
+          id_card: toNumber(parsed.data.cardId),
+          withCards: parsed.data.withCards === false ? "N" : "S"
+        }
+      });
+
+      return {
+        raw,
+        cards: extractArray(raw).map((item) => summarizeCard(item))
+      };
+    },
+
+    async addChildCard(input) {
+      const parsed = addChildCardPayloadSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new CangeValidationError("Payload inválido para addChildCard.", {
+          details: parsed.error.format()
+        });
+      }
+      const { child, parent } = parsed.data;
+
+      // 1) cria o card filho no fluxo alvo
+      const childRaw = await client.post<unknown>("/form/new-answer", {
+        body: {
+          id_form: child.idForm,
+          origin: child.origin,
+          values: child.values,
+          flow_id: child.flowId
+        }
+      });
+      const childCardId = extractChildCardId(childRaw);
+      if (childCardId === undefined) {
+        throw new CangeValidationError(
+          "Card filho criado mas não foi possível extrair o id_card da resposta.",
+          { details: { childRaw } }
+        );
+      }
+
+      // 2) read-modify-write: campo de fluxo é MULTI-VALOR e REPLACE.
+      // Envia a lista completa (existentes + novo, sem duplicar).
+      const linkedChildIds = Array.from(
+        new Set([...(parent.existingChildIds ?? []), childCardId])
+      );
+
+      const linkRaw = await client.put<unknown>("/form/answer", {
+        body: {
+          id_form: parent.idForm,
+          flow_id: parent.flowId,
+          card_id: parent.cardId,
+          values: { [parent.linkField]: linkedChildIds }
+        }
+      });
+
+      return {
+        raw: { childCardId, linkedChildIds },
+        childCardId,
+        linkedChildIds,
+        childRaw,
+        linkRaw
+      };
     }
   };
+}
+
+function extractChildCardId(raw: unknown): number | undefined {
+  const root = (raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {}) as Record<
+    string,
+    unknown
+  >;
+  const inner = (root.raw && typeof root.raw === "object" ? (root.raw as Record<string, unknown>) : root) as Record<
+    string,
+    unknown
+  >;
+  const card = (inner.card && typeof inner.card === "object" ? (inner.card as Record<string, unknown>) : undefined) as
+    | Record<string, unknown>
+    | undefined;
+  const candidate = inner.card_id ?? inner.id_card ?? card?.id_card ?? card?.card_id;
+  const n = Number(candidate);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
 }

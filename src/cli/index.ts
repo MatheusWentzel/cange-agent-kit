@@ -6,8 +6,10 @@ import { createCliPrinter } from "../utils/output.js";
 import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-card.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
 import { registerAuthCommand } from "./commands/auth.js";
+import { registerCardAddChildCommand } from "./commands/card-add-child.js";
 import { registerCardAddLabelCommand } from "./commands/card-add-label.js";
 import { registerCardCommentCreateCommand } from "./commands/card-comment-create.js";
+import { registerCardRelationshipCommand } from "./commands/card-relationship.js";
 import { registerCardCommentListCommand } from "./commands/card-comment-list.js";
 import { registerCardCreateCommand } from "./commands/card-create.js";
 import { registerCardGetCommand } from "./commands/card-get.js";
@@ -85,6 +87,8 @@ export function createProgram(): Command {
   registerCardMoveStepCommand(cardCommand);
   registerCardMoveStepWithValuesCommand(cardCommand);
   registerCardAddLabelCommand(cardCommand);
+  registerCardRelationshipCommand(cardCommand);
+  registerCardAddChildCommand(cardCommand);
 
   const commentCommand = program.command("comment").description("Operações de comentário");
   registerCardCommentListCommand(commentCommand);

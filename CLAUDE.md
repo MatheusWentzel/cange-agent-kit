@@ -41,3 +41,4 @@ Use este repositório como camada segura para operar o Cange via CLI.
 - executar e concluir/mover card: `docs/playbooks/04-execute-and-move-card.md`
 - criar novo card: `docs/playbooks/05-create-card.md`
 - construir fluxo (Flow V2 Build): `docs/playbooks/06-build-flow.md`
+- cards pai-filho ("Meus Fluxos" / `card add-child` + `card relationship`): `docs/playbooks/07-parent-child-cards.md`
