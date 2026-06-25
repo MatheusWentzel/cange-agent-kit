@@ -1,3 +1,5 @@
+import { createHash, randomBytes } from "node:crypto";
+
 import { CangeValidationError } from "../client/errors.js";
 import type { CangeClient } from "../client/http.js";
 import {
@@ -60,6 +62,22 @@ function serializeFieldOptions<T extends { options?: FieldOptionPayload[] }>(pay
       option.order === undefined ? option : { ...option, order: String(option.order) }
     )
   };
+}
+
+const HASH_NAME_RE = /^[0-9a-f]{40}$/;
+
+// O front do Cange espera field.name como hash de 40 hex (sha1) — campos nativos
+// são gerados assim. Nome legível (ex: "status_geral") quebra o editor de
+// formulário do front. Se o caller passar um name fora desse formato, geramos um
+// hash único aqui; o caller deve ler o name resultante na resposta do create.
+function ensureHashName<T extends { name?: string }>(payload: T): T {
+  // Sem name (ex: patch que não altera o name) ou já é hash → não mexe.
+  // Só normaliza quando vem um name fora do formato (ex: create com nome legível).
+  if (!payload.name || HASH_NAME_RE.test(payload.name)) {
+    return payload;
+  }
+  const seed = `${payload.name}:${Date.now()}:${randomBytes(8).toString("hex")}`;
+  return { ...payload, name: createHash("sha1").update(seed).digest("hex") };
 }
 
 export interface FlowV2BuildContracts {
@@ -246,7 +264,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
       }
       const raw = await client.post<unknown>(
         flowPath(params.data.idFlow, `/steps/${toNumber(params.data.idStep)}/fields`),
-        { body: serializeFieldOptions(body.data) }
+        { body: serializeFieldOptions(ensureHashName(body.data)) }
       );
       return { raw };
     },
@@ -265,7 +283,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
       }
       const raw = await client.post<unknown>(
         flowPath(params.data.idFlow, `/forms/${toNumber(params.data.formId)}/fields`),
-        { body: serializeFieldOptions(body.data) }
+        { body: serializeFieldOptions(ensureHashName(body.data)) }
       );
       return { raw };
     },
@@ -284,7 +302,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
       }
       const raw = await client.patch<unknown>(
         flowPath(params.data.idFlow, `/fields/${toNumber(params.data.idField)}`),
-        { body: serializeFieldOptions(body.data) }
+        { body: serializeFieldOptions(ensureHashName(body.data)) }
       );
       return { raw };
     },
@@ -307,7 +325,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
           params.data.idFlow,
           `/steps/${toNumber(params.data.idStep)}/fields/${toNumber(params.data.idField)}`
         ),
-        { body: serializeFieldOptions(body.data) }
+        { body: serializeFieldOptions(ensureHashName(body.data)) }
       );
       return { raw };
     },
@@ -330,7 +348,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
           params.data.idFlow,
           `/forms/${toNumber(params.data.formId)}/fields/${toNumber(params.data.idField)}`
         ),
-        { body: serializeFieldOptions(body.data) }
+        { body: serializeFieldOptions(ensureHashName(body.data)) }
       );
       return { raw };
     },
