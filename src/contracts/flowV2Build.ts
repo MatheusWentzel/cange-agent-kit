@@ -66,18 +66,64 @@ function serializeFieldOptions<T extends { options?: FieldOptionPayload[] }>(pay
 
 const HASH_NAME_RE = /^[0-9a-f]{40}$/;
 
+function genHashName(base = "field"): string {
+  // 128 bits de entropia (randomBytes 16) + timestamp → sha1. Força-bruta de
+  // colisão é inviável; ainda assim a checagem de unicidade abaixo garante.
+  return createHash("sha1")
+    .update(`${base}:${Date.now()}:${randomBytes(16).toString("hex")}`)
+    .digest("hex");
+}
+
 // O front do Cange espera field.name como hash de 40 hex (sha1) — campos nativos
 // são gerados assim. Nome legível (ex: "status_geral") quebra o editor de
-// formulário do front. Se o caller passar um name fora desse formato, geramos um
-// hash único aqui; o caller deve ler o name resultante na resposta do create.
+// formulário do front. Usado nos PATCH: sem name (patch que não altera o name) ou
+// já é hash → não mexe; só normaliza quando vem um name fora do formato.
 function ensureHashName<T extends { name?: string }>(payload: T): T {
-  // Sem name (ex: patch que não altera o name) ou já é hash → não mexe.
-  // Só normaliza quando vem um name fora do formato (ex: create com nome legível).
   if (!payload.name || HASH_NAME_RE.test(payload.name)) {
     return payload;
   }
-  const seed = `${payload.name}:${Date.now()}:${randomBytes(8).toString("hex")}`;
-  return { ...payload, name: createHash("sha1").update(seed).digest("hex") };
+  return { ...payload, name: genHashName(payload.name) };
+}
+
+// Usado nos CREATE: garante que o name seja um hash ÚNICO dentro do flow. Names
+// duplicados quebram a inserção de dados no front. Busca os names existentes e
+// regenera em colisão. Se a busca falhar (ex: quirk JWT do /field/by-flow), cai
+// pra entropia pura (genHashName) — o create nunca é bloqueado.
+async function ensureUniqueHashName<T extends { name?: string }>(
+  client: CangeClient,
+  idFlow: number | string,
+  payload: T
+): Promise<T> {
+  if (!payload.name) {
+    return payload;
+  }
+  const existing = new Set<string>();
+  try {
+    const raw = await client.get<unknown>("/field/by-flow", {
+      query: { flow_id: toNumber(idFlow) }
+    });
+    const arr = Array.isArray(raw)
+      ? raw
+      : ((raw as { fields?: unknown[]; raw?: unknown[] })?.fields ??
+        (raw as { raw?: unknown[] })?.raw ??
+        []);
+    for (const f of Array.isArray(arr) ? arr : []) {
+      const nm = (f as { name?: unknown })?.name;
+      if (typeof nm === "string") {
+        existing.add(nm);
+      }
+    }
+  } catch {
+    // fallback: sem checagem, confia na entropia do genHashName
+  }
+  if (HASH_NAME_RE.test(payload.name) && !existing.has(payload.name)) {
+    return payload;
+  }
+  let name = genHashName(payload.name);
+  while (existing.has(name)) {
+    name = genHashName(payload.name);
+  }
+  return { ...payload, name };
 }
 
 export interface FlowV2BuildContracts {
@@ -264,7 +310,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
       }
       const raw = await client.post<unknown>(
         flowPath(params.data.idFlow, `/steps/${toNumber(params.data.idStep)}/fields`),
-        { body: serializeFieldOptions(ensureHashName(body.data)) }
+        { body: serializeFieldOptions(await ensureUniqueHashName(client, params.data.idFlow, body.data)) }
       );
       return { raw };
     },
@@ -283,7 +329,7 @@ export function createFlowV2BuildContracts(client: CangeClient): FlowV2BuildCont
       }
       const raw = await client.post<unknown>(
         flowPath(params.data.idFlow, `/forms/${toNumber(params.data.formId)}/fields`),
-        { body: serializeFieldOptions(ensureHashName(body.data)) }
+        { body: serializeFieldOptions(await ensureUniqueHashName(client, params.data.idFlow, body.data)) }
       );
       return { raw };
     },
