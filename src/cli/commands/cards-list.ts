@@ -2,6 +2,7 @@ import type { Command } from "commander";
 
 import { CangeCliUsageError } from "../../client/errors.js";
 import type { FlowQueryEngineChoice } from "../../contracts/flowCards.js";
+import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { parseOptionalBoolean } from "../helpers.js";
 
@@ -39,7 +40,7 @@ function parseLimit(value: string | undefined): number | undefined {
 }
 
 export function registerCardsListCommand(cardCommand: Command): void {
-  cardCommand
+  const command = cardCommand
     .command("list")
     .description(
       "Lista cartões de um flow. Por padrão prioriza o motor V2 (mais rápido) com fallback V1; suporta view salva."
@@ -112,4 +113,18 @@ export function registerCardsListCommand(cardCommand: Command): void {
         };
       })
     );
+
+  annotateCommand(command, {
+    envelope:
+      "V2 (default): { engine, total, totalCount, truncated, summaries[], executionStats }. " +
+      "V1 (com --with-*): { engine, raw, summaries[], total }",
+    fieldsLocation:
+      "os cartões enriquecidos (cardId, title, currentStepId, stepName, responsibleUserId, fieldValues) vivem em `summaries[]`, NUNCA em `raw`",
+    example: "card list --flow-id 192 --limit 20",
+    outputExample: {
+      engine: "v2",
+      total: 1,
+      summaries: [{ cardId: 1096611, title: "…", currentStepId: 485, responsibleUserId: 76 }]
+    }
+  });
 }

@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 
+import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 
 interface FlowViewsListOptions {
@@ -8,7 +9,7 @@ interface FlowViewsListOptions {
 }
 
 export function registerFlowViewsListCommand(viewsCommand: Command): void {
-  viewsCommand
+  const command = viewsCommand
     .command("list")
     .description("Lista as visualizações (views salvas) de um flow, com resumo de filtros/colunas/ordenação")
     .requiredOption("--flow-id <id>", "ID do flow")
@@ -21,4 +22,11 @@ export function registerFlowViewsListCommand(viewsCommand: Command): void {
         });
       })
     );
+
+  annotateCommand(command, {
+    envelope: "{ raw, total, views[] }",
+    fieldsLocation:
+      "cada view em `views[]` traz id, name, icon, isPublic, isFavorited e `filter` (columnsCount/filtersCount/sort). Use o id em `flow query --view-id`. `raw` é pesado (schemas crus)",
+    example: "flow views list --flow-id 192"
+  });
 }

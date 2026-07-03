@@ -4,6 +4,9 @@ import { CangeCliUsageError } from "../client/errors.js";
 import { authenticateKit, createCangeAgentKit, type CangeAgentKit } from "../index.js";
 import { createCliPrinter, type CliPrinter, type OutputMode } from "../utils/output.js";
 
+import { exitCodeForError } from "./exit-codes.js";
+import { resolveOutputMode } from "./output-mode.js";
+
 export interface CliCommandContext {
   kit: CangeAgentKit;
   printer: CliPrinter;
@@ -33,25 +36,22 @@ export function createCommandAction<TArgs extends unknown[]>(
       }
     } catch (error) {
       ctx.printer.printError(error);
-      process.exitCode = 1;
+      process.exitCode = exitCodeForError(error);
     }
   };
 }
 
 async function createContext(command: Command): Promise<CliCommandContext> {
-  const globalOptions = command.optsWithGlobals<{ output?: OutputMode }>();
-  const outputModeFromFlag = globalOptions.output;
-  if (outputModeFromFlag && outputModeFromFlag !== "json" && outputModeFromFlag !== "pretty") {
-    throw new CangeCliUsageError("Valor inválido para --output. Use json ou pretty.");
-  }
+  const globalOptions = command.optsWithGlobals<{ output?: string }>();
+  // TTY-aware: sem --output/CANGE_OUTPUT, json em pipe e pretty em terminal.
+  const outputMode = resolveOutputMode(globalOptions.output);
 
   const kit = createCangeAgentKit({
     configOverrides: {
-      output: outputModeFromFlag
+      output: outputMode
     }
   });
 
-  const outputMode = outputModeFromFlag ?? kit.config.output;
   const printer = createCliPrinter(outputMode);
 
   return {

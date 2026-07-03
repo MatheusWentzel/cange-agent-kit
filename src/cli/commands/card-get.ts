@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 
+import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 
 interface CardGetOptions {
@@ -11,7 +12,7 @@ interface CardGetOptions {
 }
 
 export function registerCardGetCommand(cardCommand: Command): void {
-  cardCommand
+  const command = cardCommand
     .command("get")
     .description("Busca um cartão por flow_id + id_card")
     .requiredOption("--flow-id <id>", "ID do flow")
@@ -66,6 +67,13 @@ export function registerCardGetCommand(cardCommand: Command): void {
         };
       })
     );
+
+  annotateCommand(command, {
+    envelope: "{ raw, summary } (só { summary } com --summary-only; + requestedFieldIds com --field-ids)",
+    fieldsLocation:
+      "campos legíveis (title, stepName, fieldValues) vivem em `summary`; `raw` é a resposta crua da API",
+    example: "card get --flow-id 192 --card-id 1096611 --summary-only"
+  });
 }
 
 function parseFieldIds(value: string | undefined): string[] {

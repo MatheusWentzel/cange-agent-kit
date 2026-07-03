@@ -2,6 +2,7 @@ import type { Command } from "commander";
 
 import { CangeCliUsageError } from "../../client/errors.js";
 import type { FlowQueryEngineChoice } from "../../contracts/flowCards.js";
+import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { parseOptionalBoolean } from "../helpers.js";
 
@@ -49,7 +50,7 @@ function parsePositiveInt(value: string | undefined, flag: string): number | und
 }
 
 export function registerFlowQueryCommand(flowCommand: Command): void {
-  flowCommand
+  const command = flowCommand
     .command("query")
     .description(
       "Busca cartões de um flow priorizando o motor V2 (com fallback V1). Suporta view salva, busca e filtro por etapa."
@@ -88,4 +89,10 @@ export function registerFlowQueryCommand(flowCommand: Command): void {
         });
       })
     );
+
+  annotateCommand(command, {
+    envelope: "{ engine, requestedEngine, fellBackToV1, truncated, totalCount, total, summaries[], executionStats }",
+    fieldsLocation: "os cartões vivem em `summaries[]`; `totalCount` é o total que casa o filtro, `total` é quantos vieram",
+    example: "flow query --flow-id 192 --view-id 1 --limit 5"
+  });
 }

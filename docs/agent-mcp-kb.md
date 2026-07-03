@@ -18,6 +18,31 @@ Comando base recomendado para agentes:
 pnpm cli --output json <comando>
 ```
 
+> **Fonte de verdade em runtime:** antes de adivinhar de memória, rode
+> `pnpm cli manifest --output json`. Ele lista TODOS os comandos, flags (com
+> required/tipo), o envelope de saída e um exemplo por comando — gerado do
+> registry, sempre atualizado com o kit. Para um comando específico:
+> `pnpm cli <comando> --help` já documenta o envelope que ele retorna.
+>
+> **stdout é só o dado.** O JSON sai limpo em pipe **sem `--silent`** (o banner
+> do pnpm foi silenciado via `.npmrc`). Sem `--output`, o modo é **json quando
+> a saída é um pipe** e pretty no terminal. Logs/avisos/erros vão para **stderr**.
+
+## Exit codes (categoria do erro)
+
+Estáveis e distintos — roteie retry/correção pelo code, sem parsear a mensagem:
+
+| code | categoria |
+|---|---|
+| 0 | sucesso |
+| 1 | erro inesperado / não categorizado |
+| 2 | uso ou validação (comando/flag inválido, payload inválido) |
+| 3 | autenticação (credenciais ausentes/inválidas) |
+| 4 | rede ou API do Cange |
+
+Comando/flag desconhecido retorna a mensagem + a rota de discovery
+(`cange manifest` / `cange <grupo> --help`) e exit `2`.
+
 ## Setup resiliente (pnpm)
 
 - Rodar `pnpm install`.
@@ -36,25 +61,27 @@ pnpm cli --output json <comando>
 
 ## Contrato padrão de saída
 
-A maioria dos comandos retorna envelope previsível:
+Convenção (também exposta em `manifest.envelopeConvention` e no `--help` de cada comando):
 
 - leituras de lista:
-  - `raw`: payload original da API
-  - `summaries`: versão normalizada para decisão
+  - coleção primária enriquecida para decisão: `summaries` (ou `views`, `fields`)
   - `total`: quantidade
+  - `raw`: payload original da API (quando presente; pode ser pesado)
 - leitura unitária:
-  - `raw`
-  - `summary`
+  - `summary` (enriquecido) + `raw`
+- query V2 (`flow query`, `card list` no motor V2): `summaries[]` + `engine`, `total`, `totalCount`, `truncated`, `executionStats`
 - mutações com `--dry-run`:
-  - `dryRun: true`
-  - `executed: false`
-  - `payload`
-  - `note`
+  - `dryRun: true`, `executed: false`, `payload`, `note`
+
+> **Regra:** campos legíveis (ex.: `stepName`, `fieldValues`) vivem SEMPRE na
+> coleção enriquecida (`summaries`/`summary`), NUNCA em `raw`. Confirme o envelope
+> exato de qualquer comando em `pnpm cli <comando> --help`.
 
 ## Catálogo de tools (comandos)
 
 ### Discovery/contexto (read-only)
 
+- `pnpm cli manifest` — **fonte de verdade**: todos os comandos, flags, envelope e exemplos (gerado do registry)
 - `pnpm cli my-flows`
 - `pnpm cli my-registers`
 - `pnpm cli my-tasks`

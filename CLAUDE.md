@@ -11,8 +11,9 @@ Use este repositório como camada segura para operar o Cange via CLI.
 ## Regras obrigatórias
 
 - Usar somente `pnpm cli ...` para operações do Cange.
-- Preferir `--output json` para decisões automatizadas.
-- Para JSON puro em pipe, usar `pnpm --silent cli --output json ...`.
+- **Antes de adivinhar comando/flag, rodar `pnpm cli manifest --output json`** (fonte de verdade gerada do registry) ou `pnpm cli <comando> --help`.
+- `--output json` para decisões automatizadas. **O JSON já sai limpo em pipe sem `--silent`** (banner do pnpm silenciado via `.npmrc`); sem `--output`, o modo é json em pipe e pretty em terminal.
+- **stdout = só o dado; stderr = logs/avisos/erros.** Exit codes: 0 ok, 2 uso/validação, 3 auth, 4 rede/API, 1 inesperado.
 - `--payload` sempre deve apontar para arquivo JSON (não usar JSON inline).
 - Em payloads de mutação fora de `values`, usar chaves camelCase (`flowId`, `cardId`, `registerId` etc).
 - Sempre fazer discovery antes de mutações.

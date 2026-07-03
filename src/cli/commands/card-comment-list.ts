@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 
+import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 
 interface CommentListOptions {
@@ -9,7 +10,7 @@ interface CommentListOptions {
 }
 
 export function registerCardCommentListCommand(commentCommand: Command): void {
-  commentCommand
+  const command = commentCommand
     .command("list")
     .description("Lista comentários de um card por flow_id + card_id")
     .requiredOption("--flow-id <id>", "ID do flow")
@@ -32,4 +33,11 @@ export function registerCardCommentListCommand(commentCommand: Command): void {
         return result;
       })
     );
+
+  annotateCommand(command, {
+    envelope: "{ raw, summaries[], total } (só { summaries, total } com --summary-only)",
+    fieldsLocation:
+      "comentários legíveis (author, text, createdAt) vivem em `summaries[]`, ordenados newest-first",
+    example: "comment list --flow-id 192 --card-id 1096611 --summary-only"
+  });
 }

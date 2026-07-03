@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createProgram } from "../src/cli/index.js";
+import { EXIT_CODES } from "../src/cli/exit-codes.js";
 import { createFlowV2BuildContracts } from "../src/contracts/flowV2Build.js";
 import type { CangeClient } from "../src/client/http.js";
 import {
@@ -279,7 +280,9 @@ describe("flow-build contracts URL paths", () => {
       "POST /flow/v2/build/flows/11/steps",
       "PATCH /flow/v2/build/flows/11/steps/22",
       "POST /flow/v2/build/flows/11/steps/reorder",
+      "GET /field/by-flow",
       "POST /flow/v2/build/flows/11/steps/22/fields",
+      "GET /field/by-flow",
       "POST /flow/v2/build/flows/11/forms/33/fields",
       "PATCH /flow/v2/build/flows/11/fields/44",
       "PATCH /flow/v2/build/flows/11/steps/22/fields/44",
@@ -583,7 +586,7 @@ describe("flow-build CLI dry-run", () => {
       await unlink(payloadPath);
     }
 
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
     expect(stderr.join("")).toContain("apenas um");
     process.exitCode = prevExitCode;
   });
@@ -630,7 +633,7 @@ describe("flow-build CLI dry-run", () => {
       await unlink(payloadPath);
     }
 
-    expect(process.exitCode).toBe(1);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
     expect(stderr.join("")).toContain("--id-step ou --form-id");
     process.exitCode = prevExitCode;
   });

@@ -69,9 +69,23 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 ## Saída e previsibilidade
 
 - Use `--output json` quando o resultado for consumido por automação.
-- Para JSON puro em pipelines, prefira `pnpm --silent cli --output json ...`.
-- Use `--output pretty` para uso humano local.
-- Em falhas, tratar saída não-zero como erro operacional.
+- **Não precisa de `--silent`**: o stdout já sai limpo (banner do pnpm silenciado no `.npmrc`). Sem `--output`, o modo é json em pipe e pretty em terminal.
+- **stdout = só o dado; stderr = logs/avisos/erros.** `... 2>/dev/null | jq .` funciona em qualquer leitura.
+- Exit codes por categoria: `0` ok · `2` uso/validação · `3` auth · `4` rede/API · `1` inesperado.
+
+## Discovery antes de adivinhar
+
+- **`pnpm cli manifest --output json`** é a fonte de verdade: todos os comandos, flags (required/tipo), envelope de saída e 1 exemplo por comando — gerado do registry, nunca desatualiza.
+- Para um comando: `pnpm cli <comando> --help` já traz o envelope que ele retorna e onde vivem os campos-chave.
+- Comando/flag inválido responde com a mensagem + a rota de discovery e exit `2` — leia e corrija, não chute de novo.
+
+## Loop de feedback (quando um agente se perde no kit)
+
+Todo episódio de "agente errou o comando/flag/envelope" deve gerar **duas** saídas:
+1. **Correção na ferramenta**: melhorar a mensagem de erro, o `manifest`/`--help` ou o metadado do comando (`annotateCommand`) — a ferramenta deve ensinar o próximo passo.
+2. **Registro reutilizável**: anotar o aprendizado onde os agentes leem (memória/playbook), citando o comando.
+
+Sem esse loop, o mesmo buraco reabre a cada evolução do kit.
 
 ## Base de conhecimento MCP-style
 

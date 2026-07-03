@@ -3,6 +3,8 @@ import { Command } from "commander";
 
 import { CangeCliUsageError } from "../client/errors.js";
 import { createCliPrinter } from "../utils/output.js";
+import { exitCodeForError } from "./exit-codes.js";
+import { resolveOutputMode } from "./output-mode.js";
 import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-card.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
 import { registerAuthCommand } from "./commands/auth.js";
@@ -32,6 +34,7 @@ import { registerFlowBuildStepRelationshipCommands } from "./commands/flow-build
 import { registerFlowGetCommand } from "./commands/flow-get.js";
 import { registerFlowQueryCommand } from "./commands/flow-query.js";
 import { registerFlowViewsListCommand } from "./commands/flow-views-list.js";
+import { registerManifestCommand } from "./commands/manifest.js";
 import { registerMyFlowsCommand } from "./commands/my-flows.js";
 import { registerMyRegistersCommand } from "./commands/my-registers.js";
 import { registerMyTasksCommand } from "./commands/my-tasks.js";
@@ -51,7 +54,10 @@ export function createProgram(): Command {
     .name("cange")
     .description("CLI do cange-agent-kit para discovery e mutações seguras")
     .version("0.1.0")
-    .option("--output <mode>", "Formato de saída: json|pretty", process.env.CANGE_OUTPUT ?? "pretty");
+    .option(
+      "--output <mode>",
+      "Formato de saída: json|pretty (default: json quando stdout é pipe, pretty em terminal)"
+    );
 
   registerAuthCommand(program);
   registerMyFlowsCommand(program);
@@ -126,13 +132,21 @@ export function createProgram(): Command {
   registerFlowBuildFieldCommands(flowBuildCommand);
   registerFlowBuildStepRelationshipCommands(flowBuildCommand);
 
+  registerManifestCommand(program);
+
   return program;
 }
 
+const DISCOVERY_HINT =
+  "Descubra os comandos disponíveis: `cange manifest --output json` (fonte de verdade) " +
+  "ou `cange <grupo> --help`.";
+
 export async function runCli(argv = process.argv): Promise<void> {
   const program = createProgram();
-  program.showHelpAfterError();
-  program.exitOverride();
+  // Item 1: erros ensinam o próximo passo — aplicado a TODA a árvore (subcomandos
+  // não herdam exitOverride/config; sem isso um comando desconhecido dentro de um
+  // grupo sairia com exit 1 e mensagem crua, fora do nosso tratamento).
+  applyCliErgonomics(program);
 
   try {
     await program.parseAsync(argv);
@@ -141,14 +155,36 @@ export async function runCli(argv = process.argv): Promise<void> {
       return;
     }
 
-    const printer = createCliPrinter("pretty");
-    printer.printError(normalizeCliError(error));
-    process.exitCode = 1;
+    // Item 2/3: erro vai para stderr; stdout permanece limpo. Printer TTY-aware.
+    const printer = createCliPrinter(resolveOutputMode(undefined));
+    const normalized = normalizeCliError(error);
+    printer.printError(normalized);
+    process.exitCode = exitCodeForError(normalized);
+  }
+}
+
+/**
+ * Aplica recursivamente, a cada comando da árvore:
+ * - exitOverride: parse-errors viram exceção tratada aqui (exit code correto).
+ * - showSuggestionAfterError: "Did you mean X?" em typos.
+ * - outputError no-op: o commander não escreve o erro direto; quem imprime é o
+ *   runCli (uma vez só, com a rota de discovery anexada).
+ */
+function applyCliErgonomics(command: Command): void {
+  command.exitOverride();
+  command.showSuggestionAfterError(true);
+  command.configureOutput({ outputError: () => {} });
+  for (const child of command.commands) {
+    applyCliErgonomics(child);
   }
 }
 
 function isCommanderHelp(error: unknown): boolean {
-  return isCommanderError(error) && error.code === "commander.helpDisplayed";
+  // help e version escrevem a saída e "saem" com sucesso — não são erros.
+  return (
+    isCommanderError(error) &&
+    (error.code === "commander.helpDisplayed" || error.code === "commander.version")
+  );
 }
 
 function isCommanderError(
@@ -157,9 +193,23 @@ function isCommanderError(
   return error !== null && typeof error === "object" && "code" in error && "message" in error;
 }
 
+/** Códigos do commander que indicam comando/opção desconhecidos ou uso inválido. */
+const DISCOVERY_ERROR_CODES = new Set([
+  "commander.unknownCommand",
+  "commander.unknownOption",
+  "commander.excessArguments",
+  "commander.missingArgument",
+  "commander.missingMandatoryOptionValue",
+  "commander.optionMissingArgument"
+]);
+
 function normalizeCliError(error: unknown): Error {
   if (isCommanderError(error)) {
-    return new CangeCliUsageError(error.message, { code: error.code });
+    // Item 1: anexa a rota de discovery à mensagem de comando/flag inválidos.
+    const message = DISCOVERY_ERROR_CODES.has(error.code)
+      ? `${error.message}\n${DISCOVERY_HINT}`
+      : error.message;
+    return new CangeCliUsageError(message, { code: error.code });
   }
   if (error instanceof Error) {
     return error;

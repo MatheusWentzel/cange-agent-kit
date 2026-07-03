@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import { CangeValidationError } from "../../client/errors.js";
 import { moveCardStepPayloadSchema } from "../../schemas/cards.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
+import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { assertValidationResult, readPayloadFile } from "../helpers.js";
 
@@ -13,14 +14,19 @@ interface CardMoveStepOptions {
 }
 
 export function registerCardMoveStepCommand(cardCommand: Command): void {
-  cardCommand
+  const command = cardCommand
     .command("move-step")
-    .description("MUTAÇÃO (DEPRECATED): alias de move-step-with-values")
+    .description("MUTAÇÃO (DEPRECATED): use `card move-step-with-values`")
     .requiredOption("--payload <path>", "Caminho do JSON de payload")
     .option("--validate-fields", "Valida values contra fields do flow antes de mutar")
     .option("--dry-run", "Exibe payload sem executar a mutação")
     .action(
       createCommandAction(async ({ kit }, options: CardMoveStepOptions) => {
+        // Item 6: aviso de deprecação em stderr (não polui stdout/JSON).
+        process.stderr.write(
+          "⚠️  `card move-step` está DEPRECATED — use `card move-step-with-values`. " +
+            "Este alias será removido em versão futura.\n"
+        );
         const payloadRaw = await readPayloadFile<unknown>(options.payload);
         const parsed = moveCardStepPayloadSchema.safeParse(payloadRaw);
         if (!parsed.success) {
@@ -72,4 +78,11 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
         };
       })
     );
+
+  annotateCommand(command, {
+    mutates: true,
+    deprecatedInFavorOf: "card move-step-with-values",
+    envelope: "{ raw, summary } (ou { note, payload } em --dry-run)",
+    example: "card move-step-with-values --payload ./payloads/move.json"
+  });
 }
