@@ -6,7 +6,10 @@ import { createCardsContracts } from "./cards.js";
 import { createCommentsContracts } from "./comments.js";
 import { createDiscoveryContracts } from "./discovery.js";
 import { createFieldsContracts } from "./fields.js";
+import { createFlowCardsContracts } from "./flowCards.js";
+import { createFlowQueryContracts } from "./flowQuery.js";
 import { createFlowV2BuildContracts } from "./flowV2Build.js";
+import { createFlowViewsContracts } from "./flowViews.js";
 import { createFlowsContracts } from "./flows.js";
 import { createNotificationsContracts } from "./notifications.js";
 import { createPayloadBuilderContracts } from "./payload-builder.js";
@@ -24,6 +27,9 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const registers = createRegistersContracts(params.client);
   const timeTracking = createTimeTrackingContracts(params.client);
   const flowV2Build = createFlowV2BuildContracts(params.client);
+  const flowQuery = createFlowQueryContracts(params.client);
+  const flowViews = createFlowViewsContracts(params.client);
+  const flowCards = createFlowCardsContracts({ cards, flows, flowQuery });
   const payloadBuilder = createPayloadBuilderContracts({
     flows,
     fields,
@@ -51,6 +57,13 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     validateValuesAgainstFields: payloadBuilder.validateValuesAgainstFields,
     getCard: cards.getCard,
     listCardsByFlow: cards.listCardsByFlow,
+    fetchFlowCards: flowCards.fetchFlowCards,
+    resolveQueryEngine: flowCards.resolveQueryEngine,
+    queryFlowV2: flowQuery.queryFlowV2,
+    queryFlowV2All: flowQuery.queryFlowV2All,
+    getQueryEngineStatus: flowQuery.getQueryEngineStatus,
+    listFlowViews: flowViews.listFlowViews,
+    getFlowView: flowViews.getFlowView,
     getCardRelationship: cards.getCardRelationship,
     getRegisterFormAnswer: registers.getRegisterFormAnswer,
     listCommentsByCard: comments.listCommentsByCard,

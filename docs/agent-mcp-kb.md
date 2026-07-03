@@ -67,7 +67,13 @@ A maioria dos comandos retorna envelope previsível:
 - `pnpm cli template register-create --register-id <id>`
 - `pnpm cli template step-move --flow-id <id> --from-step-id <id> --to-step-id <id>`
 - `pnpm cli card get --flow-id <id> --card-id <id> [--field-ids <id1,id2>] [--summary-only]`
-- `pnpm cli card list --flow-id <id> [--step-id <id>] [--limit <n>]`
+- `pnpm cli card list --flow-id <id> [--step-id <id>] [--view-id <id>] [--engine auto|v1|v2] [--limit <n>]`
+  - Por padrão (`auto`) prioriza o motor **V2** (mais rápido) com fallback V1; retorna `engine`/`totalCount`/`truncated`/`executionStats` além de `summaries`/`total`.
+  - `--with-pre-answer/--with-time-tracking/--test-model` só existem no V1 e forçam o caminho legado.
+- `pnpm cli flow query --flow-id <id> [--view-id <id>] [--search <txt>] [--step-id <id>] [--engine auto|v1|v2] [--limit <n>]`
+  - Busca priorizando V2, aceita **visualização salva** e busca textual (scope `flow` automático sem view).
+- `pnpm cli flow views list --flow-id <id> [--include-schema]`
+  - Lista as **visualizações (views salvas)** do flow com resumo de filtros/colunas/ordenação (usar `.views`; `raw` é pesado).
 - `pnpm cli comment list --flow-id <id> --card-id <id> [--summary-only]`
 - `pnpm cli my-registers [--name <search>]`
 
@@ -330,6 +336,7 @@ Referência rápida: [Playbook 00](./playbooks/00-agent-operational-suggestions.
 
 - O comando `card move-step`/`card move-step-with-values` depende de `fromStepId` e `toStepId` corretos.
 - Se o fluxo tiver regras adicionais fora do endpoint, a movimentação pode exigir intervenção no app.
+- **`card list --engine v1` em fluxos grandes (`largeData`) retorna 0 cartões** — o `/card/by-flow` devolve só `ids` (sem `cards`). Por isso o default `auto` prioriza o V2. Só force `--engine v1` quando precisar dos enriquecimentos V1 (`--with-*`) e o fluxo não for grande.
 
 ## Playbooks
 

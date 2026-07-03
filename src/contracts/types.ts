@@ -41,6 +41,49 @@ export interface CardSummary {
   complete?: boolean;
 }
 
+export interface FlowViewSortItem {
+  field?: number | string;
+  order?: string;
+}
+
+export interface FlowViewFilterSummary {
+  columnsCount?: number;
+  filtersCount?: number;
+  sort?: FlowViewSortItem[];
+  searchText?: string;
+  searchFieldScope?: string;
+}
+
+export interface FlowViewSummary {
+  id?: number | string;
+  name?: string;
+  icon?: string;
+  color?: string;
+  isPublic?: boolean;
+  isFavorited?: boolean;
+  filter?: FlowViewFilterSummary;
+  /** Schema JSON parseado — presente só quando explicitamente pedido. */
+  schema?: unknown;
+}
+
+export interface FlowQueryPageInfo {
+  hasMore?: boolean;
+  nextCursor?: string;
+}
+
+export interface FlowQueryExecutionStats {
+  plan?: string;
+  cached?: boolean;
+  pageSize?: number;
+  durationMs?: number;
+  totalCount?: number;
+  warmupCount?: number;
+  snapshotFallbackUsed?: boolean;
+  [key: string]: unknown;
+}
+
+export type FlowQueryEngine = "v1" | "v2";
+
 export interface NotificationSummary {
   id?: number | string;
   title?: string;

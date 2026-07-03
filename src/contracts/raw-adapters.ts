@@ -6,6 +6,9 @@ import type {
   FieldSummaryItem,
   FieldsSummary,
   FlowSummary,
+  FlowViewFilterSummary,
+  FlowViewSortItem,
+  FlowViewSummary,
   NotificationSummary,
   RegisterSummary
 } from "./types.js";
@@ -81,6 +84,74 @@ export function summarizeFlow(raw: unknown): FlowSummary {
     companyId: pickNumberOrString(record, ["company_id", "id_company"]),
     status: pickString(record, ["status", "active"])
   };
+}
+
+/**
+ * Resume uma visualização (flow_view). Parseia o `schema` JSON para dar
+ * visibilidade dos filtros/colunas/ordenação salvos sem exigir que o chamador
+ * conheça o formato interno. `includeSchema` anexa o schema parseado bruto.
+ */
+export function summarizeFlowView(raw: unknown, options: { includeSchema?: boolean } = {}): FlowViewSummary {
+  const record = extractPrimaryRecord(raw);
+  if (!record) {
+    return {};
+  }
+
+  const parsedSchema = parseFlowViewSchema(record.schema);
+  const isPublicRaw = record.isPublic ?? record.is_public;
+
+  return compactDefined({
+    id: pickNumberOrString(record, ["id_flow_view", "id", "flow_view_id"]),
+    name: pickString(record, ["name", "title"]),
+    icon: pickString(record, ["icon"]),
+    color: pickString(record, ["color"]),
+    isPublic: typeof isPublicRaw === "string" ? isPublicRaw.trim().toUpperCase() === "S" : pickBoolean(record, ["isPublic"]),
+    isFavorited: pickBoolean(record, ["isFavorited", "is_favorited"]),
+    filter: summarizeFlowViewSchema(parsedSchema),
+    schema: options.includeSchema ? parsedSchema : undefined
+  });
+}
+
+function parseFlowViewSchema(value: unknown): Record<string, unknown> | undefined {
+  if (typeof value === "string") {
+    try {
+      return asRecord(JSON.parse(value));
+    } catch {
+      return undefined;
+    }
+  }
+  return asRecord(value);
+}
+
+function summarizeFlowViewSchema(
+  schema: Record<string, unknown> | undefined
+): FlowViewFilterSummary | undefined {
+  if (!schema) {
+    return undefined;
+  }
+
+  const fieldView = toRecordArray(schema.fieldView);
+  const activeColumns = fieldView.filter((column) => pickBoolean(column, ["active"]) !== false);
+  const conditions = toRecordArray(schema.conditions);
+  const orderBy = toRecordArray(schema.orderBy);
+
+  const sort: FlowViewSortItem[] = orderBy.map((order) => {
+    const selectedField = asRecord(order.selectedField);
+    return compactDefined({
+      field:
+        pickNumberOrString(selectedField ?? {}, ["title", "name", "id_field", "field_id"]) ??
+        pickNumberOrString(order, ["title", "id_field", "field_id"]),
+      order: pickString(order, ["selectedOrder", "order"])
+    });
+  });
+
+  return compactDefined({
+    columnsCount: activeColumns.length > 0 || fieldView.length > 0 ? activeColumns.length : undefined,
+    filtersCount: conditions.length > 0 ? conditions.length : undefined,
+    sort: sort.length > 0 ? sort : undefined,
+    searchText: pickString(schema, ["searchText"]),
+    searchFieldScope: pickString(schema, ["search_field_scope", "searchFieldScope"])
+  });
 }
 
 export function summarizeRegister(raw: unknown): RegisterSummary {

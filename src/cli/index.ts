@@ -30,6 +30,8 @@ import { registerFlowBuildPingCommand } from "./commands/flow-build/ping.js";
 import { registerFlowBuildStepCommands } from "./commands/flow-build/step.js";
 import { registerFlowBuildStepRelationshipCommands } from "./commands/flow-build/step-relationship.js";
 import { registerFlowGetCommand } from "./commands/flow-get.js";
+import { registerFlowQueryCommand } from "./commands/flow-query.js";
+import { registerFlowViewsListCommand } from "./commands/flow-views-list.js";
 import { registerMyFlowsCommand } from "./commands/my-flows.js";
 import { registerMyRegistersCommand } from "./commands/my-registers.js";
 import { registerMyTasksCommand } from "./commands/my-tasks.js";
@@ -63,6 +65,10 @@ export function createProgram(): Command {
 
   const flowCommand = program.command("flow").description("Operações de flow");
   registerFlowGetCommand(flowCommand);
+  registerFlowQueryCommand(flowCommand);
+
+  const flowViewsCommand = flowCommand.command("views").description("Visualizações (views salvas) de um flow");
+  registerFlowViewsListCommand(flowViewsCommand);
 
   const registerCommand = program.command("register").description("Operações de register");
   registerRegisterGetCommand(registerCommand);
