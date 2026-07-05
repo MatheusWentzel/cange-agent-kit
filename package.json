@@ -16,6 +16,7 @@
     "examples"
   ],
   "scripts": {
+    "prepare": "tsc -p tsconfig.build.json",
     "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "build:bundle": "tsup src/index.ts src/cli/index.ts --format esm --dts --sourcemap --clean",
     "dev": "node --loader tsx src/cli/index.ts",
