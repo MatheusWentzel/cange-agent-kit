@@ -55,7 +55,7 @@ export interface CardsContracts {
     cardId: number;
     fromStepId: number;
     toStepId: number;
-    /** Opcional: se omitido, resolve o form da etapa de origem (flow_step.form_id). */
+    /** Opcional: se omitido, resolve o form da etapa destino (flow_step.form_id). */
     idForm?: number;
     values: Record<string, unknown>;
     complete?: "S" | "N";
@@ -67,7 +67,7 @@ export interface CardsContracts {
     cardId: number;
     fromStepId: number;
     toStepId: number;
-    /** Opcional: se omitido, resolve o form da etapa de origem (flow_step.form_id). */
+    /** Opcional: se omitido, resolve o form da etapa destino (flow_step.form_id). */
     idForm?: number;
     values: Record<string, unknown>;
     complete?: "S" | "N";
@@ -130,13 +130,16 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
     return out;
   }
 
-  // Resolve/valida o id_form de um move. Um move cria form_answer(id_form, from_step);
-  // se o id_form não for o form da etapa de ORIGEM, cria um form_answer duplicado (e, no
-  // caso do form de criação, VAZIO) que vence o "winning form_answer" (max id_form_answer)
-  // do FlowQuery V2 e zera os campos do card no V2/Kanban. Se omitido, auto-resolve.
+  // Resolve/valida o id_form de um move. Um move deve usar o form de uma ETAPA
+  // (origem OU destino — ambos são limpos e válidos; o app/mcp usam o do destino).
+  // O ÚNICO valor que corrompe é o form de CRIAÇÃO (form_init): ele cria um
+  // form_answer duplicado sob o form_init que vence o "winning form_answer"
+  // (max id_form_answer) do FlowQuery V2 e zera os campos do card no V2/Kanban.
+  // Guard: rejeita só o form_init. Se omitido, auto-resolve o form da etapa DESTINO.
   async function resolveMoveForm(data: {
     flowId: number;
     fromStepId: number;
+    toStepId: number;
     idForm?: number;
   }): Promise<number> {
     let stepForms: { stepFormMap: Map<number, number>; formInitId: number | null } | null = null;
@@ -145,35 +148,35 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
     } catch {
       stepForms = null; // leitura do fluxo falhou: não bloquear callers explícitos
     }
-    const expected = stepForms?.stepFormMap.get(data.fromStepId) ?? null;
-    if (expected == null) {
-      if (data.idForm == null) {
-        throw new CangeValidationError(
-          "Não foi possível resolver o form da etapa de origem do move (leitura do fluxo falhou ou etapa desconhecida). Informe idForm = form da etapa de ORIGEM (flow_step.form_id).",
-          { details: { flowId: data.flowId, fromStepId: data.fromStepId } }
-        );
-      }
-      return data.idForm;
-    }
-    if (data.idForm == null) return expected; // auto-resolve (recomendado)
-    if (data.idForm !== expected) {
-      const isInit = stepForms?.formInitId != null && data.idForm === stepForms.formInitId;
+    const toForm = stepForms?.stepFormMap.get(data.toStepId) ?? null;
+
+    // Guard: form de criação num move é sempre errado (corrompe o FlowQuery V2).
+    if (
+      data.idForm != null &&
+      stepForms?.formInitId != null &&
+      data.idForm === stepForms.formInitId
+    ) {
       throw new CangeValidationError(
-        isInit
-          ? `id_form do move (${data.idForm}) é o form de CRIAÇÃO do fluxo (form_init). Um move deve usar o form da etapa de ORIGEM (fromStepId=${data.fromStepId} → form ${expected}). Usar o form de criação cria um form_answer VAZIO duplicado que vence o FlowQuery V2 (winning = max id_form_answer) e zera os campos do card no V2/Kanban. Passe idForm=${expected} ou omita para resolução automática.`
-          : `id_form do move (${data.idForm}) não corresponde ao form da etapa de origem (fromStepId=${data.fromStepId} → form ${expected}). Passe idForm=${expected} ou omita para resolução automática.`,
+        `id_form do move (${data.idForm}) é o form de CRIAÇÃO do fluxo (form_init). Um move deve usar o form de uma ETAPA (destino=${data.toStepId} → form ${toForm ?? "?"}, ou o form da origem). Usar o form de criação cria um form_answer duplicado sob o form_init que vence o FlowQuery V2 (winning = max id_form_answer) e zera os campos do card no V2/Kanban. Omita idForm para auto-resolver o form da etapa destino.`,
         {
           details: {
             flowId: data.flowId,
             fromStepId: data.fromStepId,
+            toStepId: data.toStepId,
             idFormRecebido: data.idForm,
-            idFormEsperado: expected,
-            formInit: stepForms?.formInitId ?? null
+            formInit: stepForms.formInitId,
+            idFormSugerido: toForm
           }
         }
       );
     }
-    return data.idForm;
+
+    if (data.idForm != null) return data.idForm; // qualquer form de etapa é aceito
+    if (toForm != null) return toForm; // auto-resolve: form da etapa DESTINO (semântica do app)
+    throw new CangeValidationError(
+      "idForm omitido e não foi possível resolver o form da etapa destino (leitura do fluxo falhou ou etapa desconhecida). Informe idForm = form da etapa destino (flow_step.form_id).",
+      { details: { flowId: data.flowId, toStepId: data.toStepId } }
+    );
   }
 
   return {

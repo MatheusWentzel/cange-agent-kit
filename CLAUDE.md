@@ -27,7 +27,7 @@ Use este repositório como camada segura para operar o Cange via CLI.
   2. `--validate-fields` (quando disponível)
   3. `--dry-run`
   4. execução real
-- Para mover etapa de card, usar `card move-step-with-values` com `values` (usar `{}` quando não houver campos obrigatórios). O `idForm` é o form da etapa de **ORIGEM** (`flow_step.form_id` do `fromStepId`) — **pode ser omitido** (o contrato resolve automaticamente). ⚠️ **NUNCA** passar o form de criação (`form_init`) num move: o contrato rejeita (guard), pois isso criaria um `form_answer` vazio duplicado que vence o FlowQuery V2 (winning = max `id_form_answer`) e zera os campos do card no V2/Kanban.
+- Para mover etapa de card, usar `card move-step-with-values` com `values` (usar `{}` quando não houver campos obrigatórios). O `idForm` é o form de uma **ETAPA** (`flow_step.form_id`) — o do **DESTINO** (`toStepId`) pela semântica do app; **pode ser omitido** (o contrato auto-resolve o form do destino). ⚠️ **NUNCA** passar o form de criação (`form_init`) num move: o contrato rejeita (guard), pois isso criaria um `form_answer` duplicado sob o `form_init` que vence o FlowQuery V2 (winning = max `id_form_answer`) e zera os campos do card no V2/Kanban.
 - Para marcar notificação como lida/arquivada, usar `notification read`.
 - Para construir fluxos (fluxo, etapas, campos, relacionamentos), usar `cange flow-build ...` (Flow V2 Build API):
   - bodies são **strict** — não enviar chaves extras.
