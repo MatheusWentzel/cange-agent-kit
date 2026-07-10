@@ -81,7 +81,10 @@ const moveCardStepBasePayloadSchema = z.object({
   cardId: z.number().int().positive(),
   fromStepId: z.number().int().positive(),
   toStepId: z.number().int().positive(),
-  idForm: z.number().int().positive(),
+  // Opcional: se omitido, o contrato resolve o form da etapa de ORIGEM (fromStepId).
+  // Um move SEMPRE usa o form da etapa de origem (flow_step.form_id) — nunca o form
+  // de criação (form_init), que criaria um form_answer vazio duplicado e quebraria o V2.
+  idForm: z.number().int().positive().optional(),
   values: valuesSchema,
   complete: z.enum(["S", "N"]).optional(),
   isFromCurrentStep: z.boolean().optional(),

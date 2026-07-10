@@ -32,7 +32,8 @@ interface DetectDataLossInput {
   payload: {
     flowId: number;
     cardId: number;
-    idForm: number;
+    /** Opcional: quando omitido no move, o form da etapa de origem é resolvido no contrato. */
+    idForm?: number;
     values: Record<string, unknown>;
   };
   /** Fields do form alvo já carregados (reuso quando --validate-fields rodou antes). */
@@ -46,6 +47,17 @@ interface FilledValue {
 
 export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLossCheck> {
   const { kit, payload } = input;
+  const idForm = payload.idForm;
+
+  // Sem idForm não há como escopar a checagem a um form. Nesse caso o form da etapa
+  // de origem é resolvido no contrato do move; aqui apenas pulamos (best-effort).
+  if (idForm == null) {
+    return {
+      checked: false,
+      orphans: [],
+      note: "idForm omitido — checagem de perda de dados pulada (form da etapa de origem resolvido no contrato)."
+    };
+  }
 
   try {
     // Fields são OPCIONAIS — servem só para enriquecer o título do campo na
@@ -57,7 +69,7 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
       try {
         const fieldsData = await kit.contracts.getFieldsByFlow({ flowId: payload.flowId });
         targetFields = fieldsData.fields.filter(
-          (field) => String(field.formId) === String(payload.idForm)
+          (field) => String(field.formId) === String(idForm)
         );
       } catch {
         targetFields = undefined;
@@ -76,7 +88,7 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
       cardId: payload.cardId
     });
 
-    const filled = extractFilledFields(card.raw, payload.idForm, fieldById);
+    const filled = extractFilledFields(card.raw, idForm, fieldById);
     const payloadNames = new Set(Object.keys(payload.values));
 
     const orphans: OrphanField[] = [];
@@ -91,7 +103,7 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
       orphans,
       note:
         orphans.length > 0
-          ? `O card tem ${orphans.length} campo(s) preenchido(s) no form ${payload.idForm} ausente(s) do values. ` +
+          ? `O card tem ${orphans.length} campo(s) preenchido(s) no form ${idForm} ausente(s) do values. ` +
             "O move criará um snapshot SEM eles (perda de dados). Inclua-os no values (read-before-move) " +
             "ou confirme a perda com --allow-data-loss."
           : "Nenhum campo preenchido seria perdido pelo move."
