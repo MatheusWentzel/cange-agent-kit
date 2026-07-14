@@ -9,6 +9,8 @@ import type {
   FlowViewFilterSummary,
   FlowViewSortItem,
   FlowViewSummary,
+  LeanCard,
+  LeanCardField,
   NotificationSummary,
   RegisterSummary
 } from "./types.js";
@@ -210,6 +212,99 @@ export function summarizeCard(raw: unknown): CardSummary {
     archived: pickBoolean(record, ["archived"]),
     complete: pickBoolean(record, ["complete"])
   });
+}
+
+/**
+ * Projeção ENXUTA de um card para consumo por agentes LLM (modo `card get --agent`).
+ *
+ * Devolve só o que o agente precisa pra agir: título, etapa atual, responsável e os
+ * campos PREENCHIDOS (label humano + valor textual). Corta `raw`, campos vazios,
+ * hashes, history e metadata. Ordens de magnitude menor que `{ raw, summary }`
+ * (num card real de fim de pipeline: ~530 KB → ~25 KB; num card de backlog: ~2–5 KB).
+ *
+ * Regras:
+ *  - ignora form_answers e form_answer_fields com `deleted === "S"` (fonte de verdade);
+ *  - só inclui campos com valueString/value não-vazio;
+ *  - last-wins por field_id (mesma semântica do `summarizeCard`);
+ *  - label = field.title (humano); só cai no field.name (hash) se não houver título.
+ */
+export function leanCard(raw: unknown): LeanCard {
+  const record = extractCardRecord(raw);
+  if (!record) {
+    return { fields: [] };
+  }
+
+  const flowStep = asRecord(record.flow_step);
+  const user = asRecord(record.user);
+  const cardId = pickNumberOrString(record, ["id_card", "card_id", "id"]);
+  const stepId =
+    pickNumberOrString(record, ["flow_step_id", "step_id", "id_step", "current_step_id"]) ??
+    pickNumberOrString(flowStep ?? {}, ["id_step", "step_id"]);
+
+  const byFieldId = new Map<string, LeanCardField>();
+  for (const answer of toRecordArray(record.form_answers)) {
+    if (isDeleted(answer)) {
+      continue;
+    }
+    for (const answerField of toRecordArray(answer.form_answer_fields)) {
+      if (isDeleted(answerField)) {
+        continue;
+      }
+      const field = asRecord(answerField.field) ?? {};
+      const fieldId =
+        pickNumberOrString(answerField, ["field_id", "id_field", "id"]) ??
+        pickNumberOrString(field, ["id_field", "field_id", "id"]);
+      if (fieldId === undefined) {
+        continue;
+      }
+
+      const value = pickNonEmpty(answerField, ["valueString", "value_string", "value"]);
+      if (value === undefined) {
+        continue;
+      }
+
+      byFieldId.set(String(fieldId), {
+        id: fieldId,
+        label: pickString(field, ["title", "name"]),
+        type: pickString(field, ["type", "field_type"]),
+        value
+      });
+    }
+  }
+
+  return compactDefined({
+    cardId,
+    title: pickString(record, ["title", "name"]),
+    currentStepId: stepId,
+    stepName: pickString(flowStep ?? {}, ["name", "title"]),
+    responsibleUserId:
+      pickNumberOrString(record, ["user_id", "responsible_user_id"]) ??
+      pickNumberOrString(user ?? {}, ["id_user", "user_id", "id"]),
+    responsibleName: pickString(user ?? {}, ["name"]),
+    fields: Array.from(byFieldId.values())
+  }) as LeanCard;
+}
+
+function isDeleted(record: Record<string, unknown>): boolean {
+  return typeof record.deleted === "string" && record.deleted.trim().toUpperCase() === "S";
+}
+
+/** Retorna o 1º valor textual não-vazio dentre as chaves; senão undefined. */
+function pickNonEmpty(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = record[key];
+    if (value === undefined || value === null) {
+      continue;
+    }
+    if (typeof value === "string") {
+      if (value.trim().length > 0) {
+        return value;
+      }
+      continue;
+    }
+    return value;
+  }
+  return undefined;
 }
 
 export function summarizeNotification(raw: unknown): NotificationSummary {
