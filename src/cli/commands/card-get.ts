@@ -1,5 +1,6 @@
 import type { Command } from "commander";
 
+import { leanCard } from "../../contracts/raw-adapters.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 
@@ -9,6 +10,8 @@ interface CardGetOptions {
   companyId?: string;
   fieldIds?: string;
   summaryOnly?: boolean;
+  agent?: boolean;
+  lean?: boolean;
 }
 
 export function registerCardGetCommand(cardCommand: Command): void {
@@ -23,6 +26,11 @@ export function registerCardGetCommand(cardCommand: Command): void {
       "Filtra summary.fieldValues por IDs de field (lista separada por vírgula)"
     )
     .option("--summary-only", "Retorna somente summary (sem raw)")
+    .option(
+      "--agent",
+      "Modo enxuto p/ agente LLM: só título, etapa, responsável e campos PREENCHIDOS (label + valueString). Sem raw/vazios/hashes. Ordens de magnitude menor."
+    )
+    .option("--lean", "Alias de --agent")
     .action(
       createCommandAction(async ({ kit }, options: CardGetOptions) => {
         const result = await kit.contracts.getCard({
@@ -30,6 +38,11 @@ export function registerCardGetCommand(cardCommand: Command): void {
           cardId: options.cardId,
           companyId: options.companyId
         });
+
+        // Modo enxuto tem precedência: descarta raw/summary e devolve só o essencial.
+        if (options.agent || options.lean) {
+          return leanCard(result.raw);
+        }
 
         const requestedFieldIds = parseFieldIds(options.fieldIds);
         if (requestedFieldIds.length === 0) {
@@ -69,10 +82,13 @@ export function registerCardGetCommand(cardCommand: Command): void {
     );
 
   annotateCommand(command, {
-    envelope: "{ raw, summary } (só { summary } com --summary-only; + requestedFieldIds com --field-ids)",
+    envelope:
+      "{ raw, summary } (só { summary } com --summary-only; + requestedFieldIds com --field-ids; " +
+      "com --agent/--lean vira { cardId, title, currentStepId, stepName, responsibleUserId, responsibleName, fields:[{id,label,type,value}] })",
     fieldsLocation:
-      "campos legíveis (title, stepName, fieldValues) vivem em `summary`; `raw` é a resposta crua da API",
-    example: "card get --flow-id 192 --card-id 1096611 --summary-only"
+      "campos legíveis (title, stepName, fieldValues) vivem em `summary`; `raw` é a resposta crua da API. " +
+      "No modo --agent os campos PREENCHIDOS vêm em `fields[]` com label humano + valueString (sem raw).",
+    example: "card get --flow-id 192 --card-id 1096611 --agent"
   });
 }
 

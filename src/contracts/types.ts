@@ -41,6 +41,30 @@ export interface CardSummary {
   complete?: boolean;
 }
 
+/** Um campo preenchido do card, no formato enxuto (label humano + valor textual). */
+export interface LeanCardField {
+  id: number | string;
+  label?: string;
+  type?: string;
+  value: unknown;
+}
+
+/**
+ * Projeção enxuta de um card para consumo por agentes LLM: só o essencial
+ * (título, etapa atual, responsável e os campos PREENCHIDOS com label + valueString).
+ * Sem `raw`, sem campos vazios, sem hashes/history/metadata. Ordens de magnitude
+ * menor que `{ raw, summary }`.
+ */
+export interface LeanCard {
+  cardId?: number | string;
+  title?: string;
+  currentStepId?: number | string;
+  stepName?: string;
+  responsibleUserId?: number | string;
+  responsibleName?: string;
+  fields: LeanCardField[];
+}
+
 export interface FlowViewSortItem {
   field?: number | string;
   order?: string;
