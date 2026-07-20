@@ -21,8 +21,8 @@ interface OptionDescriptor {
 const TYPE_GUARDS: Record<string, GuardDefinition> = {
   TEXT_SHORT_FIELD: stringGuard(),
   TEXT_LONG_FIELD: stringGuard(),
-  CHECKBOX_FIELD: stringGuard(),
-  CHECK_BOX_FIELD: stringGuard(),
+  CHECKBOX_FIELD: stringArrayGuard(),
+  CHECK_BOX_FIELD: stringArrayGuard(),
   DATE_PICKER_FIELD: isoDateGuard(),
   RADIO_BOX_FIELD: singleChoiceGuard(),
   SINGLE_SELECT_FIELD: stringGuard(),
@@ -66,11 +66,18 @@ const TYPE_GUARDS: Record<string, GuardDefinition> = {
 
 const OPTION_BOUND_TYPES = new Set(["RADIO_BOX_FIELD", "COMBO_BOX_FIELD"]);
 
+// Multi-valor ligado a options: o valor é um array e CADA item precisa estar em field.options.
+const MULTI_OPTION_BOUND_TYPES = new Set(["CHECK_BOX_FIELD", "CHECKBOX_FIELD"]);
+
 const PT_BR_ALIASES: Record<string, string> = {
   "texto curto": "TEXT_SHORT_FIELD",
   "texto longo": "TEXT_LONG_FIELD",
-  "caixa de selecao": "CHECKBOX_FIELD",
-  "caixa de seleção": "CHECKBOX_FIELD",
+  // No Cange, "Caixa de seleção" é o combo SINGLE; o multi-valor chama-se "Checkbox".
+  "caixa de selecao": "COMBO_BOX_FIELD",
+  "caixa de seleção": "COMBO_BOX_FIELD",
+  checkbox: "CHECK_BOX_FIELD",
+  "caixa de marcacao": "CHECK_BOX_FIELD",
+  "caixa de marcação": "CHECK_BOX_FIELD",
   data: "DATE_PICKER_FIELD",
   "selecao unica": "SINGLE_SELECT_FIELD",
   "seleção única": "SINGLE_SELECT_FIELD",
@@ -109,6 +116,31 @@ export function validateValueByFieldType(
       expected: "unknown",
       reason: `Tipo de field não mapeado: ${fieldType}`
     };
+  }
+
+  if (MULTI_OPTION_BOUND_TYPES.has(normalizedType)) {
+    // O formato tem precedência: se não for string[], reporta INVALID_TYPE (sem allowedOptions)
+    // para o chamador receber "Esperado: string[]" em vez de uma lista de opções irrelevante.
+    if (!guardDef.guard(value)) {
+      return { valid: false, expected: guardDef.expected, normalizedType };
+    }
+
+    const optionDescriptors = extractAllowedOptionDescriptors(options);
+    const allowedValues = optionDescriptors.map((item) => item.value);
+    if (allowedValues.length > 0) {
+      const items = value as unknown[];
+      const invalid = items.filter((item) => !isValueInOptions(item, allowedValues));
+      return {
+        valid: invalid.length === 0,
+        expected: `${guardDef.expected} (each one of options)`,
+        normalizedType,
+        reason:
+          invalid.length === 0
+            ? undefined
+            : buildInvalidOptionReason(invalid.join(", "), optionDescriptors),
+        allowedOptions: optionDescriptors
+      };
+    }
   }
 
   if (OPTION_BOUND_TYPES.has(normalizedType)) {
