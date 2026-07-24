@@ -10,6 +10,7 @@ import type {
   FlowViewSortItem,
   FlowViewSummary,
   NotificationSummary,
+  RegisterEntry,
   RegisterSummary
 } from "./types.js";
 
@@ -168,6 +169,151 @@ export function summarizeRegister(raw: unknown): RegisterSummary {
     companyId: pickNumberOrString(record, ["company_id", "id_company"]),
     status: pickString(record, ["status", "active"])
   };
+}
+
+const V2_FORM_ANSWER_PREFIX = "form_answer.";
+const V2_FIELD_PREFIX = "field:";
+
+/** `deleted === "S"` é a fonte de verdade de exclusão (pode vir null/"N" para ativo). */
+function isEntryDeleted(record: Record<string, unknown>): boolean {
+  return typeof record.deleted === "string" && record.deleted.trim().toUpperCase() === "S";
+}
+
+/** Primeiro valor não-vazio dentre as chaves (ignora undefined/null/string em branco). */
+function firstNonEmptyValue(record: Record<string, unknown>, keys: string[]): unknown {
+  for (const key of keys) {
+    const value = record[key];
+    if (value === undefined || value === null) {
+      continue;
+    }
+    if (typeof value === "string" && value.trim() === "") {
+      continue;
+    }
+    return value;
+  }
+  return undefined;
+}
+
+/**
+ * v1 — extrai as entradas (form_answers) do payload do `GET /register?withAnswers=true`.
+ * Ignora entradas com `deleted === "S"` (fonte de verdade).
+ */
+export function extractRegisterAnswersV1(raw: unknown): Record<string, unknown>[] {
+  const record = extractPrimaryRecord(raw);
+  const answers = record ? toRecordArray(record.form_answers) : [];
+  return answers.filter((answer) => !isEntryDeleted(answer));
+}
+
+/**
+ * v1 — normaliza um `form_answer` (rota legada) em {@link RegisterEntry}.
+ * Rótulo = `field.title` (humano; cai no `name`/hash só se faltar título).
+ * Valor por `valueString`; se o mesmo `field_id` aparecer em índices repetidos, agrega em array.
+ */
+export function summarizeRegisterEntryV1(rawAnswer: unknown): RegisterEntry {
+  const answer = asRecord(rawAnswer) ?? {};
+  const byFieldId = new Map<string, { label: string; values: unknown[] }>();
+
+  for (const answerField of toRecordArray(answer.form_answer_fields)) {
+    if (isEntryDeleted(answerField)) {
+      continue;
+    }
+    const field = asRecord(answerField.field) ?? {};
+    const fieldId =
+      pickNumberOrString(answerField, ["field_id", "id_field"]) ??
+      pickNumberOrString(field, ["id_field", "field_id", "id"]);
+    if (fieldId === undefined) {
+      continue;
+    }
+    const value = firstNonEmptyValue(answerField, ["valueString", "value_string", "value"]);
+    if (value === undefined) {
+      continue;
+    }
+    const label = pickString(field, ["title", "name"]) ?? String(fieldId);
+    const key = String(fieldId);
+    const existing = byFieldId.get(key);
+    if (existing) {
+      existing.values.push(value);
+    } else {
+      byFieldId.set(key, { label, values: [value] });
+    }
+  }
+
+  const fields: Record<string, unknown> = {};
+  for (const { label, values } of byFieldId.values()) {
+    fields[label] = values.length === 1 ? values[0] : values;
+  }
+
+  return compactDefined({
+    id: pickNumberOrString(answer, ["id_form_answer", "form_answer_id", "id"]),
+    title: pickString(answer, ["title"]),
+    fields
+  }) as RegisterEntry;
+}
+
+/**
+ * v2 — extrai os itens (rows projetadas) do payload do `POST /register/v2/query`.
+ */
+export function extractRegisterItemsV2(raw: unknown): Record<string, unknown>[] {
+  const record = asRecord(raw);
+  if (record && Array.isArray(record.items)) {
+    return record.items.map(asRecord).filter(isDefined);
+  }
+  return extractArray(raw).map(asRecord).filter(isDefined);
+}
+
+/**
+ * v2 — normaliza uma row projetada em {@link RegisterEntry}.
+ * A row usa chaves `form_answer.<col>` (metadados) e `field:<id>` (valores). Ela NÃO traz o
+ * título humano do campo, só o id — por isso recebe um mapa `field_id → título`.
+ * Valor: single-value é um objeto `{ display_value, value, ... }`; multi-value é
+ * `{ items: [...], mv_display_value }`.
+ */
+export function summarizeRegisterEntryV2(
+  rawRow: unknown,
+  titleByFieldId: Map<string, string> = new Map()
+): RegisterEntry {
+  const row = asRecord(rawRow) ?? {};
+  const fields: Record<string, unknown> = {};
+
+  for (const [key, rawValue] of Object.entries(row)) {
+    if (!key.startsWith(V2_FIELD_PREFIX)) {
+      continue;
+    }
+    const fieldId = key.slice(V2_FIELD_PREFIX.length);
+    const value = normalizeRegisterV2Value(rawValue);
+    if (value === undefined) {
+      continue;
+    }
+    const label = titleByFieldId.get(fieldId) ?? key;
+    fields[label] = value;
+  }
+
+  return compactDefined({
+    id: pickNumberOrString(row, [`${V2_FORM_ANSWER_PREFIX}id_form_answer`, "id_form_answer"]),
+    title: pickString(row, [`${V2_FORM_ANSWER_PREFIX}title`, "title"]),
+    fields
+  }) as RegisterEntry;
+}
+
+/** Reduz o valor de um campo v2 ao texto/array útil (display_value; multi-valor → array). */
+function normalizeRegisterV2Value(raw: unknown): unknown {
+  if (raw === null || raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== "object") {
+    return raw === "" ? undefined : raw;
+  }
+  const record = raw as Record<string, unknown>;
+  if (Array.isArray(record.items)) {
+    const values = record.items
+      .map((item) => firstNonEmptyValue(asRecord(item) ?? {}, ["display_value", "related_title", "value"]))
+      .filter((value) => value !== undefined);
+    if (values.length > 0) {
+      return values;
+    }
+    return firstNonEmptyValue(record, ["mv_display_value"]);
+  }
+  return firstNonEmptyValue(record, ["display_value", "related_title", "value"]);
 }
 
 export function summarizeCard(raw: unknown): CardSummary {

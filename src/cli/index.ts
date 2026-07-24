@@ -41,6 +41,7 @@ import { registerMyTasksCommand } from "./commands/my-tasks.js";
 import { registerNotificationReadCommand } from "./commands/notification-read.js";
 import { registerNotificationsCommand } from "./commands/notifications.js";
 import { registerRegisterCreateCommand } from "./commands/register-create.js";
+import { registerRegisterEntriesCommand } from "./commands/register-entries.js";
 import { registerRegisterFormAnswerGetCommand } from "./commands/register-form-answer-get.js";
 import { registerRegisterGetCommand } from "./commands/register-get.js";
 import { registerRegisterUpdateCommand } from "./commands/register-update.js";
@@ -78,6 +79,7 @@ export function createProgram(): Command {
 
   const registerCommand = program.command("register").description("Operações de register");
   registerRegisterGetCommand(registerCommand);
+  registerRegisterEntriesCommand(registerCommand);
   registerRegisterCreateCommand(registerCommand);
   registerRegisterUpdateCommand(registerCommand);
 

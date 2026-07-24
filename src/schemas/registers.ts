@@ -32,3 +32,19 @@ export const updateRegisterPayloadSchema = z
   .refine((value) => value.registerId !== undefined || value.formAnswerId !== undefined, {
     message: "Informe registerId ou formAnswerId para atualizar registro."
   });
+
+export const getRegisterEngineStatusParamsSchema = z.object({
+  registerId: idLikeSchema
+});
+
+/**
+ * Params do smart reader de cadastros (`getRegisterEntries`).
+ * Paginação é por cursor (só o caminho v2 pagina; v1 devolve tudo numa página).
+ * `pageSize` tem teto de 200 no back (rota v2).
+ */
+export const getRegisterEntriesParamsSchema = z.object({
+  registerId: idLikeSchema,
+  search: z.string().optional(),
+  pageSize: z.number().int().positive().max(200).optional(),
+  cursor: z.string().optional()
+});

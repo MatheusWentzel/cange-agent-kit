@@ -18,6 +18,34 @@ export interface RegisterSummary {
   status?: string;
 }
 
+/** Uma entrada (linha) de um cadastro, já normalizada e agnóstica à engine (v1/v2). */
+export interface RegisterEntry {
+  /** id_form_answer da entrada. */
+  id?: number | string;
+  /** Título/rótulo da entrada, quando o cadastro define um campo de título. */
+  title?: string;
+  /** Mapa rótulo-humano-do-campo → valor textual (multi-valor vira array). */
+  fields: Record<string, unknown>;
+}
+
+/** Resultado do smart reader de cadastros: entradas normalizadas + qual engine rodou. */
+export interface RegisterEntriesResult {
+  raw: unknown;
+  /** Engine efetivamente usada para ler: `v2` (paginado) ou `v1` (legado). */
+  engine: FlowQueryEngine;
+  entries: RegisterEntry[];
+  pageInfo: FlowQueryPageInfo;
+  executionStats?: FlowQueryExecutionStats;
+}
+
+export interface RegisterEngineStatus {
+  raw: unknown;
+  registerId?: number | string;
+  useV2: boolean;
+  useQueryV2?: string;
+  isLargeData?: string;
+}
+
 export interface CardSummary {
   cardId?: number | string;
   id_card?: number | string;

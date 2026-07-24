@@ -13,6 +13,7 @@ import { createFlowViewsContracts } from "./flowViews.js";
 import { createFlowsContracts } from "./flows.js";
 import { createNotificationsContracts } from "./notifications.js";
 import { createPayloadBuilderContracts } from "./payload-builder.js";
+import { createRegisterQueryContracts } from "./registerQuery.js";
 import { createRegistersContracts } from "./registers.js";
 import { createTimeTrackingContracts } from "./timeTracking.js";
 
@@ -25,6 +26,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const notifications = createNotificationsContracts(params.client);
   const attachments = createAttachmentsContracts(params.client);
   const registers = createRegistersContracts(params.client);
+  const registerQuery = createRegisterQueryContracts({ client: params.client, fields });
   const timeTracking = createTimeTrackingContracts(params.client);
   const flowV2Build = createFlowV2BuildContracts(params.client);
   const flowQuery = createFlowQueryContracts(params.client);
@@ -43,6 +45,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getNotificationsByUser: discovery.getNotificationsByUser,
     getFlow: flows.getFlow,
     getRegister: registers.getRegister,
+    getRegisterEntries: registerQuery.getRegisterEntries,
+    getRegisterEngineStatus: registerQuery.getRegisterEngineStatus,
     getFieldsByFlow: fields.getFieldsByFlow,
     getFieldsByRegister: fields.getFieldsByRegister,
     getFlowInitFormFields: payloadBuilder.getFlowInitFormFields,
