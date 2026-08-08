@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
+import { pathToFileURL } from "node:url";
+
 import { Command } from "commander";
 
 import { CangeCliUsageError } from "../client/errors.js";
@@ -221,6 +224,31 @@ function normalizeCliError(error: unknown): Error {
   });
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+/**
+ * True quando este arquivo é o entrypoint invocado pelo Node — ROBUSTO A SYMLINK.
+ *
+ * O Node resolve symlinks em `import.meta.url` (realpath), mas `process.argv[1]`
+ * preserva o caminho do SYMLINK (ex.: `node_modules/.bin/cange`, o bin que o `bin`
+ * do package.json cria — como o runner/agente invoca). Sem resolver o realpath de
+ * argv[1], a comparação falha na invocação por symlink → `runCli()` NUNCA roda e o
+ * CLI sai silencioso, sem fazer nada (stdout/stderr vazios, exit 0). Resolver o
+ * realpath + `pathToFileURL` faz a comparação bater tanto por symlink quanto por
+ * invocação direta (`node dist/cli/index.js`, usado pelo `pnpm cli`).
+ *
+ * ⚠️ NÃO simplificar para `import.meta.url === `file://${process.argv[1]}``: isso
+ * REINTRODUZ a regressão do commit 8c572af (todos os comandos de API voltavam
+ * vazios quando o agente chamava `cange` via `.bin/cange`). Pego num run E2E real.
+ */
+function isInvokedAsMain(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(realpathSync(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+if (isInvokedAsMain()) {
   await runCli();
 }
