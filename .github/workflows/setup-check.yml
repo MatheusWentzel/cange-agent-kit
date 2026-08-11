@@ -18,16 +18,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # pnpm ANTES do setup-node: o `cache: pnpm` do setup-node precisa do pnpm no PATH
+      # para computar a chave e restaurar o store. As imagens novas do runner GH não têm
+      # mais pnpm pré-instalado, então o setup-node falhava com "Unable to locate pnpm".
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: ${{ matrix.pnpm-version }}
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
-
-      - name: Setup pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: ${{ matrix.pnpm-version }}
 
       - name: Show versions
         run: |
