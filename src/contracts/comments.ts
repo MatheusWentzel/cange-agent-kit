@@ -83,7 +83,9 @@ export function createCommentsContracts(client: CangeClient): CommentsContracts 
       }
 
       const flowId = parsed.data.flowId ?? readEnvFlowId();
-      if (flowId === undefined) {
+      // Rejeita ausente E não-positivo (o schema do list aceita "0" via idLikeSchema, que o back
+      // rejeita com 404 mudo — simetria com o create, que exige positive).
+      if (flowId === undefined || !(Number(flowId) > 0)) {
         throw new CangeValidationError(FLOW_ID_MISSING_MSG);
       }
 
