@@ -10,6 +10,7 @@ import { exitCodeForError } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
 import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-card.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
+import { registerToolCallCommand } from "./commands/tool-call.js";
 import { registerAuthCommand } from "./commands/auth.js";
 import { registerCardAddChildCommand } from "./commands/card-add-child.js";
 import { registerCardAddLabelCommand } from "./commands/card-add-label.js";
@@ -114,6 +115,9 @@ export function createProgram(): Command {
   const attachmentCommand = program.command("attachment").description("Operações de attachment");
   registerAttachmentUploadCommand(attachmentCommand);
   registerAttachmentLinkCardCommand(attachmentCommand);
+
+  const toolCommand = program.command("tool").description("Ferramentas de API do agente (agent_tool type='api')");
+  registerToolCallCommand(toolCommand);
 
   const registerFormAnswerCommand = program
     .command("register-form-answer")
