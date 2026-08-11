@@ -22,16 +22,31 @@ export interface CommentSummary {
 
 export interface CommentsContracts {
   createCardComment: (input: {
-    flowId: number;
+    flowId?: number;
     cardId: number;
     description: string;
-    mentions: number[];
+    mentions?: number[];
   }) => Promise<{ raw: unknown }>;
   listCommentsByCard: (input: {
-    flowId: number | string;
+    flowId?: number | string;
     cardId: number | string;
   }) => Promise<{ raw: unknown; summaries: CommentSummary[]; total: number }>;
 }
+
+/**
+ * flow_id do card, resolvido de `CANGE_CARD_FLOW_ID` (o runner injeta o fluxo REAL do card
+ * no ambiente do agente). Retorna undefined se a env estiver ausente/inválida. Usado como
+ * fallback quando o chamador não passa flowId — assim o agente comenta sabendo só o cardId.
+ */
+function readEnvFlowId(): number | undefined {
+  const raw = process.env.CANGE_CARD_FLOW_ID;
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? n : undefined;
+}
+
+const FLOW_ID_MISSING_MSG =
+  "flow_id ausente: passe --flow-id, inclua flowId no payload, ou rode com CANGE_CARD_FLOW_ID no ambiente (o runner injeta o flow do card automaticamente).";
 
 export function createCommentsContracts(client: CangeClient): CommentsContracts {
   return {
@@ -43,10 +58,15 @@ export function createCommentsContracts(client: CangeClient): CommentsContracts 
         });
       }
 
+      const flowId = parsed.data.flowId ?? readEnvFlowId();
+      if (flowId === undefined) {
+        throw new CangeValidationError(FLOW_ID_MISSING_MSG);
+      }
+
       const raw = await client.post<unknown>("/card-comment", {
         body: {
           card_id: parsed.data.cardId,
-          flow_id: parsed.data.flowId,
+          flow_id: flowId,
           description: parsed.data.description,
           mentions: parsed.data.mentions
         }
@@ -62,9 +82,14 @@ export function createCommentsContracts(client: CangeClient): CommentsContracts 
         });
       }
 
+      const flowId = parsed.data.flowId ?? readEnvFlowId();
+      if (flowId === undefined) {
+        throw new CangeValidationError(FLOW_ID_MISSING_MSG);
+      }
+
       const raw = await client.get<unknown>("/card-comment/by-card", {
         query: {
-          flow_id: toNumber(parsed.data.flowId),
+          flow_id: toNumber(flowId),
           card_id: toNumber(parsed.data.cardId)
         }
       });

@@ -4,7 +4,7 @@ import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 
 interface CommentListOptions {
-  flowId: string;
+  flowId?: string;
   cardId: string;
   summaryOnly?: boolean;
 }
@@ -13,7 +13,10 @@ export function registerCardCommentListCommand(commentCommand: Command): void {
   const command = commentCommand
     .command("list")
     .description("Lista comentários de um card por flow_id + card_id")
-    .requiredOption("--flow-id <id>", "ID do flow")
+    .option(
+      "--flow-id <id>",
+      "ID do flow (opcional). Se omitido, usa CANGE_CARD_FLOW_ID do ambiente (o runner injeta o flow do card)."
+    )
     .requiredOption("--card-id <id>", "ID do card")
     .option("--summary-only", "Retorna somente summaries (sem raw)")
     .action(
