@@ -8,6 +8,7 @@ import { CangeCliUsageError } from "../client/errors.js";
 import { createCliPrinter } from "../utils/output.js";
 import { exitCodeForError } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
+import { registerAttachmentDownloadCommand } from "./commands/attachment-download.js";
 import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-card.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
 import { registerToolCallCommand } from "./commands/tool-call.js";
@@ -115,6 +116,7 @@ export function createProgram(): Command {
   const attachmentCommand = program.command("attachment").description("Operações de attachment");
   registerAttachmentUploadCommand(attachmentCommand);
   registerAttachmentLinkCardCommand(attachmentCommand);
+  registerAttachmentDownloadCommand(attachmentCommand);
 
   const toolCommand = program.command("tool").description("Ferramentas de API do agente (agent_tool type='api')");
   registerToolCallCommand(toolCommand);
