@@ -25,10 +25,23 @@ export interface Journey {
 }
 
 /**
- * Jornadas canônicas. A de ANEXO vem primeiro de propósito: é a mais errada por
- * agentes (e a que o MCP nem cobre).
+ * Jornadas canônicas. O MAPA vem primeiro (é o passo 0 de qualquer tarefa);
+ * ANEXO em seguida por ser a jornada mais errada por agentes (e a que o MCP
+ * nem cobre).
  */
 export const JOURNEYS: Journey[] = [
+  {
+    id: "mapear_ambiente",
+    title: "Entender o ambiente (mapa de flows, etapas, campos e vínculos)",
+    when: "início de QUALQUER tarefa em que você ainda não conhece a estrutura (qual flow, quais etapas, onde cada campo vive, como os flows se relacionam)",
+    steps: [
+      "cange map — devolve em UMA chamada: flows acessíveis, etapas (id/nome/form), campos (id/hash/título/tipo/obrigatório/form) e os RELACIONAMENTOS entre flows (COMBO_BOX_FLOW_FIELD) + cadastros usados.",
+      "cange map --flow-id <f> — versão enxuta de um flow só.",
+      "Com o mapa em mãos: campo com formId == formInitId é do form de CRIAÇÃO; campo com formId de uma etapa (steps[].formId) é campo de ETAPA."
+    ],
+    pitfall:
+      "NÃO reconstrua o ambiente na unha (my-flows + flow get + fields by-flow flow a flow + tentativa-e-erro): isso queima dezenas de turnos. `cange map` substitui essa exploração inteira."
+  },
   {
     id: "ler_anexo",
     title: "Ler um anexo/arquivo de um card (PDF, imagem, etc.)",
@@ -47,10 +60,12 @@ export const JOURNEYS: Journey[] = [
     title: "Ler um card e seus campos",
     when: "precisa dos valores atuais de um card",
     steps: [
-      "cange card get --flow-id <f> --card-id <c> — os valores legíveis vivem em `summary.fieldValues` (chave = field id, valor já textual); `raw` é a resposta crua.",
-      "Para o TEXTO de um campo de opção/register, use `valueString` (não o `value`, que é o CÓDIGO)."
+      "cange card read --flow-id <f> --card-id <c> — leitura ENXUTA: etapa atual + fieldValues legíveis (chave = field id, valor textual). Use este por PADRÃO.",
+      "cange card get --flow-id <f> --card-id <c> — só quando precisar do `raw` completo (pesado: pode passar de 700 KB)."
     ],
-    pitfall: "Registro ATIVO vs deletado: a verdade é o campo `deleted` (\"N\"=ativo, \"S\"=deletado). NÃO use `dt_deleted` (vem preenchido em ativos)."
+    pitfall:
+      "NÃO parseie o `raw` do card get para achar valores — os valores legíveis já vêm prontos no `card read` (fieldValues). " +
+      "Registro ATIVO vs deletado: a verdade é o campo `deleted` (\"N\"=ativo, \"S\"=deletado); NÃO use `dt_deleted` (vem preenchido em ativos)."
   },
   {
     id: "escrever_campos",
@@ -81,19 +96,21 @@ export const JOURNEYS: Journey[] = [
     title: "Mover um card de etapa",
     when: "avançar o card para outra etapa do fluxo",
     steps: [
-      "cange step-form --flow-id <f> --step-id <destino> — descubra os campos OBRIGATÓRIOS da etapa de destino.",
-      "cange template step-move --flow-id <f> --card-id <c> — gera o shape do payload.",
-      "cange card move-step-with-values --payload <arquivo.json> — mova com os obrigatórios preenchidos."
-    ]
+      "cange map --flow-id <f> (ou cange flow get --flow-id <f>) — descubra os ids das etapas de ORIGEM e DESTINO.",
+      "cange template step-move --flow-id <f> --from-step-id <origem> --to-step-id <destino> --card-id <c> — gera o payloadSkeleton PRONTO (com os campos obrigatórios do move e o cardId preenchido). Grave-o num arquivo .json e preencha os values.",
+      "cange card move-step-with-values --payload <arquivo.json> --dry-run — valide; depois rode sem --dry-run."
+    ],
+    pitfall:
+      "O template exige --from-step-id E --to-step-id (não existe --step-id). O skeleton já sai com ids numéricos — use-o como base em vez de montar o payload do zero."
   },
   {
     id: "achar_estrutura",
     title: "Descobrir fluxo, etapas e campos",
     when: "não sabe os ids de flow/etapa/campo",
     steps: [
-      "cange my-flows — lista os fluxos que você acessa (id + título).",
-      "cange flow get --flow-id <f> — etapas do fluxo.",
-      "cange fields by-flow --flow-id <f> / cange step-form --flow-id <f> --step-id <s> — os campos (id, tipo, label)."
+      "cange map — o mapa completo em 1 chamada (flows + etapas + campos + vínculos). Comece por ele.",
+      "cange step-form --flow-id <f> --step-id <s> — detalhe dos campos de UMA etapa (obrigatórios do move).",
+      "cange fields by-flow --flow-id <f> — todos os campos do flow (com o form de cada um)."
     ]
   },
   {
@@ -109,12 +126,15 @@ export const JOURNEYS: Journey[] = [
 
 /** Regras de ouro — valem em quase toda interação de escrita/leitura. */
 export const GOLDEN_RULES: string[] = [
+  "Comece pelo MAPA: `cange map` dá flows + etapas + campos + vínculos em 1 chamada — não reconstrua o ambiente na unha.",
+  "Ler card: `cange card read` (enxuto) por padrão; `card get` (com raw pesado) só quando precisar da estrutura crua.",
   "Toda MUTAÇÃO (comment/update/move/add-child) usa `--payload <arquivo.json>` — caminho de ARQUIVO, NUNCA JSON inline. Leitura usa flags diretas.",
   "Em `values`, a chave é o `id`/`name` do field (de `fields by-flow`/`step-form`), e o valor de um campo de opção é o CÓDIGO (`value`), não o texto.",
   "Ler texto de campo: use `valueString`; `value` costuma ser só o código da opção.",
   "Registro ativo vs deletado: olhe o campo `deleted` (\"N\"/\"S\"), não `dt_deleted`.",
   "Anexo: SEMPRE `cange attachment download`, NUNCA curl no blob cru.",
-  "Campo do form de criação → `card update-values`; campo de ETAPA → `card move-step-with-values`."
+  "Campo do form de criação → `card update-values`; campo de ETAPA → `card move-step-with-values`.",
+  "Ids em flags e payloads: use o padrão `--flow-id`/`--card-id`/`--register-id`; nos payloads, ids numéricos (string numérica também é aceita)."
 ];
 
 /** Armadilhas do ambiente headless do runner (queimam turno se ignoradas). */

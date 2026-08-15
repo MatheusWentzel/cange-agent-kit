@@ -20,6 +20,7 @@ import { registerCardRelationshipCommand } from "./commands/card-relationship.js
 import { registerCardCommentListCommand } from "./commands/card-comment-list.js";
 import { registerCardCreateCommand } from "./commands/card-create.js";
 import { registerCardGetCommand } from "./commands/card-get.js";
+import { registerCardReadCommand } from "./commands/card-read.js";
 import { registerCardMoveStepCommand } from "./commands/card-move-step.js";
 import { registerCardMoveStepWithValuesCommand } from "./commands/card-move-step-with-values.js";
 import { registerCardUpdateCommand } from "./commands/card-update.js";
@@ -40,6 +41,7 @@ import { registerFlowGetCommand } from "./commands/flow-get.js";
 import { registerFlowQueryCommand } from "./commands/flow-query.js";
 import { registerFlowViewsListCommand } from "./commands/flow-views-list.js";
 import { registerGuideCommand } from "./commands/guide.js";
+import { registerMapCommand } from "./commands/map.js";
 import { registerManifestCommand } from "./commands/manifest.js";
 import { registerMyFlowsCommand } from "./commands/my-flows.js";
 import { registerMyRegistersCommand } from "./commands/my-registers.js";
@@ -100,6 +102,7 @@ export function createProgram(): Command {
 
   const cardCommand = program.command("card").description("Operações de card");
   registerCardGetCommand(cardCommand);
+  registerCardReadCommand(cardCommand);
   registerCardsListCommand(cardCommand);
   registerCardCreateCommand(cardCommand);
   registerCardUpdateCommand(cardCommand);
@@ -146,6 +149,7 @@ export function createProgram(): Command {
 
   registerManifestCommand(program);
   registerGuideCommand(program);
+  registerMapCommand(program);
 
   return program;
 }

@@ -45,6 +45,8 @@ export interface PayloadBuilderContracts {
     flowId: number | string;
     fromStepId: number | string;
     toStepId: number | string;
+    /** Opcional: preenche o `cardId` do payloadSkeleton (senão fica "<CARD_ID>"). */
+    cardId?: number | string;
   }) => Promise<StepMoveTemplateResult>;
   buildRegisterCreationTemplate: (input: { registerId: number | string }) => Promise<ValuesTemplateResult>;
   validateValuesAgainstFields: (input: ValidateValuesInput) => ValidationResult;
@@ -218,22 +220,26 @@ export function createPayloadBuilderContracts(params: {
       const fieldSet = await fields.getFieldsByFlow({ flowId: input.flowId });
       const formFields = filterFieldsByForm(fieldSet.fields, fromStep.formId);
 
+      // Ids do skeleton saem como NUMBER de propósito: o payload de mutação coage
+      // strings numéricas hoje, mas o template deve gerar o shape canônico — copiar
+      // e colar o skeleton precisa funcionar sem retoque (caso real: run 1219728).
+      const numericFormId = fromStep.formId !== undefined ? Number(fromStep.formId) : fromStep.formId;
       return {
         context: {
           kind: "flow-step-move",
-          flowId: input.flowId,
-          formId: fromStep.formId,
-          fromStepId: input.fromStepId,
-          toStepId: input.toStepId
+          flowId: Number(input.flowId),
+          formId: numericFormId,
+          fromStepId: Number(input.fromStepId),
+          toStepId: Number(input.toStepId)
         },
         requiredFields: getRequiredFields(formFields).map(toFieldSummary),
         optionalFields: formFields.filter((item) => !item.required).map(toFieldSummary),
         payloadSkeleton: {
-          flowId: input.flowId,
-          cardId: "<CARD_ID>",
-          fromStepId: input.fromStepId,
-          toStepId: input.toStepId,
-          idForm: fromStep.formId,
+          flowId: Number(input.flowId),
+          cardId: input.cardId !== undefined ? Number(input.cardId) : "<CARD_ID>",
+          fromStepId: Number(input.fromStepId),
+          toStepId: Number(input.toStepId),
+          idForm: numericFormId,
           values: buildValuesSkeleton(formFields),
           complete: "N",
           isFromCurrentStep: true,
@@ -407,7 +413,7 @@ function findFlowStep(flowRaw: unknown, stepId: number | string): FlowStepSummar
   return steps.find((step) => step.id !== undefined && String(step.id) === targetId);
 }
 
-function extractFlowSteps(flowRaw: unknown): FlowStepSummary[] {
+export function extractFlowSteps(flowRaw: unknown): FlowStepSummary[] {
   const roots: Array<Record<string, unknown>> = [];
   const direct = asRecord(flowRaw);
   const primary = extractPrimaryRecord(flowRaw);
