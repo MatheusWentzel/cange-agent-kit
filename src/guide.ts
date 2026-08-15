@@ -151,7 +151,7 @@ export const GOLDEN_RULES: string[] = [
 
 /** Armadilhas do ambiente headless do runner (queimam turno se ignoradas). */
 export const GOTCHAS: string[] = [
-  "Ambiente headless: NÃO existem `python3`, `jq`, `file`, `timeout`. Use Node (`node -e`), as ferramentas Read/Grep e o CLI `cange` — não dependa daqueles binários.",
+  "Ambiente headless: prefira Node (`node -e`), Read/Grep e o CLI `cange`. `python3`/`jq`/`file` existem como fallback; `timeout` NÃO existe.",
   "Todo comando com exit != 0 vira 'ação que falhou' no log da execução. Antes de ler um arquivo que pode não existir, use `[ -f <path> ] && cat <path> || echo ausente` — não `cat` direto.",
   "Kit SEMPRE, MCP NUNCA: use o CLI `cange` (autentica como você). Nunca use um conector MCP do Cange — ele autentica como outro usuário e quebra fila/auditoria.",
   "Se um comando falhar com `unknown command`/`required option`, PARE e consulte `cange manifest --output json` ou `cange guide` — não tente às cegas.",
