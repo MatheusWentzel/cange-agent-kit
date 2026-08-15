@@ -69,6 +69,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     listFlowViews: flowViews.listFlowViews,
     getFlowView: flowViews.getFlowView,
     getCardRelationship: cards.getCardRelationship,
+    getCardAttachmentDownloads: attachments.getCardAttachmentDownloads,
     getRegisterFormAnswer: registers.getRegisterFormAnswer,
     listCommentsByCard: comments.listCommentsByCard,
     flowBuildPing: flowV2Build.ping,
