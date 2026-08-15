@@ -1,21 +1,21 @@
 import { z } from "zod";
 
-import { idLikeSchema, nonEmptyStringSchema, valuesSchema } from "./common.js";
+import { coercedIdSchema, idLikeSchema, nonEmptyStringSchema, valuesSchema } from "./common.js";
 
 export const createCardPayloadSchema = z.object({
-  idForm: z.number().int().positive(),
-  flowId: z.number().int().positive(),
+  idForm: coercedIdSchema,
+  flowId: coercedIdSchema,
   origin: nonEmptyStringSchema,
   values: valuesSchema
 });
 
 export const updateCardPayloadSchema = z
   .object({
-    flowId: z.number().int().positive(),
-    cardId: z.number().int().positive(),
-    userId: z.number().int().positive().optional(),
+    flowId: coercedIdSchema,
+    cardId: coercedIdSchema,
+    userId: coercedIdSchema.optional(),
     dtDue: z.string().optional(),
-    flowTagId: z.number().int().positive().optional(),
+    flowTagId: coercedIdSchema.optional(),
     complete: z.enum(["S", "N"]).optional(),
     archived: z.enum(["S", "N"]).optional()
   })
@@ -32,16 +32,16 @@ export const updateCardPayloadSchema = z
   );
 
 export const updateCardValuesPayloadSchema = z.object({
-  idForm: z.number().int().positive(),
-  flowId: z.number().int().positive(),
-  cardId: z.number().int().positive(),
+  idForm: coercedIdSchema,
+  flowId: coercedIdSchema,
+  cardId: coercedIdSchema,
   values: valuesSchema
 });
 
 export const addCardLabelPayloadSchema = z.object({
-  flowId: z.number().int().positive(),
-  cardId: z.number().int().positive(),
-  flowTagId: z.number().int().positive()
+  flowId: coercedIdSchema,
+  cardId: coercedIdSchema,
+  flowTagId: coercedIdSchema
 });
 
 // Leitura confiável da relação pai-filho (COMBO_BOX_FLOW_FIELD / "Meus Fluxos").
@@ -62,29 +62,29 @@ export const cardRelationshipParamsSchema = z.object({
 // (caso "primeiro marco"); para preservar vínculos existentes, é OBRIGATÓRIO passá-los.
 export const addChildCardPayloadSchema = z.object({
   child: z.object({
-    flowId: z.number().int().positive(),
-    idForm: z.number().int().positive(),
+    flowId: coercedIdSchema,
+    idForm: coercedIdSchema,
     origin: nonEmptyStringSchema,
     values: valuesSchema
   }),
   parent: z.object({
-    flowId: z.number().int().positive(),
-    cardId: z.number().int().positive(),
-    idForm: z.number().int().positive(),
+    flowId: coercedIdSchema,
+    cardId: coercedIdSchema,
+    idForm: coercedIdSchema,
     linkField: nonEmptyStringSchema,
-    existingChildIds: z.array(z.number().int().positive()).optional()
+    existingChildIds: z.array(coercedIdSchema).optional()
   })
 });
 
 const moveCardStepBasePayloadSchema = z.object({
-  flowId: z.number().int().positive(),
-  cardId: z.number().int().positive(),
-  fromStepId: z.number().int().positive(),
-  toStepId: z.number().int().positive(),
+  flowId: coercedIdSchema,
+  cardId: coercedIdSchema,
+  fromStepId: coercedIdSchema,
+  toStepId: coercedIdSchema,
   // Opcional: se omitido, o contrato resolve o form da etapa DESTINO (toStepId).
   // Um move usa o form de uma ETAPA (origem ou destino) — nunca o form de criação
   // (form_init), que criaria um form_answer duplicado sob o form_init e quebraria o V2.
-  idForm: z.number().int().positive().optional(),
+  idForm: coercedIdSchema.optional(),
   values: valuesSchema,
   complete: z.enum(["S", "N"]).optional(),
   isFromCurrentStep: z.boolean().optional(),

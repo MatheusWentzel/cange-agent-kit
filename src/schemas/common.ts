@@ -5,6 +5,18 @@ export const idLikeSchema = z.union([
   z.string().regex(/^\d+$/, "Expected integer numeric string")
 ]);
 
+/**
+ * Id que ACEITA number ou string numérica e SEMPRE entrega number.
+ * Existe porque os templates (`cange template step-move` etc.) ecoam os ids como
+ * vieram do CLI (string) — e os payloads de mutação exigiam number, fazendo o
+ * skeleton do próprio kit falhar na validação ("expected number, received string").
+ * Caso real: agente Comprador queimou 2 turnos nisso (run card 1219728).
+ */
+export const coercedIdSchema = z
+  .union([z.number(), z.string().regex(/^\d+$/, "Expected integer numeric string")])
+  .transform((value) => (typeof value === "number" ? value : Number.parseInt(value, 10)))
+  .pipe(z.number().int().positive());
+
 export const nonEmptyStringSchema = z.string().trim().min(1);
 
 export const valuesSchema = z.record(z.string(), z.unknown());
