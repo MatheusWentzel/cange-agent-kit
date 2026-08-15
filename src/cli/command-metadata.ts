@@ -1,5 +1,7 @@
 import type { Command, Option } from "commander";
 
+import { guidePayload } from "../guide.js";
+
 /**
  * Convenção de envelope de saída dos comandos de LEITURA do kit.
  * Documentada aqui (fonte única) e exposta no manifesto (item 7).
@@ -95,6 +97,8 @@ export interface Manifest {
   envelopeConvention: string;
   globalOptions: ManifestOption[];
   discovery: string;
+  /** Guia de trabalho: jornadas, regras de ouro e armadilhas (ver `cange guide`). */
+  guide: ReturnType<typeof guidePayload>;
   commands: ManifestCommand[];
 }
 
@@ -149,7 +153,9 @@ export function buildManifest(program: Command): Manifest {
     envelopeConvention: ENVELOPE_CONVENTION,
     discovery:
       "Use `cange manifest --output json` (esta saída) como fonte de verdade. " +
-      "Para detalhe/ajuda de um comando: `cange <path> --help`.",
+      "Para detalhe/ajuda de um comando: `cange <path> --help`. " +
+      "Para o CAMINHO de cada tarefa comum (baixar anexo, escrever campo, comentar, mover card): veja `guide` abaixo ou `cange guide`.",
+    guide: guidePayload(),
     globalOptions: program.options.map(describeOption),
     commands: program.commands
       .map((child) => walkCommand(child, ""))

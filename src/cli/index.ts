@@ -39,6 +39,7 @@ import { registerFlowBuildStepRelationshipCommands } from "./commands/flow-build
 import { registerFlowGetCommand } from "./commands/flow-get.js";
 import { registerFlowQueryCommand } from "./commands/flow-query.js";
 import { registerFlowViewsListCommand } from "./commands/flow-views-list.js";
+import { registerGuideCommand } from "./commands/guide.js";
 import { registerManifestCommand } from "./commands/manifest.js";
 import { registerMyFlowsCommand } from "./commands/my-flows.js";
 import { registerMyRegistersCommand } from "./commands/my-registers.js";
@@ -144,6 +145,7 @@ export function createProgram(): Command {
   registerFlowBuildStepRelationshipCommands(flowBuildCommand);
 
   registerManifestCommand(program);
+  registerGuideCommand(program);
 
   return program;
 }
