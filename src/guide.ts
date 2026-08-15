@@ -64,8 +64,20 @@ export const JOURNEYS: Journey[] = [
       "cange card get --flow-id <f> --card-id <c> — só quando precisar do `raw` completo (pesado: pode passar de 700 KB)."
     ],
     pitfall:
-      "NÃO parseie o `raw` do card get para achar valores — os valores legíveis já vêm prontos no `card read` (fieldValues). " +
+      "NÃO parseie o `raw` do card get para achar valores — os valores legíveis já vêm prontos no `card read` (fieldValues; multi-valor vira array). " +
       "Registro ATIVO vs deletado: a verdade é o campo `deleted` (\"N\"=ativo, \"S\"=deletado); NÃO use `dt_deleted` (vem preenchido em ativos)."
+  },
+  {
+    id: "navegar_vinculos",
+    title: "Navegar vínculos entre cards (pai ⇄ filhos)",
+    when: "o card se relaciona com cards de outros flows (ex.: Pedido → Itens, Pedido → Fornecedores) e você precisa achar os ids do outro lado",
+    steps: [
+      "PAI → FILHOS: `cange card read --flow-id <f> --card-id <pai>` — o bloco `links` traz, por field de vínculo (COMBO_BOX_FLOW_FIELD), a lista completa [{cardId, label}] dos cards apontados.",
+      "FILHO → PAI: `cange card relationship --flow-id <flowDoVinculo> --card-id <filho>` — devolve os cards que referenciam o filho.",
+      "Depois leia cada card do outro lado com `cange card read`."
+    ],
+    pitfall:
+      "NÃO baixe o `card get` (raw de 1 MB+) do pai só para achar os filhos — o `links` do card read já traz todos os ids. O fieldValues sozinho não basta para vínculo multi-valor."
   },
   {
     id: "escrever_campos",
@@ -140,6 +152,7 @@ export const GOLDEN_RULES: string[] = [
 /** Armadilhas do ambiente headless do runner (queimam turno se ignoradas). */
 export const GOTCHAS: string[] = [
   "Ambiente headless: NÃO existem `python3`, `jq`, `file`, `timeout`. Use Node (`node -e`), as ferramentas Read/Grep e o CLI `cange` — não dependa daqueles binários.",
+  "Todo comando com exit != 0 vira 'ação que falhou' no log da execução. Antes de ler um arquivo que pode não existir, use `[ -f <path> ] && cat <path> || echo ausente` — não `cat` direto.",
   "Kit SEMPRE, MCP NUNCA: use o CLI `cange` (autentica como você). Nunca use um conector MCP do Cange — ele autentica como outro usuário e quebra fila/auditoria.",
   "Se um comando falhar com `unknown command`/`required option`, PARE e consulte `cange manifest --output json` ou `cange guide` — não tente às cegas.",
   "Antes de encerrar, ENTREGUE o resultado no card (`cange comment create` e/ou escrita de campos). Enquanto não entregar, a tarefa NÃO está concluída."
