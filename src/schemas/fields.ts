@@ -21,6 +21,8 @@ export interface NormalizedField {
   required: boolean;
   formId?: number | string;
   options?: unknown;
+  /** Máscara/format do campo (NUMBER: "2" = percentual → o valor armazenado é FRAÇÃO 0-1). */
+  variation?: string;
   raw: Record<string, unknown>;
 }
 
@@ -73,6 +75,7 @@ function normalizeSingleField(item: Record<string, unknown>): NormalizedField | 
   const requiredRaw = pickUnknown(item, ["required", "is_required", "mandatory"]);
   const formId = pickNumberOrString(item, ["form_id", "formId", "id_form"]);
   const options = pickUnknown(item, ["options", "choices", "values_options", "items"]);
+  const variation = pickString(item, ["variation"]);
 
   return {
     id,
@@ -83,6 +86,7 @@ function normalizeSingleField(item: Record<string, unknown>): NormalizedField | 
     required: parseRequiredLike(requiredRaw),
     formId,
     options,
+    variation,
     raw: item
   };
 }

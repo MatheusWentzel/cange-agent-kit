@@ -417,9 +417,15 @@ export function summarizeFields(fields: NormalizedField[]): FieldsSummary {
     title: field.title,
     description: field.description,
     type: field.type,
-    expectedFormat: getExpectedFormatByFieldType(field.type),
+    // NUMBER percentual (variation "2") armazena FRAÇÃO — o formato enriquecido
+    // orienta o autor do payload ANTES da escrita (bug real: 90 → "9.000,00%").
+    expectedFormat:
+      field.type === "NUMBER_FIELD" && field.variation === "2"
+        ? "number (FRAÇÃO 0-1: 0.9 = 90% — campo percentual)"
+        : getExpectedFormatByFieldType(field.type),
     required: field.required,
-    formId: field.formId
+    formId: field.formId,
+    ...(field.variation !== undefined ? { variation: field.variation } : {})
   }));
 
   const groupedByFormId: Record<string, number> = {};

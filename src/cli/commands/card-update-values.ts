@@ -4,7 +4,7 @@ import { CangeValidationError } from "../../client/errors.js";
 import { updateCardValuesPayloadSchema } from "../../schemas/cards.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { createCommandAction } from "../context.js";
-import { assertValidationResult, readPayloadFile } from "../helpers.js";
+import { assertValidationResult, normalizeNumericValueKeys, readPayloadFile } from "../helpers.js";
 
 interface CardUpdateValuesOptions {
   payload: string;
@@ -20,7 +20,7 @@ export function registerCardUpdateValuesCommand(cardCommand: Command): void {
     .option("--validate-fields", "Valida values contra fields antes de mutar")
     .option("--dry-run", "Exibe payload sem executar a mutação")
     .action(
-      createCommandAction(async ({ kit }, options: CardUpdateValuesOptions) => {
+      createCommandAction(async ({ kit, ensureAuth }, options: CardUpdateValuesOptions) => {
         const payloadRaw = await readPayloadFile<unknown>(options.payload);
         const parsed = updateCardValuesPayloadSchema.safeParse(payloadRaw);
         if (!parsed.success) {
@@ -29,6 +29,7 @@ export function registerCardUpdateValuesCommand(cardCommand: Command): void {
           });
         }
         const payload = parsed.data;
+        payload.values = (await normalizeNumericValueKeys(kit, payload.flowId, payload.values, ensureAuth)).values;
 
         if (options.validateFields) {
           const fieldsData = await kit.contracts.getFieldsByFlow({ flowId: payload.flowId });

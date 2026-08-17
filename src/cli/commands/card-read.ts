@@ -79,6 +79,9 @@ export function registerCardReadCommand(cardCommand: Command): void {
           fieldValues,
           ...(extracted.links && Object.keys(extracted.links).length > 0
             ? { links: extracted.links }
+            : {}),
+          ...(extracted.registerLinks && Object.keys(extracted.registerLinks).length > 0
+            ? { registerLinks: extracted.registerLinks }
             : {})
         };
       })
@@ -86,9 +89,9 @@ export function registerCardReadCommand(cardCommand: Command): void {
 
   annotateCommand(command, {
     envelope:
-      "{ cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links? }",
+      "{ cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? }",
     fieldsLocation:
-      "fieldValues: chave = field id, valor = texto legível (multi-valor vira array). links: vínculos COMBO_BOX_FLOW_FIELD por field id — [{cardId, label}] (é assim que se acham os FILHOS de um card pai)",
+      "fieldValues: chave = field id, valor = texto legível (multi-valor vira array). links: vínculos COMBO_BOX_FLOW_FIELD — [{cardId, label}] (acha os FILHOS de um pai). registerLinks: COMBO_BOX_REGISTER_FIELD — [{entryId, label}] (o entryId pronto p/ usar em campo de register de outro card)",
     example: "card read --flow-id 22792 --card-id 1219728"
   });
 }
@@ -98,9 +101,15 @@ interface CardLink {
   label?: string;
 }
 
+interface RegisterLink {
+  entryId: number;
+  label?: string;
+}
+
 interface ExtractedCard {
   fieldValues?: Record<string, unknown>;
   links?: Record<string, CardLink[]>;
+  registerLinks?: Record<string, RegisterLink[]>;
 }
 
 /**
@@ -116,6 +125,7 @@ function extractValuesAndLinks(raw: unknown): ExtractedCard {
 
   const valuesByField = new Map<string, unknown[]>();
   const linksByField = new Map<string, CardLink[]>();
+  const registerLinksByField = new Map<string, RegisterLink[]>();
 
   for (const answer of formAnswers) {
     if (isDeleted(answer)) continue;
@@ -145,10 +155,22 @@ function extractValuesAndLinks(raw: unknown): ExtractedCard {
         });
         linksByField.set(key, bucket);
       }
+      // 5.1 (retro runs 16-19): o id da ENTRADA do cadastro (value numérico do
+      // COMBO_BOX_REGISTER_FIELD) era invisível — 3 de 4 runs queimaram passos
+      // parseando o raw para achá-lo (é o que o card create exige no campo de
+      // register). Agora sai pronto em `registerLinks`.
+      if (fieldType === "COMBO_BOX_REGISTER_FIELD" && rawValue !== undefined && /^\d+$/.test(String(rawValue))) {
+        const bucket = registerLinksByField.get(key) ?? [];
+        bucket.push({
+          entryId: Number(rawValue),
+          ...(valueString !== undefined ? { label: valueString } : {})
+        });
+        registerLinksByField.set(key, bucket);
+      }
     }
   }
 
-  if (valuesByField.size === 0 && linksByField.size === 0) return {};
+  if (valuesByField.size === 0 && linksByField.size === 0 && registerLinksByField.size === 0) return {};
 
   const fieldValues: Record<string, unknown> = {};
   for (const [key, values] of valuesByField) {
@@ -158,10 +180,15 @@ function extractValuesAndLinks(raw: unknown): ExtractedCard {
   for (const [key, list] of linksByField) {
     links[key] = list;
   }
+  const registerLinks: Record<string, RegisterLink[]> = {};
+  for (const [key, list] of registerLinksByField) {
+    registerLinks[key] = list;
+  }
 
   return {
     fieldValues: Object.keys(fieldValues).length > 0 ? fieldValues : undefined,
-    links: Object.keys(links).length > 0 ? links : undefined
+    links: Object.keys(links).length > 0 ? links : undefined,
+    registerLinks: Object.keys(registerLinks).length > 0 ? registerLinks : undefined
   };
 }
 
