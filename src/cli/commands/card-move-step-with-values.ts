@@ -8,7 +8,7 @@ import { detectDataLoss, type DataLossCheck } from "../../utils/dataLoss.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { getExpectedFormatByFieldType } from "../../utils/fieldTypeGuards.js";
 import { createCommandAction } from "../context.js";
-import { assertValidationResult, readPayloadFile } from "../helpers.js";
+import { assertValidationResult, normalizeNumericValueKeys, readPayloadFile } from "../helpers.js";
 
 interface CardMoveStepWithValuesOptions {
   payload?: string;
@@ -77,6 +77,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
           });
         }
         const payload = parsed.data;
+        payload.values = (await normalizeNumericValueKeys(kit, payload.flowId, payload.values, ensureAuth)).values;
 
         // M1 — Guard de self-move. O endpoint /card/v2/move-step NÃO bloqueia
         // fromStepId === toStepId (diferente da v1), e cada move cria um

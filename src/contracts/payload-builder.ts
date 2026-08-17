@@ -2,7 +2,7 @@ import { CangeValidationError } from "../client/errors.js";
 import type { NormalizedField } from "../schemas/fields.js";
 import { getExpectedFormatByFieldType, validateValueByFieldType } from "../utils/fieldTypeGuards.js";
 import { getRequiredFields } from "../utils/requiredFields.js";
-import { buildValuesSkeleton } from "../utils/valuesBuilder.js";
+import { SKELETON_NOTE, buildValuesSkeleton } from "../utils/valuesBuilder.js";
 
 import { filterFieldsByForm, type FieldsContracts } from "./fields.js";
 import type { FlowsContracts } from "./flows.js";
@@ -47,6 +47,8 @@ export interface PayloadBuilderContracts {
     toStepId: number | string;
     /** Opcional: preenche o `cardId` do payloadSkeleton (senão fica "<CARD_ID>"). */
     cardId?: number | string;
+    /** Inclui os campos OPCIONAIS no payloadSkeleton (com placeholder <OPTIONAL:tipo>). */
+    includeOptional?: boolean;
   }) => Promise<StepMoveTemplateResult>;
   buildRegisterCreationTemplate: (input: { registerId: number | string }) => Promise<ValuesTemplateResult>;
   validateValuesAgainstFields: (input: ValidateValuesInput) => ValidationResult;
@@ -180,6 +182,7 @@ export function createPayloadBuilderContracts(params: {
           origin: "/cange-agent-kit",
           values: buildValuesSkeleton(formFields)
         },
+        skeletonNote: SKELETON_NOTE,
         flowSummary: flowData.summary,
         fieldsSummary: summarizeFields(formFields)
       };
@@ -245,6 +248,7 @@ export function createPayloadBuilderContracts(params: {
           isFromCurrentStep: true,
           isTestMode: false
         },
+        skeletonNote: SKELETON_NOTE,
         flowSummary: flowData.summary,
         fieldsSummary: summarizeFields(formFields),
         fromStep,
@@ -268,6 +272,7 @@ export function createPayloadBuilderContracts(params: {
           origin: "/cange-agent-kit",
           values: buildValuesSkeleton(formFields)
         },
+        skeletonNote: SKELETON_NOTE,
         registerSummary: registerData.summary,
         fieldsSummary: summarizeFields(formFields)
       };
@@ -296,6 +301,32 @@ export function validateValuesAgainstFields(input: ValidateValuesInput): Validat
         message: originalField
           ? `O campo ${formatFieldReference(key, originalField.title)} não pertence ao formulário alvo.`
           : `O campo "${key}" não existe na estrutura consultada.`
+      });
+      continue;
+    }
+
+    // 5.7 (retro runs 16-19): NUMBER percentual armazena FRAÇÃO (0.9 = 90%).
+    // Valor > 10 (>1000%) é quase certamente o erro clássico "mandei 90 querendo
+    // 90%" (caso real: Confiança 90 → "9.000,00%" no run 19). Bloqueia com
+    // mensagem pedagógica; percentuais legítimos >100% (1.5 = 150%) passam.
+    const fieldVariation =
+      field.variation ?? (typeof field.raw?.variation === "string" ? field.raw.variation : undefined);
+    if (
+      field.type === "NUMBER_FIELD" &&
+      fieldVariation === "2" &&
+      typeof value === "number" &&
+      Math.abs(value) > 10
+    ) {
+      issues.push({
+        code: "PERCENT_FRACTION_SUSPECT",
+        fieldName: key,
+        fieldTitle: field.title,
+        message:
+          `O campo ${formatFieldReference(key, field.title)} é PERCENTUAL e armazena FRAÇÃO ` +
+          `(0.9 = 90%). Valor recebido: ${value} (= ${(value * 100).toLocaleString("pt-BR")}%). ` +
+          `Se você quis dizer ${value}%, envie ${value / 100}.`,
+        expected: "number (FRAÇÃO 0-1: 0.9 = 90%)",
+        receivedType: describeValueType(value)
       });
       continue;
     }

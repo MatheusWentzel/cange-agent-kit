@@ -144,6 +144,8 @@ export interface FieldSummaryItem {
   expectedFormat?: string;
   required: boolean;
   formId?: number | string;
+  /** Máscara do campo (NUMBER "2" = percentual: valor armazenado é FRAÇÃO 0-1). */
+  variation?: string;
 }
 
 export interface FieldsSummary {
@@ -179,7 +181,8 @@ export interface ValidationIssue {
     | "INVALID_TYPE"
     | "INVALID_OPTION"
     | "FIELD_OUT_OF_FORM"
-    | "UNKNOWN_FIELD_TYPE";
+    | "UNKNOWN_FIELD_TYPE"
+    | "PERCENT_FRACTION_SUSPECT";
   fieldName: string;
   fieldTitle?: string;
   message: string;

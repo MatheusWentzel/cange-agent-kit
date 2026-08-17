@@ -104,6 +104,31 @@ export const JOURNEYS: Journey[] = [
     pitfall: "`--payload` é SEMPRE um CAMINHO DE ARQUIVO .json — NUNCA JSON inline. É isso que faz body grande funcionar."
   },
   {
+    id: "criar_card",
+    title: "Criar um card num fluxo",
+    when: "precisa inserir um item/registro novo num fluxo (ex.: itens de cotação, marcos, tarefas)",
+    steps: [
+      "cange template flow-create --flow-id <f> — devolve o payloadSkeleton com os HASHES dos campos do form de criação (obrigatórios = <TIPO>; opcionais = <OPTIONAL:TIPO>).",
+      "Monte o payload .json a partir do skeleton: preencha os obrigatórios E os opcionais que a tarefa pede; remova só o que não se aplica. Campo de register = [entryId] (ache com `register entries --register-id <r> --search`, ou pelo registerLinks de um card read).",
+      "cange card create --payload <arq> — valide o PRIMEIRO de um lote com --validate-fields --dry-run; os demais direto. A saída é enxuta: {cardId, stepId, createdAt}.",
+      "Se o card criado precisa aparecer num campo de vínculo de OUTRO card (pai), grave o vínculo lá (ver jornadas navegar_vinculos e gravar_campo_etapa) — criar NÃO vincula sozinho."
+    ],
+    pitfall:
+      "Chaves de values são os HASHES (name) dos campos — id numérico é traduzido automaticamente, mas o canônico é o hash do template. NUNCA envie um placeholder literal (<...>) no payload."
+  },
+  {
+    id: "gravar_campo_etapa",
+    title: "Gravar campo de ETAPA sem mover o card",
+    when: "precisa escrever num campo que pertence ao form de uma etapa (não ao form de criação) sem mudar o card de etapa",
+    steps: [
+      "Descubra o form da etapa dona do campo: `cange map --flow-id <f>` (steps[].formId × fields[].formId).",
+      "cange card update-values --payload <arq.json> com { flowId, cardId, idForm: <FORM DA ETAPA>, values: {\"<hash>\": <valor>} } — o endpoint aceita qualquer form do flow.",
+      "NÃO use --validate-fields neste caso: a validação client-side compara com o form de criação e daria falso UNKNOWN_FIELD."
+    ],
+    pitfall:
+      "NUNCA use self-move (move com from==to) para gravar campo de etapa: cada move cria um form_answer novo e pode sobrepor snapshot preenchido. `update-values` com o idForm da etapa é o caminho canônico."
+  },
+  {
     id: "mover_card",
     title: "Mover um card de etapa",
     when: "avançar o card para outra etapa do fluxo",
