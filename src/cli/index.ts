@@ -159,6 +159,21 @@ const DISCOVERY_HINT =
   "ou `cange <grupo> --help`.";
 
 export async function runCli(argv = process.argv): Promise<void> {
+  // EPIPE = o consumidor do pipe fechou/morreu (`cange … | head`, ou um
+  // processador que crashou no meio). Node não segue a convenção Unix de
+  // SIGPIPE: sem handler, vira "Unhandled 'error' event" com stack trace — num
+  // run de agente, isso polui a trilha com um crash que não é do cange (run 22
+  // do Comprador: o python3 da direita morreu e o cange "explodiu" junto).
+  // Convenção das CLIs Unix (git, grep): parar de escrever e sair em silêncio.
+  const exitQuietlyOnEpipe = (error: NodeJS.ErrnoException): void => {
+    if (error?.code === "EPIPE") {
+      process.exit(0);
+    }
+    throw error;
+  };
+  process.stdout.on("error", exitQuietlyOnEpipe);
+  process.stderr.on("error", exitQuietlyOnEpipe);
+
   const program = createProgram();
   // Item 1: erros ensinam o próximo passo — aplicado a TODA a árvore (subcomandos
   // não herdam exitOverride/config; sem isso um comando desconhecido dentro de um
