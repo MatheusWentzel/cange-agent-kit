@@ -1,13 +1,20 @@
 import type { Command } from "commander";
 
+import { CangeCliUsageError } from "../../client/errors.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 
 interface CardReadOptions {
   flowId: string;
-  cardId: string;
+  cardId?: string;
+  cardIds?: string;
   fieldIds?: string;
 }
+
+/** Teto do batch: acima disso o output deixa de ser "enxuto" e vira despejo. */
+const READ_MANY_MAX = 30;
+/** Concorrência das leituras do batch (gentil com a API, rápido o bastante). */
+const READ_MANY_CONCURRENCY = 5;
 
 /**
  * `cange card read` — leitura ENXUTA de um card, feita para agentes.
@@ -33,67 +40,132 @@ export function registerCardReadCommand(cardCommand: Command): void {
       "LEITURA ENXUTA do card (etapa atual + valores legíveis + vínculos, sem raw) — use este por padrão; `card get` só quando precisar do raw"
     )
     .requiredOption("--flow-id <id>", "ID do flow")
-    .requiredOption("--card-id <id>", "ID do card")
+    .option("--card-id <id>", "ID do card")
+    .option(
+      "--card-ids <ids>",
+      `Lote: lista de card ids separados por vírgula (máx ${READ_MANY_MAX}) — 1 comando lê N cards do mesmo flow`
+    )
     .option(
       "--field-ids <ids>",
       "Filtra fieldValues por IDs de field (lista separada por vírgula)"
     )
     .action(
       createCommandAction(async ({ kit }, options: CardReadOptions) => {
-        const result = await kit.contracts.getCard({
-          flowId: options.flowId,
-          cardId: options.cardId
-        });
-
-        const s = result.summary as Record<string, unknown>;
-        const extracted = extractValuesAndLinks(result.raw);
-
-        // Preferência: valores agregados do raw (multi-valor vira array, deletado
-        // sai); fallback no summary legado quando o raw não tiver form_answers.
-        let fieldValues =
-          extracted.fieldValues ??
-          ((s.fieldValues ?? s.fields ?? {}) as Record<string, unknown>);
-
         const requested = (options.fieldIds ?? "")
           .split(",")
           .map((item) => item.trim())
           .filter((item) => item.length > 0);
-        if (requested.length > 0) {
-          const filtered: Record<string, unknown> = {};
-          for (const id of requested) {
-            filtered[id] = id in fieldValues ? fieldValues[id] : null;
+
+        // ── Modo LOTE (redução de custo do agente: 1 passo lê N cards — em
+        // pedidos com 10-20 itens, cada passo economizado poupa o contexto
+        // inteiro re-lido pelo modelo).
+        if (options.cardIds) {
+          if (options.cardId) {
+            throw new CangeCliUsageError("Use --card-id OU --card-ids, não os dois.");
           }
-          fieldValues = filtered;
+          const ids = options.cardIds
+            .split(",")
+            .map((item) => item.trim())
+            .filter((item) => item.length > 0);
+          if (ids.length === 0) {
+            throw new CangeCliUsageError("--card-ids vazio.");
+          }
+          if (ids.length > READ_MANY_MAX) {
+            throw new CangeCliUsageError(
+              `--card-ids aceita no máximo ${READ_MANY_MAX} cards por chamada (recebi ${ids.length}).`
+            );
+          }
+          const cards = await mapWithConcurrency(ids, READ_MANY_CONCURRENCY, async (cardId) => {
+            try {
+              const result = await kit.contracts.getCard({ flowId: options.flowId, cardId });
+              return buildLeanRead(result, requested);
+            } catch (error) {
+              // Um card com erro não derruba o lote — vira entrada de erro legível.
+              return { cardId: Number(cardId), error: error instanceof Error ? error.message : String(error) };
+            }
+          });
+          return { count: cards.length, cards };
         }
 
-        return {
-          cardId: s.cardId ?? s.id_card,
-          title: s.title,
-          flowId: s.flowId ?? s.flow_id,
-          flowName: s.flowName,
-          stepId: s.currentStepId ?? s.step_id,
-          stepName: s.stepName,
-          createdAt: s.createdAt,
-          archived: s.archived,
-          complete: s.complete,
-          fieldValues,
-          ...(extracted.links && Object.keys(extracted.links).length > 0
-            ? { links: extracted.links }
-            : {}),
-          ...(extracted.registerLinks && Object.keys(extracted.registerLinks).length > 0
-            ? { registerLinks: extracted.registerLinks }
-            : {})
-        };
+        if (!options.cardId) {
+          throw new CangeCliUsageError("Informe --card-id (ou --card-ids para lote).");
+        }
+
+        const result = await kit.contracts.getCard({
+          flowId: options.flowId,
+          cardId: options.cardId
+        });
+        return buildLeanRead(result, requested);
       })
     );
 
   annotateCommand(command, {
     envelope:
-      "{ cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? }",
+      "{ cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? } — com --card-ids: { count, cards: [<mesmo shape>] }",
     fieldsLocation:
       "fieldValues: chave = field id, valor = texto legível (multi-valor vira array). links: vínculos COMBO_BOX_FLOW_FIELD — [{cardId, label}] (acha os FILHOS de um pai). registerLinks: COMBO_BOX_REGISTER_FIELD — [{entryId, label}] (o entryId pronto p/ usar em campo de register de outro card)",
-    example: "card read --flow-id 22792 --card-id 1219728"
+    example: "card read --flow-id 22795 --card-ids 1223901,1223902,1223903"
   });
+}
+
+/** Monta a visão enxuta a partir do envelope do getCard (single e lote usam o mesmo). */
+function buildLeanRead(
+  result: { raw: unknown; summary: unknown },
+  requestedFieldIds: string[]
+): Record<string, unknown> {
+  const s = result.summary as Record<string, unknown>;
+  const extracted = extractValuesAndLinks(result.raw);
+
+  // Preferência: valores agregados do raw (multi-valor vira array, deletado
+  // sai); fallback no summary legado quando o raw não tiver form_answers.
+  let fieldValues =
+    extracted.fieldValues ??
+    ((s.fieldValues ?? s.fields ?? {}) as Record<string, unknown>);
+
+  if (requestedFieldIds.length > 0) {
+    const filtered: Record<string, unknown> = {};
+    for (const id of requestedFieldIds) {
+      filtered[id] = id in fieldValues ? fieldValues[id] : null;
+    }
+    fieldValues = filtered;
+  }
+
+  return {
+    cardId: s.cardId ?? s.id_card,
+    title: s.title,
+    flowId: s.flowId ?? s.flow_id,
+    flowName: s.flowName,
+    stepId: s.currentStepId ?? s.step_id,
+    stepName: s.stepName,
+    createdAt: s.createdAt,
+    archived: s.archived,
+    complete: s.complete,
+    fieldValues,
+    ...(extracted.links && Object.keys(extracted.links).length > 0
+      ? { links: extracted.links }
+      : {}),
+    ...(extracted.registerLinks && Object.keys(extracted.registerLinks).length > 0
+      ? { registerLinks: extracted.registerLinks }
+      : {})
+  };
+}
+
+/** Promise.all com teto de concorrência (ordem do input preservada). */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index] as T);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 interface CardLink {

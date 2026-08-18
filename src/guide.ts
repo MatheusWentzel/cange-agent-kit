@@ -61,6 +61,7 @@ export const JOURNEYS: Journey[] = [
     when: "precisa dos valores atuais de um card",
     steps: [
       "cange card read --flow-id <f> --card-id <c> — leitura ENXUTA: etapa atual + fieldValues legíveis (chave = field id, valor textual). Use este por PADRÃO.",
+      "Vários cards do MESMO flow: cange card read --flow-id <f> --card-ids <a,b,c> (até 30) — 1 comando lê o lote inteiro; NUNCA um comando por card.",
       "cange card get --flow-id <f> --card-id <c> — só quando precisar do `raw` completo (pesado: pode passar de 700 KB)."
     ],
     pitfall:
