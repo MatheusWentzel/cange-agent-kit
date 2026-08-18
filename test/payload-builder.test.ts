@@ -105,7 +105,7 @@ describe("payload builder", () => {
       flowId: 192,
       values: {
         customer_name: "<TEXT_SHORT_FIELD>",
-        due_date: "<DATE_PICKER_FIELD>"
+        due_date: "<OPTIONAL:DATE_PICKER_FIELD>"
       }
     });
   });
