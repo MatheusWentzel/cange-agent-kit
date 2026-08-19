@@ -1,6 +1,7 @@
 import type { CangeResolvedConfig } from "../client/config.js";
 import type { CangeClient } from "../client/http.js";
 
+import { createArtifactsContracts } from "./artifacts.js";
 import { createAttachmentsContracts } from "./attachments.js";
 import { createCardsContracts } from "./cards.js";
 import { createCommentsContracts } from "./comments.js";
@@ -25,6 +26,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const comments = createCommentsContracts(params.client);
   const notifications = createNotificationsContracts(params.client);
   const attachments = createAttachmentsContracts(params.client);
+  const artifacts = createArtifactsContracts(params.client);
   const registers = createRegistersContracts(params.client);
   const registerQuery = createRegisterQueryContracts({ client: params.client, fields });
   const timeTracking = createTimeTrackingContracts(params.client);
@@ -70,6 +72,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getFlowView: flowViews.getFlowView,
     getCardRelationship: cards.getCardRelationship,
     getCardAttachmentDownloads: attachments.getCardAttachmentDownloads,
+    getArtifactsByCard: artifacts.getArtifactsByCard,
     getRegisterFormAnswer: registers.getRegisterFormAnswer,
     listCommentsByCard: comments.listCommentsByCard,
     flowBuildPing: flowV2Build.ping,
@@ -91,6 +94,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     createCardComment: comments.createCardComment,
     uploadAttachment: attachments.uploadAttachment,
     linkAttachmentToCard: attachments.linkAttachmentToCard,
+    publishArtifact: artifacts.publishArtifact,
     createRegister: registers.createRegister,
     updateRegister: registers.updateRegister,
     createTimeTracking: timeTracking.createTimeTracking,
