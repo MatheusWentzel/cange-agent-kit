@@ -8,6 +8,8 @@ import { CangeCliUsageError } from "../client/errors.js";
 import { createCliPrinter } from "../utils/output.js";
 import { exitCodeForError } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
+import { registerArtifactPublishCommand } from "./commands/artifact-publish.js";
+import { registerArtifactListCommand } from "./commands/artifact-list.js";
 import { registerAttachmentDownloadCommand } from "./commands/attachment-download.js";
 import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-card.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
@@ -121,6 +123,10 @@ export function createProgram(): Command {
   registerAttachmentUploadCommand(attachmentCommand);
   registerAttachmentLinkCardCommand(attachmentCommand);
   registerAttachmentDownloadCommand(attachmentCommand);
+
+  const artifactCommand = program.command("artifact").description("Operações de artefato (páginas HTML versionadas em cards)");
+  registerArtifactPublishCommand(artifactCommand);
+  registerArtifactListCommand(artifactCommand);
 
   const toolCommand = program.command("tool").description("Ferramentas de API do agente (agent_tool type='api')");
   registerToolCallCommand(toolCommand);
