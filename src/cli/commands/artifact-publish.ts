@@ -12,6 +12,7 @@ interface ArtifactPublishOptions {
   file: string;
   accent?: string;
   density?: string;
+  variant?: string;
   public?: boolean;
   full?: boolean;
 }
@@ -24,8 +25,9 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
     .requiredOption("--type <type>", "Tipo do artefato (ex.: mapa-cotacao, one-pager)")
     .requiredOption("--title <title>", "Título do artefato")
     .requiredOption("--file <path>", "Caminho do arquivo HTML (fragmento semântico)")
-    .option("--accent <accent>", "Cor de destaque: orange|purple|red|blue|green")
+    .option("--accent <accent>", "Cor de destaque: orange|purple|red|blue|green|teal|slate|amber|rose|indigo")
     .option("--density <density>", "Densidade: default|compact")
+    .option("--variant <variant>", "Variante de tema: editorial (documento formal)")
     .option("--public", "Torna o artefato público por link (default: privado)")
     .option("--full", "Devolve o envelope completo. Default: {artifactId, slug, version}")
     .action(
@@ -51,6 +53,7 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
           html,
           ...(options.accent ? { accent: options.accent } : {}),
           ...(options.density ? { density: options.density } : {}),
+          ...(options.variant ? { variant: options.variant } : {}),
           ...(options.public ? { public: true } : {})
         });
 
@@ -64,6 +67,9 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
           slug: r.slug,
           version: r.version,
           visibility: r.visibility,
+          // Id do ANEXO cunhado: grave-o num campo de anexo (INPUT_ATTACH_FIELD)
+          // via `card update-values` para o artefato aparecer NAQUELE campo.
+          attachmentId: r.attachment_id,
           ...(Array.isArray(r.warnings) && r.warnings.length > 0 ? { warnings: r.warnings } : {})
         };
       })
@@ -71,9 +77,9 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
 
   annotateCommand(command, {
     mutates: true,
-    envelope: "{ artifactId, slug, version, visibility, warnings? } — com --full: { raw }",
+    envelope: "{ artifactId, slug, version, visibility, attachmentId, warnings? } — com --full: { raw }",
     fieldsLocation:
-      "O --file é o FRAGMENTO HTML semântico (h1-h4, p, table, ul, classes do tema). O produto injeta o tema oficial no render; NÃO escreva CSS nem <html>/<head>. Terminar com <!-- /artifact --> para o back detectar truncamento.",
+      "O --file é o FRAGMENTO HTML semântico (h1-h4, p, table, ul, classes do tema). O produto injeta o tema oficial; NÃO escreva CSS nem <html>/<head>. Terminar com <!-- /artifact -->. Para pôr o artefato num CAMPO de anexo do card, grave o `attachmentId` no valor do campo (INPUT_ATTACH_FIELD) via `card update-values`.",
     example: 'artifact publish --card-id 1226170 --type mapa-cotacao --title "Mapa — Pedido 123" --file /tmp/mapa.html'
   });
 }
