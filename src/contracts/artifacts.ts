@@ -26,7 +26,6 @@ export interface ArtifactsContracts {
     accent?: string;
     density?: string;
     variant?: string;
-    public?: boolean;
   }) => Promise<{ raw: unknown }>;
   getArtifactsByCard: (input: {
     cardId: number | string;
@@ -54,7 +53,6 @@ export function createArtifactsContracts(client: CangeClient): ArtifactsContract
           ...(parsed.data.accent ? { accent: parsed.data.accent } : {}),
           ...(parsed.data.density ? { density: parsed.data.density } : {}),
           ...(parsed.data.variant ? { variant: parsed.data.variant } : {}),
-          ...(parsed.data.public ? { public: true } : {})
         },
         retry: false
       });

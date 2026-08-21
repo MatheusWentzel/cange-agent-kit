@@ -13,7 +13,6 @@ interface ArtifactPublishOptions {
   accent?: string;
   density?: string;
   variant?: string;
-  public?: boolean;
   full?: boolean;
 }
 
@@ -28,7 +27,6 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
     .option("--accent <accent>", "Cor de destaque: orange|purple|red|blue|green|teal|slate|amber|rose|indigo")
     .option("--density <density>", "Densidade: default|compact")
     .option("--variant <variant>", "Variante de tema: editorial (documento formal)")
-    .option("--public", "Torna o artefato público por link (default: privado)")
     .option("--full", "Devolve o envelope completo. Default: {artifactId, slug, version}")
     .action(
       createCommandAction(async ({ kit }, options: ArtifactPublishOptions) => {
@@ -54,7 +52,6 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
           ...(options.accent ? { accent: options.accent } : {}),
           ...(options.density ? { density: options.density } : {}),
           ...(options.variant ? { variant: options.variant } : {}),
-          ...(options.public ? { public: true } : {})
         });
 
         if (options.full) {
