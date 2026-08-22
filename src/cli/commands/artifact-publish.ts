@@ -6,7 +6,8 @@ import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 
 interface ArtifactPublishOptions {
-  cardId: string;
+  cardId?: string;
+  card?: string;
   type: string;
   title: string;
   file: string;
@@ -20,7 +21,10 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
   const command = artifactCommand
     .command("publish")
     .description("MUTAÇÃO: publica/atualiza um artefato HTML num card (nova versão, mesma URL)")
-    .requiredOption("--card-id <id>", "ID do card")
+    // `--card-id` é a flag canônica; `--card` é alias tolerado (LLMs erram pra
+    // ele com frequência — caso real do run 96; aceitar é mais barato que o retry).
+    .option("--card-id <id>", "ID do card")
+    .option("--card <id>", "Alias de --card-id")
     .requiredOption("--type <type>", "Tipo do artefato (ex.: mapa-cotacao, one-pager)")
     .requiredOption("--title <title>", "Título do artefato")
     .requiredOption("--file <path>", "Caminho do arquivo HTML (fragmento semântico)")
@@ -30,9 +34,12 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
     .option("--full", "Devolve o envelope completo. Default: {artifactId, slug, version}")
     .action(
       createCommandAction(async ({ kit }, options: ArtifactPublishOptions) => {
-        const cardId = Number(options.cardId);
-        if (!Number.isInteger(cardId) || cardId <= 0) {
-          throw new CangeValidationError("--card-id deve ser um inteiro positivo.");
+        const rawCardId = options.cardId ?? options.card ?? process.env.RUNNER_CARD_ID;
+        const cardId = Number(rawCardId);
+        if (!rawCardId || !Number.isInteger(cardId) || cardId <= 0) {
+          throw new CangeValidationError(
+            "--card-id deve ser um inteiro positivo (aceita --card como alias; em automação, RUNNER_CARD_ID do ambiente é usado como default)."
+          );
         }
 
         let html: string;
