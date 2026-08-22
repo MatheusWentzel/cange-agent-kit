@@ -9,7 +9,7 @@ export const publishArtifactInputSchema = z.object({
   html: z.string().min(1),
   accent: z.string().trim().max(24).optional(),
   density: z.string().trim().max(16).optional(),
-  public: z.boolean().optional()
+  variant: z.string().trim().max(24).optional()
 });
 
 export const listArtifactsByCardParamsSchema = z.object({

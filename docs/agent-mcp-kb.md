@@ -88,12 +88,14 @@ Convenção (também exposta em `manifest.envelopeConvention` e no `--help` de c
 - `pnpm cli notifications --is-archived N`
 - `pnpm cli flow get --id-flow <id>`
 - `pnpm cli register get --id-register <id>`
-- `pnpm cli fields by-flow --flow-id <id>`
+- `pnpm cli fields by-flow --flow-id <id> [--form-id <id>] [--raw]`
+  - Default é digest: `{ summaries[], total }` (era emitido 4× — raw/fields/summaries/summary). `--raw` devolve o envelope antigo completo.
 - `pnpm cli fields by-register --register-id <id>`
 - `pnpm cli template flow-create --flow-id <id>`
 - `pnpm cli template register-create --register-id <id>`
 - `pnpm cli template step-move --flow-id <id> --from-step-id <id> --to-step-id <id>`
-- `pnpm cli card get --flow-id <id> --card-id <id> [--field-ids <id1,id2>] [--summary-only]`
+- `pnpm cli card get --flow-id <id> --card-id <id> [--field-ids <id1,id2>] [--raw] [--raw-full]`
+  - Default devolve SÓ `{ summary }` (leve). `--raw` inclui a resposta crua com vínculos compactados (`valueCardFlow` → `{id_card,title}`); `--raw-full` = raw intocado (**pesado**, 8MB+ em card com muitos vínculos — evite). `--summary-only` é legado/no-op (o default já é o summary). Em automação, `--flow-id`/`--card-id` defaultam de `RUNNER_FLOW_ID`/`RUNNER_CARD_ID`.
 - `pnpm cli card list --flow-id <id> [--step-id <id>] [--view-id <id>] [--engine auto|v1|v2] [--limit <n>]`
   - Por padrão (`auto`) prioriza o motor **V2** (mais rápido) com fallback V1; retorna `engine`/`totalCount`/`truncated`/`executionStats` além de `summaries`/`total`.
   - `--with-pre-answer/--with-time-tracking/--test-model` só existem no V1 e forçam o caminho legado.
@@ -101,7 +103,8 @@ Convenção (também exposta em `manifest.envelopeConvention` e no `--help` de c
   - Busca priorizando V2, aceita **visualização salva** e busca textual (scope `flow` automático sem view).
 - `pnpm cli flow views list --flow-id <id> [--include-schema]`
   - Lista as **visualizações (views salvas)** do flow com resumo de filtros/colunas/ordenação (usar `.views`; `raw` é pesado).
-- `pnpm cli comment list --flow-id <id> --card-id <id> [--summary-only]`
+- `pnpm cli comment list --flow-id <id> --card-id <id> [--full]`
+  - Default é digest: `{ summaries[], total }` com `description` capada em 800 chars (marcador ensina o caminho de volta). `--full` devolve `{raw, summaries[], total}` com o teor COMPLETO (pesado — comentários com transcrição chegam a 100KB+). `--summary-only` é legado (o digest já é o default). `--flow-id` defaulta de `CANGE_CARD_FLOW_ID`.
 - `pnpm cli my-registers [--name <search>]`
 
 ### Mutações

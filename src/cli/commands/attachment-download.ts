@@ -3,12 +3,13 @@ import { basename, join } from "node:path";
 
 import type { Command } from "commander";
 
-import { CangeValidationError } from "../../client/errors.js";
+import { CangeCliUsageError, CangeValidationError } from "../../client/errors.js";
 import { createCommandAction } from "../context.js";
+import { envCardId, envFlowId } from "../env-defaults.js";
 
 interface AttachmentDownloadOptions {
-  flowId: string;
-  cardId: string;
+  flowId?: string;
+  cardId?: string;
   out?: string;
 }
 
@@ -37,11 +38,19 @@ export function registerAttachmentDownloadCommand(attachmentCommand: Command): v
     .description(
       "LEITURA: baixa os anexos de um card (PDF/imagem/etc) para um diretório local (--out) para leitura posterior; sem --out, só lista os anexos + URLs."
     )
-    .requiredOption("--flow-id <id>", "Flow do card (o back valida o acesso ao fluxo)")
-    .requiredOption("--card-id <id>", "Card cujos anexos serão baixados")
+    .option("--flow-id <id>", "Flow do card (default: RUNNER_FLOW_ID/CANGE_CARD_FLOW_ID do ambiente do runner)")
+    .option("--card-id <id>", "Card cujos anexos serão baixados (default: RUNNER_CARD_ID do ambiente)")
     .option("--out <dir>", "Diretório onde gravar os arquivos. Se omitido, só lista (não baixa).")
     .action(
       createCommandAction(async ({ kit }, options: AttachmentDownloadOptions) => {
+        // Defaults do ambiente do runner (flag explícita vence).
+        options.flowId = options.flowId ?? envFlowId();
+        options.cardId = options.cardId ?? envCardId();
+        if (!options.flowId || !options.cardId) {
+          throw new CangeCliUsageError(
+            "--flow-id e --card-id são obrigatórios (em automação, RUNNER_FLOW_ID/RUNNER_CARD_ID do ambiente são usados como default)."
+          );
+        }
         const wantsFiles = typeof options.out === "string" && options.out.trim().length > 0;
 
         const { files } = await kit.contracts.getCardAttachmentDownloads({

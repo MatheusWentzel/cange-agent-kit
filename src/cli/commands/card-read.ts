@@ -3,9 +3,10 @@ import type { Command } from "commander";
 import { CangeCliUsageError } from "../../client/errors.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
+import { envCardId, envFlowId } from "../env-defaults.js";
 
 interface CardReadOptions {
-  flowId: string;
+  flowId?: string;
   cardId?: string;
   cardIds?: string;
   fieldIds?: string;
@@ -39,8 +40,8 @@ export function registerCardReadCommand(cardCommand: Command): void {
     .description(
       "LEITURA ENXUTA do card (etapa atual + valores legíveis + vínculos, sem raw) — use este por padrão; `card get` só quando precisar do raw"
     )
-    .requiredOption("--flow-id <id>", "ID do flow")
-    .option("--card-id <id>", "ID do card")
+    .option("--flow-id <id>", "ID do flow (default: RUNNER_FLOW_ID/CANGE_CARD_FLOW_ID do ambiente do runner)")
+    .option("--card-id <id>", "ID do card (default: RUNNER_CARD_ID do ambiente do runner)")
     .option(
       "--card-ids <ids>",
       `Lote: lista de card ids separados por vírgula (máx ${READ_MANY_MAX}) — 1 comando lê N cards do mesmo flow`
@@ -51,6 +52,18 @@ export function registerCardReadCommand(cardCommand: Command): void {
     )
     .action(
       createCommandAction(async ({ kit }, options: CardReadOptions) => {
+        // Defaults do ambiente do runner (flag explícita vence). Sem os dois →
+        // erro CLARO aqui, não um usage error genérico.
+        const flowId = options.flowId ?? envFlowId();
+        if (!flowId) {
+          throw new CangeCliUsageError(
+            "--flow-id é obrigatório (em automação, RUNNER_FLOW_ID/CANGE_CARD_FLOW_ID do ambiente são usados como default)."
+          );
+        }
+        options.flowId = flowId;
+        if (!options.cardId && !options.cardIds) {
+          options.cardId = envCardId();
+        }
         const requested = (options.fieldIds ?? "")
           .split(",")
           .map((item) => item.trim())
@@ -77,7 +90,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
           }
           const cards = await mapWithConcurrency(ids, READ_MANY_CONCURRENCY, async (cardId) => {
             try {
-              const result = await kit.contracts.getCard({ flowId: options.flowId, cardId });
+              const result = await kit.contracts.getCard({ flowId, cardId });
               return buildLeanRead(result, requested);
             } catch (error) {
               // Um card com erro não derruba o lote — vira entrada de erro legível.
@@ -128,6 +141,12 @@ function buildLeanRead(
       filtered[id] = id in fieldValues ? fieldValues[id] : null;
     }
     fieldValues = filtered;
+  } else {
+    // Cap de campo gigante (só quando NÃO foi pedido campo específico): um
+    // rich-text com ata de reunião inteira (14KB, caso real do card 1079918)
+    // dominava o digest e era relido a cada turno do agente. Pedir o campo
+    // explicitamente (--field-ids) devolve o valor completo.
+    fieldValues = capOversizedFieldValues(fieldValues);
   }
 
   return {
@@ -148,6 +167,30 @@ function buildLeanRead(
       ? { registerLinks: extracted.registerLinks }
       : {})
   };
+}
+
+/**
+ * Cap por CAMPO no digest do card read: valores string acima de 2.000 chars são
+ * truncados com marcador dizendo como obter o inteiro (`--field-ids <id>`).
+ * Multi-valor (array) tem cada item capado individualmente.
+ */
+const FIELD_VALUE_CAP = 2_000;
+
+function capOversizedFieldValues(fieldValues: Record<string, unknown>): Record<string, unknown> {
+  const capOne = (fieldId: string, value: unknown): unknown => {
+    if (typeof value !== "string" || value.length <= FIELD_VALUE_CAP) return value;
+    return (
+      value.slice(0, FIELD_VALUE_CAP) +
+      ` […truncado ${value.length - FIELD_VALUE_CAP} chars — use --field-ids ${fieldId} p/ o valor completo]`
+    );
+  };
+  const out: Record<string, unknown> = {};
+  for (const [fieldId, value] of Object.entries(fieldValues)) {
+    out[fieldId] = Array.isArray(value)
+      ? value.map((item) => capOne(fieldId, item))
+      : capOne(fieldId, value);
+  }
+  return out;
 }
 
 /** Promise.all com teto de concorrência (ordem do input preservada). */

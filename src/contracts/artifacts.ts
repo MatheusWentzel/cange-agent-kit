@@ -25,7 +25,7 @@ export interface ArtifactsContracts {
     html: string;
     accent?: string;
     density?: string;
-    public?: boolean;
+    variant?: string;
   }) => Promise<{ raw: unknown }>;
   getArtifactsByCard: (input: {
     cardId: number | string;
@@ -42,7 +42,8 @@ export function createArtifactsContracts(client: CangeClient): ArtifactsContract
         });
       }
 
-      // HTML vai como campo JSON (é texto, não binário) — corpo até 50MB no back.
+      // HTML vai como campo JSON (é texto, não binário). O sanitizador do back
+      // rejeita fragmento > 2MB (o body-parser aceita 50MB, mas o teto do artefato é 2MB).
       const raw = await client.post<unknown>("/artifact", {
         body: {
           card_id: parsed.data.cardId,
@@ -51,7 +52,7 @@ export function createArtifactsContracts(client: CangeClient): ArtifactsContract
           html: parsed.data.html,
           ...(parsed.data.accent ? { accent: parsed.data.accent } : {}),
           ...(parsed.data.density ? { density: parsed.data.density } : {}),
-          ...(parsed.data.public ? { public: true } : {})
+          ...(parsed.data.variant ? { variant: parsed.data.variant } : {}),
         },
         retry: false
       });
