@@ -4,6 +4,7 @@ import type { Command } from "commander";
 import { CangeValidationError } from "../../client/errors.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
+import { envCardId } from "../env-defaults.js";
 
 interface ArtifactPublishOptions {
   cardId?: string;
@@ -34,7 +35,7 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
     .option("--full", "Devolve o envelope completo. Default: {artifactId, slug, version}")
     .action(
       createCommandAction(async ({ kit }, options: ArtifactPublishOptions) => {
-        const rawCardId = options.cardId ?? options.card ?? process.env.RUNNER_CARD_ID;
+        const rawCardId = options.cardId ?? options.card ?? envCardId();
         const cardId = Number(rawCardId);
         if (!rawCardId || !Number.isInteger(cardId) || cardId <= 0) {
           throw new CangeValidationError(
