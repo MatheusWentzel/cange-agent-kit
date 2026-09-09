@@ -79,17 +79,30 @@ export function createCangeClient(config: CangeClientConfig): CangeClient {
 
         const parsedBody = await parseResponseBody(response);
         if (!response.ok) {
+          const retryAfterSeconds = parseRetryAfter(response.headers.get("retry-after"));
           const shouldRetry = canRetry && attempt < maxRetries && isRetryStatus(response.status);
           if (shouldRetry) {
-            await sleep(backoffDelay(attempt, retryDelayMs));
-            continue;
+            const delay = retryDelay({
+              status: response.status,
+              attempt,
+              baseDelayMs: retryDelayMs,
+              retryAfterSeconds
+            });
+            // `undefined` = a espera necessária passa do teto do cliente (429 com
+            // bloqueio longo). Aí devolvemos o erro COM `retryAfterSeconds` em vez
+            // de segurar o processo — quem chamou decide quando voltar.
+            if (delay !== undefined) {
+              await sleep(delay);
+              continue;
+            }
           }
 
           throw buildApiError({
             method,
             path,
             status: response.status,
-            body: parsedBody
+            body: parsedBody,
+            retryAfterSeconds
           });
         }
 
@@ -193,8 +206,52 @@ function isRetryStatus(status: number): boolean {
   return status === 429 || status >= 500;
 }
 
+/**
+ * Teto de espera do RETRY INTERNO do cliente. O backend bloqueia a chave por 5
+ * minutos ao estourar o teto de req/s: dormir isso aqui dentro travaria o
+ * comando muito além de qualquer timeout útil. Passando do teto, o erro sobe
+ * com `retryAfterSeconds` para a camada de lote decidir.
+ */
+const CLIENT_MAX_RETRY_WAIT_MS = 5_000;
+/** 429 merece backoff bem maior que um 5xx: é limite de taxa, não soluço. */
+const RATE_LIMIT_BASE_DELAY_MS = 1_000;
+
+interface RetryDelayInput {
+  status: number;
+  attempt: number;
+  baseDelayMs: number;
+  retryAfterSeconds?: number;
+}
+
+/** Espera até a próxima tentativa; `undefined` = não vale a pena esperar. */
+function retryDelay(input: RetryDelayInput): number | undefined {
+  const delay =
+    input.retryAfterSeconds !== undefined
+      ? input.retryAfterSeconds * 1000
+      : input.status === 429
+        ? RATE_LIMIT_BASE_DELAY_MS * 2 ** input.attempt
+        : backoffDelay(input.attempt, input.baseDelayMs);
+  return delay > CLIENT_MAX_RETRY_WAIT_MS ? undefined : delay;
+}
+
 function backoffDelay(attempt: number, baseDelayMs: number): number {
   return baseDelayMs * Math.max(1, attempt + 1);
+}
+
+/** `Retry-After` aceita segundos ou data HTTP; normalizamos para segundos. */
+export function parseRetryAfter(header: string | null | undefined): number | undefined {
+  if (!header) {
+    return undefined;
+  }
+  const trimmed = header.trim();
+  if (/^\d+$/.test(trimmed)) {
+    return Number(trimmed);
+  }
+  const asDate = Date.parse(trimmed);
+  if (Number.isNaN(asDate)) {
+    return undefined;
+  }
+  return Math.max(0, Math.ceil((asDate - Date.now()) / 1000));
 }
 
 async function parseResponseBody(response: globalThis.Response): Promise<unknown> {
@@ -222,6 +279,7 @@ interface BuildApiErrorInput {
   path: string;
   status: number;
   body: unknown;
+  retryAfterSeconds?: number;
 }
 
 function buildApiError(input: BuildApiErrorInput): CangeApiError {
@@ -230,7 +288,8 @@ function buildApiError(input: BuildApiErrorInput): CangeApiError {
     status: input.status,
     method: input.method,
     endpoint: input.path,
-    details: sanitizeSensitive(input.body)
+    details: sanitizeSensitive(input.body),
+    ...(input.retryAfterSeconds !== undefined ? { retryAfterSeconds: input.retryAfterSeconds } : {})
   });
 }
 
@@ -262,7 +321,11 @@ function defaultStatusMessage(status: number): string {
     return "Recurso não encontrado na API do Cange.";
   }
   if (status === 429) {
-    return "Limite de requisições atingido na API do Cange.";
+    return (
+      "Limite de requisições atingido na API do Cange (429). O teto é por chave " +
+      "(10 req/s em leitura, 20 req/s em escrita) e estourar bloqueia por ~5 minutos — " +
+      "reduza a taxa (ex.: --rps) e só volte depois do bloqueio."
+    );
   }
   if (status >= 500) {
     return "Erro interno na API do Cange.";

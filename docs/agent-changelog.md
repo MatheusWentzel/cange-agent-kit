@@ -2,6 +2,36 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-09-09
+
+### Criação em lote + throttle de rate limit (corrige perda silenciosa de dados)
+
+**O que aconteceu:** o agente Comprador criou 28 cards numa rajada de shell
+(`for f in *.json; do cange card create …`), estourou o teto de escrita da API
+(20 req/s), a chave foi bloqueada por 5 minutos e 8 creates falharam. Como cada
+invocação era independente e o retorno não era conferido, o agente vinculou os 28
+ids que **esperava** — 8 nunca existiram — e fechou a tarefa como sucesso
+(runs 34/35, company 6728; perda de ~29%, reproduzida 2 de 2 vezes).
+
+**O que mudou no kit:**
+
+- `card create` ganhou modo **LOTE**: `--payload-dir <dir>` ou `--payloads <a.json,b.json>`,
+  com `--rps` (default 8/s) e `--max-retries` (default 3).
+  - valida TODOS os payloads antes de mutar (payload inválido ⇒ nada é criado, exit 2);
+  - throttle abaixo do teto + backoff/retry em 429/5xx/rede, honrando `Retry-After`;
+  - **para o lote** ao detectar bloqueio por rate limit (429) em vez de martelar;
+  - resumo explícito: `created` / `failed` / `notAttempted` + `cardIds` reais + `warning`.
+- **Exit code 5 = lote PARCIAL** (parte processada, parte não). Antes, um lote
+  incompleto era indistinguível de sucesso.
+- `card read --card-ids` passou a respeitar o teto de GET (10 req/s) — a
+  concorrência de 5 sozinha podia disparar ~80 req/s — e devolve
+  `{ count, ok, errors, cards }`, com exit 5 quando algum card falha.
+- Erros de API agora carregam `retryAfterSeconds`; o retry interno do cliente
+  usa backoff maior em 429 e desiste (em vez de dormir) quando a espera passa de 5s.
+
+**Para playbooks/agentes:** 2+ cards ⇒ sempre lote; conferir `created`/`failed`
+antes de montar vínculos ou concluir; nunca deduzir id que não foi devolvido.
+
 ## 2026-05-12
 
 ### Novos comandos: Flow V2 Build API (`/flow/v2/build`)

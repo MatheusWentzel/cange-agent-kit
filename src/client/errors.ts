@@ -7,6 +7,8 @@ export interface CangeErrorContext {
   details?: unknown;
   cause?: unknown;
   code?: string;
+  /** `Retry-After` da resposta (em segundos) — presente tipicamente em 429. */
+  retryAfterSeconds?: number;
 }
 
 interface CangeErrorSerialized {
@@ -16,6 +18,7 @@ interface CangeErrorSerialized {
   endpoint?: string;
   method?: CangeHttpMethod;
   code?: string;
+  retryAfterSeconds?: number;
   details?: unknown;
 }
 
@@ -25,6 +28,7 @@ export class CangeError extends Error {
   public readonly method?: CangeHttpMethod;
   public readonly details?: unknown;
   public readonly code?: string;
+  public readonly retryAfterSeconds?: number;
 
   public constructor(message: string, context: CangeErrorContext = {}) {
     super(message, context.cause ? { cause: context.cause } : undefined);
@@ -34,6 +38,7 @@ export class CangeError extends Error {
     this.method = context.method;
     this.details = sanitizeSensitive(context.details);
     this.code = context.code;
+    this.retryAfterSeconds = context.retryAfterSeconds;
   }
 
   public toJSON(): CangeErrorSerialized {
@@ -42,6 +47,7 @@ export class CangeError extends Error {
     if (this.endpoint !== undefined) out.endpoint = this.endpoint;
     if (this.method !== undefined) out.method = this.method;
     if (this.code !== undefined) out.code = this.code;
+    if (this.retryAfterSeconds !== undefined) out.retryAfterSeconds = this.retryAfterSeconds;
     if (this.details !== undefined) out.details = this.details;
     return out;
   }

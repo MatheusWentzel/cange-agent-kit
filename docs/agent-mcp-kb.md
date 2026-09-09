@@ -39,9 +39,37 @@ Estáveis e distintos — roteie retry/correção pelo code, sem parsear a mensa
 | 2 | uso ou validação (comando/flag inválido, payload inválido) |
 | 3 | autenticação (credenciais ausentes/inválidas) |
 | 4 | rede ou API do Cange |
+| 5 | **sucesso PARCIAL em lote** (parte processada, parte não) |
 
 Comando/flag desconhecido retorna a mensagem + a rota de discovery
 (`cange manifest` / `cange <grupo> --help`) e exit `2`.
+
+> **Exit 5 nunca é "deu certo".** Ele sai de operações em lote (`card create`
+> com `--payload-dir`/`--payloads`, `card read --card-ids`) quando parte dos
+> itens não passou. Ao recebê-lo: use SÓ os ids que vieram no resumo, reprocesse
+> os payloads listados em `failures`/`notAttemptedPayloads` e, se não der para
+> concluir, reporte a tarefa como PARCIAL — nunca deduza ids que não foram
+> retornados.
+
+## Limite de requisições (rate limit) — e por que ele vira perda de dados
+
+A API limita **por chave**: **10 req/s em leitura** e **20 req/s em escrita**.
+Estourar não devolve só um 429 pontual: **a chave fica bloqueada por ~5 minutos**.
+
+Foi assim que um lote de 28 cards virou 20 (runs 34/35 do agente Comprador):
+os creates saíram numa rajada de shell (`for f in *.json; do cange card create …`),
+a chave bloqueou no meio, 8 falharam — e, como ninguém conferia o retorno de cada
+comando, o agente seguiu vinculando os 28 ids que **esperava**. 8 nunca existiram.
+
+Regras:
+
+- **Nunca** crie cards num loop de shell. Use o LOTE: `card create --payload-dir <dir>`
+  (ou `--payloads a.json,b.json`) — 1 autenticação, throttle abaixo do teto,
+  retry em 429, parada automática se a chave bloquear e resumo por payload.
+- Leitura de vários cards: `card read --card-ids <a,b,c>` (já vem com throttle).
+- `--rps` ajusta a taxa (default: 8/s escrita, 6/s leitura); o CLI recusa valores
+  acima do teto do backend.
+- **Confira sempre o retorno**: os ids que existem são os que o comando devolveu.
 
 ## Setup resiliente (pnpm)
 
@@ -110,6 +138,8 @@ Convenção (também exposta em `manifest.envelopeConvention` e no `--help` de c
 ### Mutações
 
 - `pnpm cli card create --payload <path-to-json> [--validate-fields] [--dry-run]`
+- `pnpm cli card create --payload-dir <dir> | --payloads <a.json,b.json> [--rps <n>] [--max-retries <n>]`
+  - **LOTE** (use SEMPRE que forem 2+ cards): valida todos os payloads antes de mutar, cria com throttle + retry em 429, PARA se a chave bloquear e devolve `{ requested, created, failed, notAttempted, cardIds, cards[], failures[], notAttemptedPayloads[], aborted?, warning? }`. Lote incompleto sai com **exit 5**.
 - `pnpm cli card update --payload <path-to-json> [--dry-run]`
 - `pnpm cli card update-values --payload <path-to-json> [--validate-fields] [--dry-run]`
 - `pnpm cli card move-step --payload <path-to-json> [--dry-run]`
@@ -197,7 +227,7 @@ Exemplos prontos no repositório:
 }
 ```
 
-`card create`:
+`card create` (no lote é o mesmo shape, um arquivo por card):
 
 ```json
 {
