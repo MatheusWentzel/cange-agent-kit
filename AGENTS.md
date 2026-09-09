@@ -71,7 +71,28 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Use `--output json` quando o resultado for consumido por automação.
 - **Não precisa de `--silent`**: o stdout já sai limpo (banner do pnpm silenciado no `.npmrc`). Sem `--output`, o modo é json em pipe e pretty em terminal.
 - **stdout = só o dado; stderr = logs/avisos/erros.** `... 2>/dev/null | jq .` funciona em qualquer leitura.
-- Exit codes por categoria: `0` ok · `2` uso/validação · `3` auth · `4` rede/API · `1` inesperado.
+- Exit codes por categoria: `0` ok · `2` uso/validação · `3` auth · `4` rede/API · `5` **lote parcial** · `1` inesperado.
+- **Exit `5` = a operação em lote saiu INCOMPLETA.** Use só os ids que o resumo devolveu, reprocesse o que está em `failures`/`notAttemptedPayloads` e reporte a tarefa como parcial se não fechar. Nunca deduza id que não foi retornado.
+
+## Criação/leitura em lote (rate limit)
+
+A API limita **por chave**: 10 req/s em leitura, 20 req/s em escrita — e estourar
+**bloqueia a chave por ~5 minutos**. Foi o que transformou um lote de 28 cards em
+20 sem ninguém perceber (o agente vinculou 8 ids que nunca existiram).
+
+- 2+ cards para criar → `cange card create --payload-dir <dir>` ou `--payloads a.json,b.json`.
+  **Nunca** `for f in *.json; do cange card create …; done`.
+- 2+ cards para ler → `cange card read --card-ids <a,b,c>`.
+- Sempre confira `created`/`failed`/`notAttempted` no retorno antes de montar
+  vínculos, contagens ou conclusão.
+- O lote **não repete** create que falhou por 5xx/timeout (POST não idempotente,
+  sem chave de idempotência no backend): o item vira falha com o aviso de
+  **conferir se o card existe** antes de reprocessar. Só 429 é repetido.
+- **Rodando dentro do `cange-agent-runner`:** o gate de aprovação deriva o alvo de
+  `--payload <arquivo>` e ainda **não** entende `--payload-dir`/`--payloads`. O lote
+  é pausado para aprovação normalmente, mas o pedido chega sem o flow derivado e
+  rotulado como "Criar **um** card" (mesmo sendo N). Quem aprova precisa ler a
+  linha de comando do pedido.
 
 ## Discovery antes de adivinhar
 

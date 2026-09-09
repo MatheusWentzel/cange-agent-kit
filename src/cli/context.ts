@@ -4,7 +4,7 @@ import { CangeCliUsageError } from "../client/errors.js";
 import { authenticateKit, createCangeAgentKit, type CangeAgentKit } from "../index.js";
 import { createCliPrinter, type CliPrinter, type OutputMode } from "../utils/output.js";
 
-import { exitCodeForError } from "./exit-codes.js";
+import { EXIT_CODES, exitCodeForError, type ExitCode } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
 
 export interface CliCommandContext {
@@ -15,6 +15,23 @@ export interface CliCommandContext {
 }
 
 type CommandHandler<TArgs extends unknown[]> = (ctx: CliCommandContext, ...args: TArgs) => Promise<unknown>;
+
+/**
+ * Saída de comando que precisa TERMINAR COM EXIT CODE ≠ 0 sem ser um erro:
+ * o lote parcial (parte dos itens processada, parte não). O dado vai para
+ * stdout como sempre; o exit code é o que impede o chamador de tratar o
+ * resultado incompleto como sucesso (achado A4).
+ */
+export class CliOutcome {
+  public constructor(
+    public readonly value: unknown,
+    public readonly exitCode: ExitCode
+  ) {}
+}
+
+export function withExitCode(value: unknown, exitCode: ExitCode): CliOutcome {
+  return new CliOutcome(value, exitCode);
+}
 
 export function createCommandAction<TArgs extends unknown[]>(
   handler: CommandHandler<TArgs>,
@@ -31,6 +48,15 @@ export function createCommandAction<TArgs extends unknown[]>(
       }
 
       const output = await handler(ctx, ...args);
+      if (output instanceof CliOutcome) {
+        if (output.value !== undefined) {
+          ctx.printer.print(output.value);
+        }
+        if (output.exitCode !== EXIT_CODES.SUCCESS) {
+          process.exitCode = output.exitCode;
+        }
+        return;
+      }
       if (output !== undefined) {
         ctx.printer.print(output);
       }

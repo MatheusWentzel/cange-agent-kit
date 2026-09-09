@@ -218,6 +218,7 @@ Os templates já retornam:
 pnpm cli card get --flow-id 192 --card-id 9001
 pnpm cli card list --flow-id 192 --archived false --with-pre-answer true --with-time-tracking true
 pnpm cli card create --payload ./examples/create-card.example.json --validate-fields --dry-run
+pnpm cli card create --payload-dir ./payloads/itens --validate-fields   # LOTE (2+ cards)
 pnpm cli card update --payload ./examples/update-card.example.json --dry-run
 pnpm cli card update-values --payload ./examples/update-card-values.example.json --validate-fields --dry-run
 pnpm cli card move-step --payload ./examples/move-card-step.example.json --dry-run
@@ -230,6 +231,34 @@ Diferença importante:
 - `card update-values` altera respostas dinâmicas do formulário (`values`)
 - `card move-step` move de etapa sem enviar respostas
 - `card move-step-with-values` move de etapa enviando `idForm + values`
+
+### Criação em lote (`--payload-dir` / `--payloads`)
+
+A API do Cange limita **por chave**: 10 req/s em leitura e 20 req/s em escrita — e
+estourar **bloqueia a chave por ~5 minutos**. Criar cards num loop de shell
+(`for f in *.json; do cange card create …`) estoura esse teto no meio da rajada:
+os creates seguintes falham e, se ninguém conferir cada retorno, a tarefa segue
+com ids que nunca existiram (aconteceu: 28 cards "criados", 20 de verdade).
+
+O modo lote resolve isso em 1 comando:
+
+- valida **todos** os payloads antes de mutar (nada é criado se algum for inválido);
+- 1 autenticação e 1 processo para N cards;
+- **throttle** (`--rps`, default 8/s) + **retry com backoff só em 429** (`--max-retries`,
+  default 3). 5xx/timeout **não** são repetidos: o create não é idempotente e o backend não
+  tem chave de idempotência na rota — repetir criaria card duplicado. Esse item vira falha,
+  com o aviso de conferir se o card existe antes de reprocessar;
+- **para o lote** se a chave for bloqueada (enquanto o bloqueio dura, toda tentativa falha)
+  ou se o gate de agente devolver 403 (a liberação é one-shot por requisição);
+- resumo por payload: `{ requested, created, failed, notAttempted, cardIds, cards[], failures[], notAttemptedPayloads[], aborted?, warning? }`
+  — um 200 sem `cardId` conta como **falha**, nunca como criado;
+- **exit 5** quando o lote sai incompleto (`0` só quando tudo passou; quando nada passou,
+  sai a categoria do erro).
+
+O mesmo throttle vale para a leitura em lote (`card read --card-ids`), que devolve
+`{ count, ok, errors, notAttempted?, aborted?, cards }`, sai com exit 5 quando parte falha
+(categoria do erro quando nada é lido) e PARA no 429 em vez de queimar requisição contra
+uma chave já bloqueada.
 
 ## Operações de comentário e anexo
 

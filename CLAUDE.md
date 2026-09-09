@@ -17,6 +17,8 @@ Use este repositório como camada segura para operar o Cange via CLI.
 - `--payload` sempre deve apontar para arquivo JSON (não usar JSON inline).
 - Em payloads de mutação fora de `values`, usar chaves camelCase (`flowId`, `cardId`, `registerId` etc).
 - Sempre fazer discovery antes de mutações.
+- **Criar 2+ cards = LOTE em 1 comando**: `pnpm cli card create --payload-dir <dir>` (ou `--payloads a.json,b.json`). Nunca um loop de shell chamando `card create` N vezes — a rajada estoura o rate limit (20 req/s de escrita), a chave é bloqueada por 5 min e os creates seguintes falham. Ler 2+ cards: `card read --card-ids`.
+- **Exit 5 = lote PARCIAL** (parte processada, parte não): usar só os ids devolvidos em `cardIds`, reprocessar `failures`/`notAttemptedPayloads` e reportar como parcial se não fechar.
 - Para payloads com `values`:
   - chave = `field.name`
   - respeitar `field.type`

@@ -111,11 +111,14 @@ export const JOURNEYS: Journey[] = [
     steps: [
       "cange template flow-create --flow-id <f> — devolve o payloadSkeleton com os HASHES dos campos do form de criação (obrigatórios = <TIPO>; opcionais = <OPTIONAL:TIPO>).",
       "Monte o payload .json a partir do skeleton: preencha os obrigatórios E os opcionais que a tarefa pede; remova só o que não se aplica. Campo de register = [entryId] (ache com `register entries --register-id <r> --search`, ou pelo registerLinks de um card read).",
-      "cange card create --payload <arq> — valide o PRIMEIRO de um lote com --validate-fields --dry-run; os demais direto. A saída é enxuta: {cardId, stepId, createdAt}.",
+      "1 card: cange card create --payload <arq> — saída enxuta {cardId, stepId, createdAt}.",
+      "2+ cards: SEMPRE em LOTE — cange card create --payload-dir <dir> (um .json por card) ou --payloads <a.json,b.json>. NUNCA um loop de shell chamando card create N vezes: a rajada estoura o rate limit, a chave é bloqueada por 5 min e os creates seguintes falham.",
+      "Confira o retorno do lote: {requested, created, failed, notAttempted, cardIds}. Os cards que EXISTEM são os de cardIds — exit 5 significa lote INCOMPLETO.",
       "Se o card criado precisa aparecer num campo de vínculo de OUTRO card (pai), grave o vínculo lá (ver jornadas navegar_vinculos e gravar_campo_etapa) — criar NÃO vincula sozinho."
     ],
     pitfall:
-      "Chaves de values são os HASHES (name) dos campos — id numérico é traduzido automaticamente, mas o canônico é o hash do template. NUNCA envie um placeholder literal (<...>) no payload."
+      "Chaves de values são os HASHES (name) dos campos — id numérico é traduzido automaticamente, mas o canônico é o hash do template. NUNCA envie um placeholder literal (<...>) no payload. " +
+      "E NUNCA monte vínculo/contagem com id que o create não devolveu: num lote que falhou no meio, os ids que faltam NÃO são a continuação da sequência (caso real: 8 ids inexistentes vinculados como se existissem)."
   },
   {
     id: "gravar_campo_etapa",
@@ -172,13 +175,16 @@ export const GOLDEN_RULES: string[] = [
   "Registro ativo vs deletado: olhe o campo `deleted` (\"N\"/\"S\"), não `dt_deleted`.",
   "Anexo: SEMPRE `cange attachment download`, NUNCA curl no blob cru.",
   "Campo do form de criação → `card update-values`; campo de ETAPA → `card move-step-with-values`.",
-  "Ids em flags e payloads: use o padrão `--flow-id`/`--card-id`/`--register-id`; nos payloads, ids numéricos (string numérica também é aceita)."
+  "Ids em flags e payloads: use o padrão `--flow-id`/`--card-id`/`--register-id`; nos payloads, ids numéricos (string numérica também é aceita).",
+  "Vários itens = LOTE em 1 comando (`card create --payload-dir`, `card read --card-ids`), nunca um loop de shell: a API bloqueia a chave por 5 minutos quando a rajada estoura o teto (10 req/s leitura, 20 req/s escrita).",
+  "Depois de QUALQUER mutação, o que existe é o que o comando DEVOLVEU. Exit 5 = lote incompleto: use só os ids retornados, reprocesse o que faltou e, se não fechar, reporte a tarefa como parcial."
 ];
 
 /** Armadilhas do ambiente headless do runner (queimam turno se ignoradas). */
 export const GOTCHAS: string[] = [
   "Ambiente headless: prefira Node (`node -e`), Read/Grep e o CLI `cange`. `python3`/`jq`/`file` existem como fallback; `timeout` NÃO existe.",
   "Todo comando com exit != 0 vira 'ação que falhou' no log da execução. Antes de ler um arquivo que pode não existir, use `[ -f <path> ] && cat <path> || echo ausente` — não `cat` direto.",
+  "Exit 5 é SUCESSO PARCIAL de lote (parte processada, parte não) — não é sucesso nem falha total: leia o resumo em stdout e reprocesse o que faltou antes de concluir a tarefa.",
   "Kit SEMPRE, MCP NUNCA: use o CLI `cange` (autentica como você). Nunca use um conector MCP do Cange — ele autentica como outro usuário e quebra fila/auditoria.",
   "Se um comando falhar com `unknown command`/`required option`, PARE e consulte `cange manifest --output json` ou `cange guide` — não tente às cegas.",
   "Antes de encerrar, ENTREGUE o resultado no card (`cange comment create` e/ou escrita de campos). Enquanto não entregar, a tarefa NÃO está concluída."

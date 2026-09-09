@@ -1,21 +1,40 @@
 import type { Command } from "commander";
 
-import { CangeCliUsageError } from "../../client/errors.js";
+import { CangeCliUsageError, CangeError } from "../../client/errors.js";
+import type { BatchAbort } from "../../utils/batchRunner.js";
+import {
+  BACKEND_READ_RPS_LIMIT,
+  DEFAULT_READ_RPS,
+  isRateLimitError,
+  mapWithThrottle,
+  retryAfterMs
+} from "../../utils/rateLimit.js";
 import { annotateCommand } from "../command-metadata.js";
-import { createCommandAction } from "../context.js";
+import { createCommandAction, withExitCode } from "../context.js";
 import { envCardId, envFlowId } from "../env-defaults.js";
+import { exitCodeForBatch } from "../exit-codes.js";
 
 interface CardReadOptions {
   flowId?: string;
   cardId?: string;
   cardIds?: string;
   fieldIds?: string;
+  rps?: string;
 }
 
 /** Teto do batch: acima disso o output deixa de ser "enxuto" e vira despejo. */
 const READ_MANY_MAX = 30;
-/** Concorrência das leituras do batch (gentil com a API, rápido o bastante). */
+/**
+ * Concorrência do batch. Sozinha ela NÃO limita a taxa: 5 leituras em voo de
+ * 60 ms cada dão ~80 req/s, muito acima do teto de GET do backend (10 req/s) —
+ * e estourar bloqueia a chave por 5 minutos. Quem limita a taxa é o `rps`.
+ */
 const READ_MANY_CONCURRENCY = 5;
+/**
+ * Bloqueio do `apiRateLimiter` do backend (`blockTimeInMinutes` = 5). Piso
+ * usado quando o 429 vem sem `Retry-After` — hoje, sempre.
+ */
+const RATE_LIMIT_BLOCK_FALLBACK_SECONDS = 300;
 
 /**
  * `cange card read` — leitura ENXUTA de um card, feita para agentes.
@@ -49,6 +68,10 @@ export function registerCardReadCommand(cardCommand: Command): void {
     .option(
       "--field-ids <ids>",
       "Filtra fieldValues por IDs de field (lista separada por vírgula)"
+    )
+    .option(
+      "--rps <n>",
+      `Lote: requisições por segundo (default ${DEFAULT_READ_RPS}; teto do backend em leitura: ${BACKEND_READ_RPS_LIMIT}/s, e estourar bloqueia a chave por ~5 min)`
     )
     .action(
       createCommandAction(async ({ kit }, options: CardReadOptions) => {
@@ -88,16 +111,65 @@ export function registerCardReadCommand(cardCommand: Command): void {
               `--card-ids aceita no máximo ${READ_MANY_MAX} cards por chamada (recebi ${ids.length}).`
             );
           }
-          const cards = await mapWithConcurrency(ids, READ_MANY_CONCURRENCY, async (cardId) => {
-            try {
-              const result = await kit.contracts.getCard({ flowId, cardId });
-              return buildLeanRead(result, requested);
-            } catch (error) {
-              // Um card com erro não derruba o lote — vira entrada de erro legível.
-              return { cardId: Number(cardId), error: error instanceof Error ? error.message : String(error) };
+          let errors = 0;
+          let notAttempted = 0;
+          let firstError: unknown;
+          // Disjuntor de bloqueio: com a chave bloqueada (429) TODA leitura
+          // seguinte falha — e cada uma ainda gasta os retries internos do
+          // cliente. Ao primeiro 429 o lote para e o resto volta como NÃO
+          // TENTADO, para o agente saber o que reprocessar.
+          let aborted: BatchAbort | undefined;
+          const cards = await mapWithThrottle(
+            ids,
+            { rps: parseRps(options.rps), concurrency: READ_MANY_CONCURRENCY },
+            async (cardId) => {
+              if (aborted) {
+                notAttempted += 1;
+                return {
+                  cardId: Number(cardId),
+                  notAttempted: true,
+                  error: "não tentado — leitura interrompida por bloqueio de rate limit (429)"
+                };
+              }
+              try {
+                const result = await kit.contracts.getCard({ flowId, cardId });
+                return buildLeanRead(result, requested);
+              } catch (error) {
+                // Um card com erro não derruba o lote — vira entrada de erro
+                // legível E entra na contagem: lote incompleto sai com exit 5,
+                // nunca como leitura completa (ver EXIT_CODES.PARTIAL).
+                errors += 1;
+                firstError ??= error;
+                if (isRateLimitError(error)) {
+                  const waitMs = retryAfterMs(error);
+                  aborted = {
+                    reason: "RATE_LIMIT_BLOCK",
+                    message:
+                      "Teto de requisições da API estourado (429). A chave fica bloqueada por ~5 minutos e, " +
+                      "enquanto isso, TODA leitura falha: o lote foi INTERROMPIDO para não queimar requisições " +
+                      "e o tempo da execução. Espere o bloqueio passar e leia de novo SÓ os cards que faltaram.",
+                    retryAfterSeconds:
+                      waitMs !== undefined ? Math.round(waitMs / 1000) : RATE_LIMIT_BLOCK_FALLBACK_SECONDS
+                  };
+                }
+                return { cardId: Number(cardId), error: describeError(error) };
+              }
             }
-          });
-          return { count: cards.length, cards };
+          );
+          const envelope = {
+            count: cards.length,
+            ok: cards.length - errors - notAttempted,
+            errors,
+            ...(notAttempted > 0 ? { notAttempted } : {}),
+            ...(aborted ? { aborted } : {}),
+            cards
+          };
+          // `errors > 0 ? PARTIAL` mentia quando NADA foi lido (flow errado ⇒
+          // 30 falhas com exit 5, que o contrato define como "parte passou").
+          return withExitCode(
+            envelope,
+            exitCodeForBatch({ succeeded: envelope.ok, failed: errors + notAttempted, firstError })
+          );
         }
 
         if (!options.cardId) {
@@ -114,7 +186,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
 
   annotateCommand(command, {
     envelope:
-      "{ cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? } — com --card-ids: { count, cards: [<mesmo shape>] }",
+      "{ cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? } — com --card-ids: { count, ok, errors, notAttempted?, aborted?, cards: [<mesmo shape>; card que falhou vira {cardId, error}] }. Lote parcial sai com exit code 5; lote em que NADA foi lido sai com a categoria do erro (ex.: 4). Em 429 o lote PARA e o restante volta como notAttempted.",
     fieldsLocation:
       "fieldValues: chave = field id, valor = texto legível (multi-valor vira array). links: vínculos COMBO_BOX_FLOW_FIELD — [{cardId, label}] (acha os FILHOS de um pai). registerLinks: COMBO_BOX_REGISTER_FIELD — [{entryId, label}] (o entryId pronto p/ usar em campo de register de outro card)",
     example: "card read --flow-id 22795 --card-ids 1223901,1223902,1223903"
@@ -193,22 +265,27 @@ function capOversizedFieldValues(fieldValues: Record<string, unknown>): Record<s
   return out;
 }
 
-/** Promise.all com teto de concorrência (ordem do input preservada). */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results = new Array<R>(items.length);
-  let next = 0;
-  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-    while (next < items.length) {
-      const index = next++;
-      results[index] = await fn(items[index] as T);
-    }
-  });
-  await Promise.all(workers);
-  return results;
+function parseRps(raw: string | undefined): number {
+  if (raw === undefined) {
+    return DEFAULT_READ_RPS;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new CangeCliUsageError(`--rps inválido: "${raw}" (esperado número > 0).`);
+  }
+  if (value > BACKEND_READ_RPS_LIMIT) {
+    throw new CangeCliUsageError(
+      `--rps ${value} passa do teto de leitura do backend (${BACKEND_READ_RPS_LIMIT} req/s) — estourar bloqueia a chave por ~5 minutos.`
+    );
+  }
+  return value;
+}
+
+function describeError(error: unknown): string {
+  if (error instanceof CangeError && error.status !== undefined) {
+    return `[${error.status}] ${error.message}`;
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 interface CardLink {
