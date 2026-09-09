@@ -139,7 +139,7 @@ Convenção (também exposta em `manifest.envelopeConvention` e no `--help` de c
 
 - `pnpm cli card create --payload <path-to-json> [--validate-fields] [--dry-run]`
 - `pnpm cli card create --payload-dir <dir> | --payloads <a.json,b.json> [--rps <n>] [--max-retries <n>]`
-  - **LOTE** (use SEMPRE que forem 2+ cards): valida todos os payloads antes de mutar, cria com throttle + retry em 429, PARA se a chave bloquear e devolve `{ requested, created, failed, notAttempted, cardIds, cards[], failures[], notAttemptedPayloads[], aborted?, warning? }`. Lote incompleto sai com **exit 5**.
+  - **LOTE** (use SEMPRE que forem 2+ cards): valida todos os payloads antes de mutar, cria com throttle + retry **só em 429** (5xx/timeout NÃO são repetidos — o create não é idempotente; o item vira falha pedindo para CONFERIR se o card existe), PARA se a chave bloquear ou se o gate de agente devolver 403, e devolve `{ requested, created, failed, notAttempted, cardIds, cards[], failures[], notAttemptedPayloads[], aborted?, warning? }`. Lote incompleto sai com **exit 5**; lote em que nada foi criado sai com a categoria do erro.
 - `pnpm cli card update --payload <path-to-json> [--dry-run]`
 - `pnpm cli card update-values --payload <path-to-json> [--validate-fields] [--dry-run]`
 - `pnpm cli card move-step --payload <path-to-json> [--dry-run]`

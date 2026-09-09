@@ -8,6 +8,7 @@ import { createProgram } from "../src/cli/index.js";
 import { EXIT_CODES, exitCodeForBatch } from "../src/cli/exit-codes.js";
 import { CangeApiError, CangeValidationError } from "../src/client/errors.js";
 import { runBatch } from "../src/utils/batchRunner.js";
+import { isRateLimitError } from "../src/utils/rateLimit.js";
 
 const envBackup = { ...process.env };
 const noSleep = async () => {};
@@ -68,6 +69,70 @@ describe("runBatch", () => {
     expect(report.results.map((result) => result.ok)).toEqual([true, false, true]);
     // 4xx definitivo não gasta retry.
     expect(report.results[1]?.attempts).toBe(1);
+  });
+
+  it("PARA o lote no 403 de aprovação/permissão do agente (liberação é one-shot)", async () => {
+    const seen: string[] = [];
+    const report = await runBatch(
+      ["a", "b", "c"],
+      { rps: 1000, maxRetries: 2, sleep: noSleep },
+      async (item) => {
+        seen.push(item);
+        throw new CangeApiError("Ação não autorizada para este agente.", {
+          status: 403,
+          // O código NÃO vem em `error.code`: o backend serializa o `complement`
+          // do AppError no body e o cliente guarda o body em `details`.
+          details: { status: "error", complement: { code: "APPROVAL_REQUIRED", action_kind: "cange:card_create" } }
+        });
+      }
+    );
+
+    expect(seen).toEqual(["a"]);
+    expect(report.aborted).toMatchObject({ reason: "APPROVAL_BLOCK" });
+    expect(report.results.map((result) => result.attempted)).toEqual([true, false, false]);
+    // 403 não é transitório: não gasta retry.
+    expect(report.results[0]?.attempts).toBe(1);
+  });
+
+  it("403 sem code de aprovação NÃO aborta o lote", async () => {
+    const report = await runBatch(
+      ["a", "b"],
+      { rps: 1000, maxRetries: 0, sleep: noSleep },
+      async (item) => {
+        if (item === "a") {
+          throw new CangeApiError("sem acesso ao fluxo", { status: 403 });
+        }
+        return `card-${item}`;
+      }
+    );
+
+    expect(report.aborted).toBeUndefined();
+    expect(report.results.map((result) => result.ok)).toEqual([false, true]);
+  });
+
+  it("preenche retryAfterSeconds com o bloqueio padrão quando o 429 vem sem Retry-After", async () => {
+    const report = await runBatch(["a"], { rps: 1000, maxRetries: 0, sleep: noSleep }, async () => {
+      throw new CangeApiError("limite atingido", { status: 429 });
+    });
+
+    // O apiRateLimiter do backend não emite Retry-After hoje: sem o piso, o
+    // campo saía vazio e o playbook mandava esperar por um dado que nunca vem.
+    expect(report.aborted).toMatchObject({ reason: "RATE_LIMIT_BLOCK", retryAfterSeconds: 300 });
+  });
+
+  it("respeita o shouldRetry de quem chama (create não repete 5xx)", async () => {
+    let calls = 0;
+    const report = await runBatch(
+      ["a"],
+      { rps: 1000, maxRetries: 3, sleep: noSleep, shouldRetry: isRateLimitError },
+      async () => {
+        calls += 1;
+        throw new CangeApiError("erro interno", { status: 500 });
+      }
+    );
+
+    expect(calls).toBe(1);
+    expect(report.results[0]).toMatchObject({ ok: false, attempted: true, attempts: 1 });
   });
 
   it("repete erro transitório e conta as tentativas gastas", async () => {
@@ -200,6 +265,75 @@ describe("card create em lote (CLI)", () => {
     expect(process.exitCode).toBe(EXIT_CODES.PARTIAL);
     // A rajada PARA: 3 requisições (2 ok + 1 bloqueada), não 4.
     expect(call).toBe(3);
+  });
+
+  it("NÃO repete um create que falhou sem status (POST não idempotente) — vira failure", async () => {
+    await writePayload("item-01.json");
+    await writePayload("item-02.json");
+
+    let call = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      call += 1;
+      if (call === 1) {
+        // Timeout/queda de rede: o cliente embrulha em CangeApiError SEM status.
+        // Repetir aqui podia criar o card duas vezes.
+        throw new TypeError("fetch failed");
+      }
+      return cardResponse(1281650 + call);
+    });
+
+    const program = createProgram();
+    await program.parseAsync([
+      "node",
+      "cange",
+      "--output",
+      "json",
+      "card",
+      "create",
+      "--payload-dir",
+      dir,
+      "--rps",
+      "20",
+      "--max-retries",
+      "3"
+    ]);
+
+    const summary = JSON.parse(stdout.join(""));
+    expect(summary).toMatchObject({ requested: 2, created: 1, failed: 1, notAttempted: 0 });
+    expect(summary.failures[0]).toMatchObject({ payload: expect.stringContaining("item-01.json"), attempts: 1 });
+    expect(summary.failures[0].error).toContain("CONFIRA se o card existe");
+    // 1 requisição do item que falhou (sem repetição) + 1 do item seguinte.
+    expect(call).toBe(2);
+    expect(process.exitCode).toBe(EXIT_CODES.PARTIAL);
+  });
+
+  it("200 sem cardId conta como FALHA, não como card criado", async () => {
+    await writePayload("item-01.json");
+
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () => new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } })
+    );
+
+    const program = createProgram();
+    await program.parseAsync([
+      "node",
+      "cange",
+      "--output",
+      "json",
+      "card",
+      "create",
+      "--payload-dir",
+      dir,
+      "--rps",
+      "20"
+    ]);
+
+    const summary = JSON.parse(stdout.join(""));
+    expect(summary).toMatchObject({ requested: 1, created: 0, failed: 1, cardIds: [] });
+    expect(summary.failures[0].error).toContain("sem cardId");
+    expect(summary.warning).toContain("NÃO foram criados");
+    // Nada passou → categoria do erro (API), não PARTIAL.
+    expect(process.exitCode).toBe(EXIT_CODES.API);
   });
 
   it("sai com exit 0 e a lista de ids quando o lote inteiro passa", async () => {

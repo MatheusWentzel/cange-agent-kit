@@ -1,15 +1,18 @@
 import type { Command } from "commander";
 
 import { CangeCliUsageError, CangeError } from "../../client/errors.js";
+import type { BatchAbort } from "../../utils/batchRunner.js";
 import {
   BACKEND_READ_RPS_LIMIT,
   DEFAULT_READ_RPS,
-  mapWithThrottle
+  isRateLimitError,
+  mapWithThrottle,
+  retryAfterMs
 } from "../../utils/rateLimit.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { envCardId, envFlowId } from "../env-defaults.js";
-import { EXIT_CODES } from "../exit-codes.js";
+import { exitCodeForBatch } from "../exit-codes.js";
 
 interface CardReadOptions {
   flowId?: string;
@@ -27,6 +30,11 @@ const READ_MANY_MAX = 30;
  * e estourar bloqueia a chave por 5 minutos. Quem limita a taxa é o `rps`.
  */
 const READ_MANY_CONCURRENCY = 5;
+/**
+ * Bloqueio do `apiRateLimiter` do backend (`blockTimeInMinutes` = 5). Piso
+ * usado quando o 429 vem sem `Retry-After` — hoje, sempre.
+ */
+const RATE_LIMIT_BLOCK_FALLBACK_SECONDS = 300;
 
 /**
  * `cange card read` — leitura ENXUTA de um card, feita para agentes.
@@ -104,10 +112,25 @@ export function registerCardReadCommand(cardCommand: Command): void {
             );
           }
           let errors = 0;
+          let notAttempted = 0;
+          let firstError: unknown;
+          // Disjuntor de bloqueio: com a chave bloqueada (429) TODA leitura
+          // seguinte falha — e cada uma ainda gasta os retries internos do
+          // cliente. Ao primeiro 429 o lote para e o resto volta como NÃO
+          // TENTADO, para o agente saber o que reprocessar.
+          let aborted: BatchAbort | undefined;
           const cards = await mapWithThrottle(
             ids,
             { rps: parseRps(options.rps), concurrency: READ_MANY_CONCURRENCY },
             async (cardId) => {
+              if (aborted) {
+                notAttempted += 1;
+                return {
+                  cardId: Number(cardId),
+                  notAttempted: true,
+                  error: "não tentado — leitura interrompida por bloqueio de rate limit (429)"
+                };
+              }
               try {
                 const result = await kit.contracts.getCard({ flowId, cardId });
                 return buildLeanRead(result, requested);
@@ -116,12 +139,37 @@ export function registerCardReadCommand(cardCommand: Command): void {
                 // legível E entra na contagem: lote incompleto sai com exit 5,
                 // nunca como leitura completa (ver EXIT_CODES.PARTIAL).
                 errors += 1;
+                firstError ??= error;
+                if (isRateLimitError(error)) {
+                  const waitMs = retryAfterMs(error);
+                  aborted = {
+                    reason: "RATE_LIMIT_BLOCK",
+                    message:
+                      "Teto de requisições da API estourado (429). A chave fica bloqueada por ~5 minutos e, " +
+                      "enquanto isso, TODA leitura falha: o lote foi INTERROMPIDO para não queimar requisições " +
+                      "e o tempo da execução. Espere o bloqueio passar e leia de novo SÓ os cards que faltaram.",
+                    retryAfterSeconds:
+                      waitMs !== undefined ? Math.round(waitMs / 1000) : RATE_LIMIT_BLOCK_FALLBACK_SECONDS
+                  };
+                }
                 return { cardId: Number(cardId), error: describeError(error) };
               }
             }
           );
-          const envelope = { count: cards.length, ok: cards.length - errors, errors, cards };
-          return errors > 0 ? withExitCode(envelope, EXIT_CODES.PARTIAL) : envelope;
+          const envelope = {
+            count: cards.length,
+            ok: cards.length - errors - notAttempted,
+            errors,
+            ...(notAttempted > 0 ? { notAttempted } : {}),
+            ...(aborted ? { aborted } : {}),
+            cards
+          };
+          // `errors > 0 ? PARTIAL` mentia quando NADA foi lido (flow errado ⇒
+          // 30 falhas com exit 5, que o contrato define como "parte passou").
+          return withExitCode(
+            envelope,
+            exitCodeForBatch({ succeeded: envelope.ok, failed: errors + notAttempted, firstError })
+          );
         }
 
         if (!options.cardId) {
@@ -138,7 +186,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
 
   annotateCommand(command, {
     envelope:
-      "{ cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? } — com --card-ids: { count, ok, errors, cards: [<mesmo shape>; card que falhou vira {cardId, error}] }. Lote com errors > 0 sai com exit code 5 (leitura INCOMPLETA).",
+      "{ cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? } — com --card-ids: { count, ok, errors, notAttempted?, aborted?, cards: [<mesmo shape>; card que falhou vira {cardId, error}] }. Lote parcial sai com exit code 5; lote em que NADA foi lido sai com a categoria do erro (ex.: 4). Em 429 o lote PARA e o restante volta como notAttempted.",
     fieldsLocation:
       "fieldValues: chave = field id, valor = texto legível (multi-valor vira array). links: vínculos COMBO_BOX_FLOW_FIELD — [{cardId, label}] (acha os FILHOS de um pai). registerLinks: COMBO_BOX_REGISTER_FIELD — [{entryId, label}] (o entryId pronto p/ usar em campo de register de outro card)",
     example: "card read --flow-id 22795 --card-ids 1223901,1223902,1223903"

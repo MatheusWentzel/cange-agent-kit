@@ -18,14 +18,23 @@ ids que **esperava** — 8 nunca existiram — e fechou a tarefa como sucesso
 - `card create` ganhou modo **LOTE**: `--payload-dir <dir>` ou `--payloads <a.json,b.json>`,
   com `--rps` (default 8/s) e `--max-retries` (default 3).
   - valida TODOS os payloads antes de mutar (payload inválido ⇒ nada é criado, exit 2);
-  - throttle abaixo do teto + backoff/retry em 429/5xx/rede, honrando `Retry-After`;
-  - **para o lote** ao detectar bloqueio por rate limit (429) em vez de martelar;
-  - resumo explícito: `created` / `failed` / `notAttempted` + `cardIds` reais + `warning`.
+  - throttle abaixo do teto + backoff/retry **só em 429** (5xx/timeout não são
+    repetidos: `POST /form/new-answer` não é idempotente e o backend não tem chave de
+    idempotência — repetir criaria card duplicado; o item vira falha com o aviso de
+    conferir se o card existe antes de reprocessar);
+  - **para o lote** ao detectar bloqueio por rate limit (429) — enquanto o bloqueio
+    dura (~5 min) toda tentativa falha — e também no 403 do gate de agente
+    (`APPROVAL_*`/`PERMISSION_REQUIRED`), que é one-shot por requisição;
+  - resumo explícito: `created` / `failed` / `notAttempted` + `cardIds` reais + `warning`
+    (200 sem `cardId` conta como FALHA, nunca como criado).
 - **Exit code 5 = lote PARCIAL** (parte processada, parte não). Antes, um lote
-  incompleto era indistinguível de sucesso.
+  incompleto era indistinguível de sucesso. Quando **nada** passa, sai a categoria do
+  erro (4/3/2/1), não 5.
 - `card read --card-ids` passou a respeitar o teto de GET (10 req/s) — a
   concorrência de 5 sozinha podia disparar ~80 req/s — e devolve
-  `{ count, ok, errors, cards }`, com exit 5 quando algum card falha.
+  `{ count, ok, errors, notAttempted?, aborted?, cards }`: exit 5 quando parte falha,
+  categoria do erro quando nada é lido, e no 429 o lote PARA (o resto volta como
+  `notAttempted` em vez de queimar requisição contra chave bloqueada).
 - Erros de API agora carregam `retryAfterSeconds`; o retry interno do cliente
   usa backoff maior em 429 e desiste (em vez de dormir) quando a espera passa de 5s.
 

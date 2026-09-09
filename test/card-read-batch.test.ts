@@ -83,6 +83,51 @@ describe("card read em lote (CLI)", () => {
     expect(process.exitCode).toBe(EXIT_CODES.PARTIAL);
   });
 
+  it("PARA a leitura no 429 e devolve o restante como não tentado", async () => {
+    let calls = 0;
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ message: "Too many requests" }), {
+        status: 429,
+        headers: { "content-type": "application/json" }
+      });
+    });
+
+    const ids = Array.from({ length: 20 }, (_, index) => index + 1).join(",");
+    await runRead(["--flow-id", "22996", "--card-ids", ids, "--rps", "10"]);
+
+    const envelope = JSON.parse(stdout.join(""));
+    expect(envelope.count).toBe(20);
+    expect(envelope.ok).toBe(0);
+    // Só a onda que já estava em voo (concorrência 5) é condenada; o resto nem
+    // é tentado. Antes: 20 leituras × 3 tentativas internas = 60 requisições
+    // contra uma chave JÁ bloqueada.
+    expect(envelope.errors).toBeLessThanOrEqual(5);
+    expect(envelope.notAttempted).toBeGreaterThanOrEqual(15);
+    expect(calls).toBeLessThanOrEqual(15);
+    // Sem Retry-After o piso é o bloqueio padrão do backend (5 min).
+    expect(envelope.aborted).toMatchObject({ reason: "RATE_LIMIT_BLOCK", retryAfterSeconds: 300 });
+    expect(envelope.cards.at(-1)).toMatchObject({ cardId: 20, notAttempted: true });
+    // NADA foi lido → categoria do erro, não PARTIAL.
+    expect(process.exitCode).toBe(EXIT_CODES.API);
+  });
+
+  it("lote em que NENHUM card foi lido sai com a categoria do erro, não com exit 5", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(JSON.stringify({ message: "não encontrado" }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        })
+    );
+
+    await runRead(["--flow-id", "99999", "--card-ids", "1,2", "--rps", "10"]);
+
+    expect(JSON.parse(stdout.join(""))).toMatchObject({ count: 2, ok: 0, errors: 2 });
+    // Exit 5 significa "parte passou, parte não" — aqui nada passou.
+    expect(process.exitCode).toBe(EXIT_CODES.API);
+  });
+
   it("recusa --rps acima do teto de leitura do backend", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch");
 

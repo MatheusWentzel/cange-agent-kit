@@ -4,13 +4,19 @@ import path from "node:path";
 import type { Command } from "commander";
 import type { z } from "zod";
 
-import { CangeCliUsageError, CangeError, CangeValidationError } from "../../client/errors.js";
+import {
+  CangeApiError,
+  CangeCliUsageError,
+  CangeError,
+  CangeValidationError
+} from "../../client/errors.js";
 import { createCardPayloadSchema } from "../../schemas/cards.js";
 import { runBatch, type BatchReport } from "../../utils/batchRunner.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import {
   BACKEND_WRITE_RPS_LIMIT,
   DEFAULT_WRITE_RPS,
+  isRateLimitError,
   withRetry
 } from "../../utils/rateLimit.js";
 import type { CangeAgentKit } from "../../index.js";
@@ -32,7 +38,10 @@ interface CardCreateOptions {
   maxRetries?: string;
 }
 
-/** Tentativas ADICIONAIS por card em erro transitório (429/5xx/rede). */
+/**
+ * Tentativas ADICIONAIS por card em 429 (o único erro seguro de repetir num
+ * POST não idempotente — ver `shouldRetry` no create).
+ */
 const DEFAULT_MAX_RETRIES = 3;
 /**
  * Teto de payloads por lote. Não é limite técnico: é para o lote continuar
@@ -55,7 +64,8 @@ const BATCH_MAX_PAYLOADS = 200;
  * O que o lote garante e o loop de shell não garantia:
  *   · UMA autenticação e UM processo para N cards (menos requisições);
  *   · throttle abaixo do teto de escrita + backoff/retry em 429;
- *   · PARADA ao detectar bloqueio (martelar só estende os 5 minutos);
+ *   · PARADA ao detectar bloqueio (enquanto a chave está bloqueada, ~5 min,
+ *     toda tentativa falha — seguir só queima requisição e tempo de execução);
  *   · resumo por payload: `created`/`failed`/`notAttempted` + os ids reais;
  *   · exit code 5 quando o lote sai incompleto — sucesso parcial não passa
  *     por sucesso.
@@ -81,7 +91,7 @@ export function registerCardCreateCommand(cardCommand: Command): void {
     )
     .option(
       "--max-retries <n>",
-      `Tentativas adicionais por card em 429/5xx/rede (default ${DEFAULT_MAX_RETRIES})`
+      `Tentativas adicionais por card em 429 (default ${DEFAULT_MAX_RETRIES}). 5xx/timeout NÃO são repetidos: create não é idempotente`
     )
     .action(
       createCommandAction(async ({ kit, ensureAuth }, options: CardCreateOptions) => {
@@ -122,9 +132,20 @@ export function registerCardCreateCommand(cardCommand: Command): void {
 
         if (!batch) {
           const item = items[0]!;
-          const { value: result } = await withRetry(() => kit.contracts.createCard(item.payload), {
-            maxRetries
-          });
+          const { value: result } = await withRetry(
+            () => kit.contracts.createCard(item.payload).catch(rethrowWithVerifyHint),
+            {
+              maxRetries,
+              // POST /form/new-answer NÃO é idempotente e o backend não tem chave
+              // de idempotência nessa rota: repetir um create que falhou por 5xx
+              // ou por erro de rede (timeout = erro SEM status) pode criar o card
+              // duas vezes. Só 429 é seguro repetir — o rate limiter roda ANTES do
+              // handler (`applyApiRateLimit` no `ensureAuthenticated`), então é
+              // comprovadamente sem efeito colateral. O resto vira falha do
+              // comando, com a instrução de CONFERIR antes de reprocessar.
+              shouldRetry: isRateLimitError
+            }
+          );
           if (options.full) {
             return result;
           }
@@ -136,17 +157,21 @@ export function registerCardCreateCommand(cardCommand: Command): void {
           };
         }
 
-        const report = await runBatch(items, { rps, maxRetries }, async (item) =>
-          toCreatedCard(await kit.contracts.createCard(item.payload))
+        const report = await runBatch(
+          items,
+          // Mesmo motivo do caminho de 1 card: create não é idempotente, então
+          // só 429 (barrado antes do handler) pode ser repetido.
+          { rps, maxRetries, shouldRetry: isRateLimitError },
+          async (item) => toCreatedCard(await kit.contracts.createCard(item.payload))
         );
 
-        const summary = buildBatchSummary(items, report);
+        const { summary, firstError } = buildBatchSummary(items, report);
         return withExitCode(
           summary,
           exitCodeForBatch({
             succeeded: summary.created,
             failed: summary.failed + summary.notAttempted,
-            firstError: firstBatchError(report)
+            firstError
           })
         );
       })
@@ -421,18 +446,57 @@ interface BatchSummary {
 }
 
 /**
+ * Mensagem de um create cujo desfecho é AMBÍGUO (5xx, timeout, erro de rede):
+ * a requisição pode ter chegado ao backend e criado o card mesmo tendo
+ * devolvido erro. Como o create não é idempotente, reprocessar às cegas
+ * duplica.
+ */
+const VERIFY_BEFORE_RETRY =
+  "CONFIRA se o card existe (card list/flow query pelo título) ANTES de reprocessar este payload — " +
+  "o create não é idempotente e a requisição pode ter sido aplicada mesmo com erro.";
+
+/**
+ * O create devolveu 200 mas sem id: o kit NÃO tem como afirmar que o card
+ * existe, então isso não pode contar como criado (o `cardIds` é o contrato de
+ * "o que existe de verdade").
+ */
+const CREATED_WITHOUT_ID =
+  "create respondeu 200 mas sem cardId — verifique se o card existe antes de reusar este payload";
+
+/**
  * Resumo do lote. O contrato aqui é o antídoto do achado A4: o que existe são
  * os ids em `cardIds`; tudo que não passou aparece nomeado, e um lote
  * incompleto carrega um `warning` explícito além do exit code 5.
+ *
+ * Devolve junto o PRIMEIRO erro do lote (inclusive os sintéticos, como o 200
+ * sem cardId) — é ele que dá a categoria do exit code quando NADA passou.
  */
-function buildBatchSummary(items: BatchItem[], report: BatchReport<CreatedCard>): BatchSummary {
+function buildBatchSummary(
+  items: BatchItem[],
+  report: BatchReport<CreatedCard>
+): { summary: BatchSummary; firstError?: unknown } {
   const cards: BatchSummary["cards"] = [];
   const failures: NonNullable<BatchSummary["failures"]> = [];
   const notAttemptedPayloads: string[] = [];
+  let firstError: unknown;
+
+  const fail = (source: string, attempts: number, error: unknown): void => {
+    firstError ??= error;
+    failures.push({ payload: source, attempts, ...describeError(error) });
+  };
 
   for (const result of report.results) {
     const source = items[result.index]?.source ?? String(result.index);
     if (result.ok && result.value) {
+      // 200 sem id é FALHA, não sucesso: `undefined` entrando em `cardIds`
+      // vira `null` no JSON e o agente monta vínculo com um id que não existe.
+      if (result.value.cardId === undefined || result.value.cardId === null) {
+        // Erro sintético (não veio da API): entra no relatório com a mensagem
+        // já pronta e dá a categoria do exit code quando NADA passou.
+        firstError ??= new CangeApiError(`${CREATED_WITHOUT_ID}.`);
+        failures.push({ payload: source, attempts: result.attempts, error: `${CREATED_WITHOUT_ID}.` });
+        continue;
+      }
       cards.push({ payload: source, ...result.value });
       continue;
     }
@@ -440,44 +504,73 @@ function buildBatchSummary(items: BatchItem[], report: BatchReport<CreatedCard>)
       notAttemptedPayloads.push(source);
       continue;
     }
-    failures.push({ payload: source, attempts: result.attempts, ...describeError(result.error) });
+    fail(source, result.attempts, result.error);
   }
 
   const pending = failures.length + notAttemptedPayloads.length;
   return {
-    requested: items.length,
-    created: cards.length,
-    failed: failures.length,
-    notAttempted: notAttemptedPayloads.length,
-    cardIds: cards.map((card) => card.cardId),
-    cards,
-    ...(failures.length > 0 ? { failures } : {}),
-    ...(notAttemptedPayloads.length > 0 ? { notAttemptedPayloads } : {}),
-    ...(report.aborted ? { aborted: report.aborted } : {}),
-    ...(pending > 0
-      ? {
-          warning:
-            `ATENÇÃO: ${pending} de ${items.length} cards NÃO foram criados. ` +
-            "Os únicos cards que existem são os de `cardIds` — NÃO deduza ids por sequência e NÃO monte vínculos/contagens com ids que não estão nessa lista. " +
-            "Reprocesse os payloads de `failures`/`notAttemptedPayloads` e, se não for possível concluir, reporte a tarefa como PARCIAL."
-        }
-      : {})
+    summary: {
+      requested: items.length,
+      created: cards.length,
+      failed: failures.length,
+      notAttempted: notAttemptedPayloads.length,
+      cardIds: cards.map((card) => card.cardId),
+      cards,
+      ...(failures.length > 0 ? { failures } : {}),
+      ...(notAttemptedPayloads.length > 0 ? { notAttemptedPayloads } : {}),
+      ...(report.aborted ? { aborted: report.aborted } : {}),
+      ...(pending > 0
+        ? {
+            warning:
+              `ATENÇÃO: ${pending} de ${items.length} cards NÃO foram criados. ` +
+              "Os únicos cards que existem são os de `cardIds` — NÃO deduza ids por sequência e NÃO monte vínculos/contagens com ids que não estão nessa lista. " +
+              "Reprocesse os payloads de `failures`/`notAttemptedPayloads` e, se não for possível concluir, reporte a tarefa como PARCIAL."
+          }
+        : {})
+    },
+    ...(firstError !== undefined ? { firstError } : {})
   };
+}
+
+/**
+ * Desfecho ambíguo = pode ter sido aplicado no backend: 5xx e erro SEM status
+ * (timeout/rede). 4xx é recusa do payload e 429 é barrado antes do handler —
+ * nesses dois o card comprovadamente não foi criado.
+ */
+function isAmbiguousWriteError(error: unknown): boolean {
+  if (!(error instanceof CangeError)) {
+    return false;
+  }
+  return error.status === undefined || error.status >= 500;
+}
+
+/** Anexa o aviso de conferência ao erro de create com desfecho ambíguo. */
+function rethrowWithVerifyHint(error: unknown): never {
+  if (!isAmbiguousWriteError(error) || !(error instanceof CangeError)) {
+    throw error;
+  }
+  throw new CangeApiError(`${error.message} ${VERIFY_BEFORE_RETRY}`, {
+    ...(error.status !== undefined ? { status: error.status } : {}),
+    ...(error.endpoint !== undefined ? { endpoint: error.endpoint } : {}),
+    ...(error.method !== undefined ? { method: error.method } : {}),
+    ...(error.details !== undefined ? { details: error.details } : {}),
+    ...(error.retryAfterSeconds !== undefined ? { retryAfterSeconds: error.retryAfterSeconds } : {}),
+    cause: error
+  });
 }
 
 function describeError(error: unknown): { error: string; status?: number; retryAfterSeconds?: number } {
   if (error instanceof CangeError) {
+    const message = isAmbiguousWriteError(error)
+      ? `${error.message} ${VERIFY_BEFORE_RETRY}`
+      : error.message;
     return {
-      error: error.message,
+      error: message,
       ...(error.status !== undefined ? { status: error.status } : {}),
       ...(error.retryAfterSeconds !== undefined ? { retryAfterSeconds: error.retryAfterSeconds } : {})
     };
   }
   return { error: error instanceof Error ? error.message : String(error) };
-}
-
-function firstBatchError(report: BatchReport<CreatedCard>): unknown {
-  return report.results.find((result) => result.attempted && !result.ok)?.error;
 }
 
 function parseRps(raw: string | undefined): number {

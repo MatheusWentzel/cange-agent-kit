@@ -85,6 +85,14 @@ A API limita **por chave**: 10 req/s em leitura, 20 req/s em escrita — e estou
 - 2+ cards para ler → `cange card read --card-ids <a,b,c>`.
 - Sempre confira `created`/`failed`/`notAttempted` no retorno antes de montar
   vínculos, contagens ou conclusão.
+- O lote **não repete** create que falhou por 5xx/timeout (POST não idempotente,
+  sem chave de idempotência no backend): o item vira falha com o aviso de
+  **conferir se o card existe** antes de reprocessar. Só 429 é repetido.
+- **Rodando dentro do `cange-agent-runner`:** o gate de aprovação deriva o alvo de
+  `--payload <arquivo>` e ainda **não** entende `--payload-dir`/`--payloads`. O lote
+  é pausado para aprovação normalmente, mas o pedido chega sem o flow derivado e
+  rotulado como "Criar **um** card" (mesmo sendo N). Quem aprova precisa ler a
+  linha de comando do pedido.
 
 ## Discovery antes de adivinhar
 
