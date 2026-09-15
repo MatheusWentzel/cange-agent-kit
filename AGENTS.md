@@ -12,6 +12,7 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Na criação, preencher todos os campos com `required = "1"` do formulário-alvo.
 - Para card create, usar `flow.form_init_id`.
 - Para register create/update, usar `register.form_id`.
+- Para register create, o payload precisa do `registerId` (id do cadastro) **na raiz**, além do `idForm`: o backend resolve a referência por `register_id` no body. Sem ele, 404 "não foi possível encontrar a referência do formulário" — que parece falta de acesso, mas é payload. No register update, mandar `registerId` junto do `formAnswerId`.
 - Para mover etapa de card, sempre usar `card move-step-with-values`, mesmo sem obrigatórios.
 - Quando não houver campos para preencher, enviar `values: {}`.
 - Ao mover etapa, o `idForm` do payload deve ser o `form_id` da etapa atual (`flow_step.form_id`), não o `form_init_id` do fluxo.

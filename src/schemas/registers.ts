@@ -15,13 +15,30 @@ export const getRegisterFormAnswerParamsSchema = z.object({
   formAnswerId: idLikeSchema
 });
 
+/**
+ * Criação de registro de cadastro.
+ *
+ * `registerId` é OBRIGATÓRIO: o backend resolve a referência do formulário por
+ * `register_id` (ou `flow_id`) no nível RAIZ do body de `POST /form/new-answer`.
+ * Sem ele a rota devolve 404 "Parâmetros inválidos, não foi possível encontrar a
+ * referência do formulário!" antes mesmo de olhar o `id_form`. O antigo
+ * `registerContext` era aninhado e o backend nunca o leu.
+ */
 export const createRegisterPayloadSchema = z.object({
   idForm: z.number().int().positive(),
   origin: nonEmptyStringSchema,
   values: valuesSchema,
-  registerContext: z.record(z.string(), z.unknown()).optional()
+  registerId: idLikeSchema
 });
 
+/**
+ * Atualização de registro de cadastro.
+ *
+ * Na prática o backend exige `registerId` JUNTO de `formAnswerId`: `PUT /form/answer`
+ * despacha por `register_id` (ou `flow_id`) e devolve 404 quando só recebe o
+ * `form_answer_id`. O schema aceita um ou outro por compatibilidade, mas mandar só
+ * o `formAnswerId` falha na API.
+ */
 export const updateRegisterPayloadSchema = z
   .object({
     idForm: z.number().int().positive(),

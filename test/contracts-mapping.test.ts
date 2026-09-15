@@ -72,6 +72,13 @@ describe("contracts endpoint mapping", () => {
       archived: "S"
     });
 
+    await registers.createRegister({
+      idForm: 700,
+      origin: "/cange-agent-kit",
+      values: { doc_name: "Contrato" },
+      registerId: 90
+    });
+
     await registers.updateRegister({
       idForm: 700,
       registerId: 90,
@@ -119,6 +126,15 @@ describe("contracts endpoint mapping", () => {
       body: {
         id_notification: 48107,
         archived: "S"
+      }
+    });
+
+    expect(client.post).toHaveBeenNthCalledWith(5, "/form/new-answer", {
+      body: {
+        id_form: 700,
+        origin: "/cange-agent-kit",
+        values: { doc_name: "Contrato" },
+        register_id: 90
       }
     });
 

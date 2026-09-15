@@ -2,6 +2,53 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-09-15
+
+### `register create` volta a funcionar (payload agora leva `registerId`)
+
+**O que acontecia:** `cange register create` devolvia **404 em `POST /form/new-answer`**
+("Parâmetros inválidos, não foi possível encontrar a referência do formulário!") para
+**qualquer** cadastro, com qualquer chave de API. O contrato montava o body com o id do
+cadastro aninhado em `registerContext`, e o backend não lê essa chave: a rota decide por
+`register_id`/`flow_id` no nível **raiz** do body e, sem nenhum dos dois, devolve 404 antes
+de olhar o `id_form`. Por isso o erro era idêntico para um `id_form` inexistente e para o
+form de um fluxo onde o bot escreve todo dia — parecia falta de permissão no cadastro e não
+era. O `card create` sempre esteve correto (manda `flow_id` achatado); só a criação de
+registro divergia. Pior: o `template register-create` gerava um `payloadSkeleton` **sem** o
+id do cadastro, então seguir o template levava direto ao erro.
+
+**O que mudou no kit:**
+
+- `createRegister` manda **`register_id` achatado** na raiz do body.
+- `createRegisterPayloadSchema` troca `registerContext` (opcional, ignorado) por
+  **`registerId` obrigatório** — payload sem o id do cadastro falha na validação local,
+  com mensagem clara, em vez de virar 404 da API.
+- `template register-create` passa a incluir `registerId` no `payloadSkeleton`: o skeleton
+  é copiável sem retoque.
+- `register create` com payload no formato antigo (`registerContext`) morre com instrução de
+  migração, não com erro genérico de schema.
+- Testes de regressão em `test/register-create.test.ts` + asserção do `createRegister` no
+  `test/contracts-mapping.test.ts` (a criação de registro era o único contrato de mutação
+  sem cobertura do shape do body — foi assim que o bug passou).
+
+**Migração:** no payload de `register create`, troque
+
+```json
+{ "registerContext": { "registerId": 175 } }
+```
+
+por
+
+```json
+{ "registerId": 175 }
+```
+
+no nível raiz. O `--register-id` da CLI continua servindo só para a validação local de fields.
+
+**Nota que vale documentar:** `register update` exige `registerId` **junto** de
+`formAnswerId` — só o `formAnswerId` cai no mesmo 404, porque `PUT /form/answer` despacha
+pela mesma regra.
+
 ## 2026-09-09
 
 ### Criação em lote + throttle de rate limit (corrige perda silenciosa de dados)

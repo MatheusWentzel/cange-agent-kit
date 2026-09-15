@@ -24,6 +24,7 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
     .action(
       createCommandAction(async ({ kit }, options: RegisterCreateOptions) => {
         const payloadRaw = await readPayloadFile<unknown>(options.payload);
+        assertNoLegacyRegisterContext(payloadRaw);
         const parsed = createRegisterPayloadSchema.safeParse(payloadRaw);
         if (!parsed.success) {
           throw new CangeValidationError("Payload inválido para register create.", {
@@ -33,12 +34,7 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
         const payload = parsed.data;
 
         if (options.validateFields) {
-          const registerId = options.registerId ?? extractRegisterId(payload.registerContext);
-          if (!registerId) {
-            throw new CangeCliUsageError(
-              "Para --validate-fields em register create, informe --register-id ou registerContext com registerId."
-            );
-          }
+          const registerId = options.registerId ?? String(payload.registerId);
 
           const formContext = await kit.contracts.getRegisterFormFields({
             registerId
@@ -71,13 +67,37 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
     );
 }
 
-function extractRegisterId(
-  registerContext: Record<string, unknown> | undefined
-): string | undefined {
-  if (!registerContext) {
+/**
+ * O payload antigo levava o id do cadastro aninhado em `registerContext`, que o
+ * backend nunca leu: toda criação morria em 404 "não foi possível encontrar a
+ * referência do formulário". Quem ainda tiver payload no formato velho recebe a
+ * instrução de migração em vez do erro genérico de schema.
+ */
+function assertNoLegacyRegisterContext(payloadRaw: unknown): void {
+  if (
+    typeof payloadRaw !== "object" ||
+    payloadRaw === null ||
+    !("registerContext" in payloadRaw) ||
+    "registerId" in payloadRaw
+  ) {
+    return;
+  }
+
+  const legacy = (payloadRaw as { registerContext?: unknown }).registerContext;
+  const hint = extractLegacyRegisterId(legacy);
+  throw new CangeCliUsageError(
+    "Payload no formato antigo: `registerContext` foi removido porque o backend nunca o leu " +
+      "(POST /form/new-answer espera `register_id` no nível raiz). " +
+      `Troque por "registerId": ${hint ?? "<id do cadastro>"} no nível raiz do payload.`
+  );
+}
+
+function extractLegacyRegisterId(registerContext: unknown): string | undefined {
+  if (typeof registerContext !== "object" || registerContext === null) {
     return undefined;
   }
-  const candidates = [registerContext.registerId, registerContext.idRegister, registerContext.register_id];
+  const context = registerContext as Record<string, unknown>;
+  const candidates = [context.registerId, context.idRegister, context.register_id];
   for (const candidate of candidates) {
     if (typeof candidate === "number" && Number.isFinite(candidate)) {
       return String(candidate);
