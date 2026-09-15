@@ -286,6 +286,17 @@ pnpm cli register create --payload ./examples/create-register.example.json --reg
 pnpm cli register update --payload ./payload.json --register-id 55 --validate-fields --dry-run
 ```
 
+> **`registerId` é obrigatório no payload de `register create`** (e o `template register-create`
+> já o devolve preenchido no `payloadSkeleton`). O backend resolve a referência do formulário
+> por `register_id` no nível **raiz** do body de `POST /form/new-answer`, do mesmo jeito que o
+> `card create` faz com `flow_id`. Sem ele a rota devolve **404 "Parâmetros inválidos, não foi
+> possível encontrar a referência do formulário!"** antes de olhar o `idForm` — erro que parece
+> falta de acesso ao cadastro, mas é payload. O `--register-id` da CLI serve só para a validação
+> local de fields; ele **não** substitui o `registerId` do payload.
+>
+> No `register update`, mandar `registerId` **junto** de `formAnswerId`: só o `formAnswerId`
+> cai no mesmo 404 (o `PUT /form/answer` também despacha por `register_id`/`flow_id`).
+
 ## Regras críticas de `values`
 
 - A chave de cada entrada em `values` deve ser exatamente `field.name`.

@@ -21,7 +21,7 @@ export interface RegistersContracts {
     idForm: number;
     origin: string;
     values: Record<string, unknown>;
-    registerContext?: Record<string, unknown>;
+    registerId: string | number;
   }) => Promise<{ raw: unknown; summary: RegisterSummary }>;
   updateRegister: (input: {
     idForm: number;
@@ -78,12 +78,14 @@ export function createRegistersContracts(client: CangeClient): RegistersContract
         });
       }
 
+      // `register_id` vai ACHATADO na raiz do body, igual ao `flow_id` do createCard:
+      // é assim que POST /form/new-answer resolve a referência do formulário.
       const raw = await client.post<unknown>("/form/new-answer", {
         body: {
           id_form: parsed.data.idForm,
           origin: parsed.data.origin,
           values: parsed.data.values,
-          registerContext: parsed.data.registerContext
+          register_id: toNumber(parsed.data.registerId)
         }
       });
 

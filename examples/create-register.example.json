@@ -1,9 +1,7 @@
 {
   "idForm": 700,
+  "registerId": 55,
   "origin": "/cange-agent-kit",
-  "registerContext": {
-    "registerId": 55
-  },
   "values": {
     "customer_name": "ACME LTDA",
     "billing_email": "financeiro@acme.com",

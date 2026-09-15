@@ -268,7 +268,10 @@ export function createPayloadBuilderContracts(params: {
         requiredFields: getRequiredFields(formFields).map(toFieldSummary),
         optionalFields: formFields.filter((item) => !item.required).map(toFieldSummary),
         payloadSkeleton: {
+          // `registerId` é obrigatório no payload de `register create`: sem ele o
+          // POST /form/new-answer devolve 404 sem nem olhar o `idForm`.
           idForm: formId,
+          registerId: Number(input.registerId),
           origin: "/cange-agent-kit",
           values: buildValuesSkeleton(formFields)
         },

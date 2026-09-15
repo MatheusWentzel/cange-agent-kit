@@ -14,6 +14,7 @@
 4. Filtrar fields do formulário correto:
    - card create: `field.form_id === flow.form_init_id`
    - register create/update: `field.form_id === register.form_id`
+   - register create/update: além do `idForm`, mandar `registerId` na raiz do payload (o backend despacha por `register_id`).
 5. Montar payload usando `field.name` como chave.
 6. Validar tipos e obrigatórios.
 7. Rodar `--dry-run`.

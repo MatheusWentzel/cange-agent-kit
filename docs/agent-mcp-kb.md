@@ -150,6 +150,7 @@ Convenção (também exposta em `manifest.envelopeConvention` e no `--help` de c
 - `pnpm cli attachment upload --file <path>`
 - `pnpm cli attachment link-card --payload <path-to-json> [--dry-run]`
 - `pnpm cli register create --payload <path-to-json> [--validate-fields] [--register-id <id>] [--dry-run]`
+  - O payload precisa de `registerId` na raiz (id do cadastro) além de `idForm`/`origin`/`values`; sem ele a API devolve 404 de referência do formulário. O `--register-id` é só para a validação local de fields.
 - `pnpm cli register update --payload <path-to-json> [--validate-fields] [--register-id <id>] [--dry-run]`
 
 ### Construção de fluxos (Flow V2 Build API — `/flow/v2/build`)
