@@ -60,6 +60,8 @@ export interface CardSummary {
   stepName?: string;
   dueDate?: string;
   createdAt?: string;
+  /** Data de conclusão (card.dt_complete): preenchida ao entrar numa etapa final; zerada na reabertura. */
+  completedAt?: string;
   responsibleUserId?: number | string;
   responsibleName?: string;
   statusDue?: number | string;

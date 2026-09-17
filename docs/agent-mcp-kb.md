@@ -296,6 +296,7 @@ Compatibilidade: também aceita `id_notification`.
   stepName?: string;
   dueDate?: string;          // ISO
   createdAt?: string;        // ISO
+  completedAt?: string;      // ISO — card.dt_complete; só vem quando o card está em etapa final
   responsibleUserId?: number | string;
   responsibleName?: string;
   statusDue?: number | string;
