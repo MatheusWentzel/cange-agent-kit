@@ -346,6 +346,9 @@ export function summarizeCard(raw: unknown): CardSummary {
     stepName: pickString(flowStep ?? {}, ["name", "title"]),
     dueDate: pickString(record, ["dt_due", "due_date"]),
     createdAt: pickString(record, ["dt_created", "created_at"]),
+    // dt_complete é a coluna autoritativa do card. O V2 também devolve `completed_at`,
+    // mas é cópia denormalizada em card_snapshot — não usar como fonte.
+    completedAt: pickString(record, ["dt_complete"]),
     responsibleUserId:
       pickNumberOrString(record, ["user_id", "responsible_user_id"]) ??
       pickNumberOrString(user ?? {}, ["id_user", "user_id", "id"]),

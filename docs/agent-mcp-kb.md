@@ -296,6 +296,7 @@ Compatibilidade: também aceita `id_notification`.
   stepName?: string;
   dueDate?: string;          // ISO
   createdAt?: string;        // ISO
+  completedAt?: string;      // ISO — card.dt_complete; só em card concluído (ver nota abaixo)
   responsibleUserId?: number | string;
   responsibleName?: string;
   statusDue?: number | string;
@@ -303,6 +304,10 @@ Compatibilidade: também aceita `id_notification`.
   complete?: boolean;
 }
 ```
+
+> **`completedAt`.** O Cange grava `dt_complete` ao mover o card para uma etapa final (`MoveCardService.ts:179`) **ou** ao marcar o card como concluído (`complete: "S"` via `PUT /card`), o que pode ser feito em **qualquer** etapa — `UpdateCardService.ts:87-91` não checa `isEndStep`. Limpa ao reabrir: sair de etapa final para não-final, ou desmarcar fora de uma etapa final. **Não é re-carimbada**: card que entra numa segunda etapa final mantém a data da primeira (`MoveCardService.ts:179` só grava com `dt_complete === null`).
+>
+> Logo: presença da data **não prova** etapa final, e a etapa **não prova** a data. Para contar entregas por período, agrupe pela data.
 
 ### Notification summary (`notifications`)
 
