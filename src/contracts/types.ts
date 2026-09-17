@@ -60,7 +60,12 @@ export interface CardSummary {
   stepName?: string;
   dueDate?: string;
   createdAt?: string;
-  /** Data de conclusão (card.dt_complete): preenchida ao entrar numa etapa final; zerada na reabertura. */
+  /**
+   * Data de conclusão (card.dt_complete), ISO. Gravada ao entrar numa etapa final OU ao marcar
+   * o card como concluído — o que pode acontecer em qualquer etapa; limpa ao reabrir. É a conclusão
+   * ATUAL, não histórico, e não é re-carimbada numa segunda etapa final. Ter a data não implica
+   * estar numa etapa final, nem o contrário.
+   */
   completedAt?: string;
   responsibleUserId?: number | string;
   responsibleName?: string;

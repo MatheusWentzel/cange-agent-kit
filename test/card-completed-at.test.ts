@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { summarizeCard } from "../src/contracts/raw-adapters.js";
 
 /**
- * `completedAt` vem de `card.dt_complete`, gravado pelo backend quando o card entra
- * numa etapa final (`isEndStep === "1"`) e ZERADO quando ele volta para etapa não-final.
+ * `completedAt` vem de `card.dt_complete`, que o backend grava ao mover o card para uma
+ * etapa final (`MoveCardService.ts:179`) OU ao marcá-lo como concluído em qualquer etapa
+ * (`UpdateCardService.ts:87-91` não checa `isEndStep`), e limpa ao reabrir.
  * Card sem conclusão não deve criar a chave (o consumidor distingue "não concluído"
  * de "concluído sem data").
  */
@@ -34,6 +35,21 @@ describe("summarizeCard — completedAt", () => {
     });
 
     expect(summary.completedAt).toBe("2025-12-24T10:14:56.000Z");
+  });
+
+  it("mapeia a data mesmo fora de etapa final — concluir não exige mover de etapa", () => {
+    // Regressão documentada: o toggle de concluir do CardV2 manda `PUT /card {complete:"S"}`
+    // sem mover de etapa, e o backend carimba dt_complete sem checar isEndStep. O adapter é
+    // (e tem que continuar) agnóstico a etapa — não gatear por step aqui.
+    const summary = summarizeCard({
+      id: 1234,
+      flow_id: 192,
+      flow_step_id: 486, // "Em execução" — isEndStep = 0
+      complete: "S",
+      dt_complete: "2026-09-10T18:00:00.000Z"
+    });
+
+    expect(summary.completedAt).toBe("2026-09-10T18:00:00.000Z");
   });
 
   it("não cria a chave quando o card não está concluído (dt_complete null)", () => {
