@@ -57,6 +57,10 @@ const TYPE_GUARDS: Record<string, GuardDefinition> = {
   NUMBER_FIELD: numberGuard(),
   DOCUMENT_FIELD: stringGuard(),
   DOCUMENTS_FIELD: stringGuard(),
+  // Campo de documento do Cange (CPF/CNPJ). Aceita com ou sem máscara e o CNPJ
+  // alfanumérico (12 caracteres [A-Z0-9] + 2 dígitos verificadores).
+  DOC_FIELD: documentGuard(),
+  MAIL_FIELD: emailGuard(),
   RICH_TEXT_FIELD: stringGuard(),
   INPUT_RICH_TEXT_FIELD: stringGuard(),
   HTML_FIELD: stringGuard(),
@@ -97,6 +101,9 @@ const PT_BR_ALIASES: Record<string, string> = {
   numerico: "NUMERIC_FIELD",
   "numérico": "NUMERIC_FIELD",
   documentos: "DOCUMENTS_FIELD",
+  documento: "DOC_FIELD",
+  cpf: "DOC_FIELD",
+  cnpj: "DOC_FIELD",
   "texto formatado": "RICH_TEXT_FIELD",
   link: "LINK_FIELD"
 };
@@ -238,6 +245,17 @@ function objectGuard(): GuardDefinition {
   return {
     expected: "object",
     guard: (value) => value !== null && typeof value === "object" && !Array.isArray(value)
+  };
+}
+
+function documentGuard(): GuardDefinition {
+  return {
+    expected: "string (CPF com 11 dígitos ou CNPJ com 14 caracteres, com ou sem máscara)",
+    guard: (value) => {
+      if (typeof value !== "string") return false;
+      const bare = value.replace(/[.\-/\s]/g, "");
+      return /^\d{11}$/.test(bare) || /^[A-Za-z0-9]{12}\d{2}$/.test(bare);
+    }
   };
 }
 

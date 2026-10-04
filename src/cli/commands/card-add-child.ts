@@ -4,7 +4,7 @@ import { CangeValidationError } from "../../client/errors.js";
 import { addChildCardPayloadSchema } from "../../schemas/cards.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { createCommandAction } from "../context.js";
-import { readPayloadFile } from "../helpers.js";
+import { normalizeNumericValueKeys, readPayloadFile } from "../helpers.js";
 
 interface CardAddChildOptions {
   payload: string;
@@ -20,7 +20,7 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
     .requiredOption("--payload <path>", "Caminho do JSON de payload (child + parent)")
     .option("--dry-run", "Exibe o payload normalizado sem executar a mutação")
     .action(
-      createCommandAction(async ({ kit }, options: CardAddChildOptions) => {
+      createCommandAction(async ({ kit, ensureAuth }, options: CardAddChildOptions) => {
         const payloadRaw = await readPayloadFile<unknown>(options.payload);
         const parsed = addChildCardPayloadSchema.safeParse(payloadRaw);
         if (!parsed.success) {
@@ -29,8 +29,19 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
           });
         }
 
+        // R5-KR-03: o `map` e o `card read` enxutos mostram o id numérico do campo,
+        // sem o hash. O add-child cria o filho e só DEPOIS vincula, sem transação:
+        // um linkField numérico só falhava no PUT e deixava o filho órfão. Traduz
+        // id → hash ANTES do POST (values pelo fluxo filho, linkField pelo fluxo
+        // pai); id que não existe falha aqui, antes de criar qualquer coisa.
+        const { child, parent } = parsed.data;
+        child.values = (await normalizeNumericValueKeys(kit, child.flowId, child.values, ensureAuth)).values;
+        if (/^\d+$/.test(parent.linkField)) {
+          const link = await normalizeNumericValueKeys(kit, parent.flowId, { [parent.linkField]: true }, ensureAuth);
+          parent.linkField = Object.keys(link.values)[0] ?? parent.linkField;
+        }
+
         if (options.dryRun) {
-          const { child, parent } = parsed.data;
           return createDryRunResult({
             ...parsed.data,
             preview: {

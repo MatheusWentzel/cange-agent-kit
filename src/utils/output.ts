@@ -2,6 +2,8 @@ import { inspect } from "node:util";
 
 import type { CangeError } from "../client/errors.js";
 
+import type { OutputProfile } from "./lean.js";
+
 export type OutputMode = "json" | "pretty";
 
 export interface CliPrinter {
@@ -9,11 +11,17 @@ export interface CliPrinter {
   printError: (error: unknown) => void;
 }
 
-export function createCliPrinter(outputMode: OutputMode): CliPrinter {
+/**
+ * `profile` (rodada 5): no perfil `lean` (padrão) o JSON de sucesso sai SEM
+ * indentação (a indentação custava ~1,9 token por linha relida pelo agente);
+ * `full` mantém o JSON indentado de antes. Erro sai sempre como antes (stderr,
+ * indentado): o runner e o agente leem o código e o status dele.
+ */
+export function createCliPrinter(outputMode: OutputMode, profile: OutputProfile = "full"): CliPrinter {
   return {
     print(value) {
       if (outputMode === "json") {
-        process.stdout.write(`${JSON.stringify(value, null, 2)}\n`);
+        process.stdout.write(`${profile === "lean" ? JSON.stringify(value) : JSON.stringify(value, null, 2)}\n`);
         return;
       }
       process.stdout.write(`${formatPretty(value)}\n`);

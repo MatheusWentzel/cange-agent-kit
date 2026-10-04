@@ -19,7 +19,13 @@ export const queryFlowV2ParamsSchema = z.object({
   cursor: z.string().optional(),
   flowStepId: idLikeSchema.optional(),
   isArchived: z.boolean().optional(),
-  searchFieldScope: z.enum(["view", "flow"]).optional()
+  searchFieldScope: z.enum(["view", "flow"]).optional(),
+  /**
+   * Rodada 5: pede ao back o título REAL do cartão mesmo sem fieldView
+   * (`flags.ensure_card_title`). Sem isso a listagem V2 sem view devolvia
+   * "(Sem título)" e o agente lia cartão a cartão para ter o título.
+   */
+  ensureCardTitle: z.boolean().optional()
 });
 
 export type QueryFlowV2Params = z.infer<typeof queryFlowV2ParamsSchema>;

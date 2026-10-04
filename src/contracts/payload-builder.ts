@@ -336,13 +336,18 @@ export function validateValuesAgainstFields(input: ValidateValuesInput): Validat
 
     const typeValidation = validateValueByFieldType(field.type, value, field.options);
     if (typeValidation.expected === "unknown") {
+      // Tipo sem validação local (ex.: FORMULA_FIELD, INPUT_LIST_FIELD): é AVISO, não
+      // bloqueio. O valor segue como enviado e o servidor valida. Bloquear aqui
+      // impedia o agente de criar card em qualquer fluxo com um tipo novo
+      // (caso real: DOC_FIELD do CNPJ, run 196, 03/10/2026).
       issues.push({
         code: "UNKNOWN_FIELD_TYPE",
         fieldName: key,
         fieldTitle: field.title,
-        message: `Tipo de field não suportado para validação: ${field.type}.`,
+        message: `Tipo de field sem validação local: ${field.type}. O valor segue como enviado e o servidor valida.`,
         expected: "unknown"
       });
+      normalizedValues[key] = value;
       continue;
     }
 
@@ -405,11 +410,14 @@ export function validateValuesAgainstFields(input: ValidateValuesInput): Validat
   }
 
   return {
-    valid: issues.length === 0,
+    valid: issues.every((issue) => NON_BLOCKING_ISSUE_CODES.has(issue.code)),
     issues,
     normalizedValues
   };
 }
+
+/** Issues que informam mas não reprovam a validação (o servidor é quem decide). */
+const NON_BLOCKING_ISSUE_CODES: ReadonlySet<ValidationIssue["code"]> = new Set(["UNKNOWN_FIELD_TYPE"]);
 
 function isMissingValue(value: unknown): boolean {
   if (value === undefined || value === null) {

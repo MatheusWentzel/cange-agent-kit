@@ -10,6 +10,9 @@ import { exitCodeForError } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
 import { registerArtifactPublishCommand } from "./commands/artifact-publish.js";
 import { registerArtifactListCommand } from "./commands/artifact-list.js";
+import { registerArtifactGetCommand } from "./commands/artifact-get.js";
+import { registerAgentHeadCommands } from "./commands/agent-head.js";
+import { registerAccessCommands, registerCatalogCommand } from "./commands/access.js";
 import { registerAttachmentDownloadCommand } from "./commands/attachment-download.js";
 import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-card.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
@@ -50,6 +53,7 @@ import { registerMyRegistersCommand } from "./commands/my-registers.js";
 import { registerMyTasksCommand } from "./commands/my-tasks.js";
 import { registerNotificationReadCommand } from "./commands/notification-read.js";
 import { registerNotificationsCommand } from "./commands/notifications.js";
+import { registerRecipeCommand } from "./commands/recipe.js";
 import { registerRegisterCreateCommand } from "./commands/register-create.js";
 import { registerRegisterEntriesCommand } from "./commands/register-entries.js";
 import { registerRegisterFormAnswerGetCommand } from "./commands/register-form-answer-get.js";
@@ -68,6 +72,11 @@ export function createProgram(): Command {
     .option(
       "--output <mode>",
       "Formato de saída: json|pretty (default: json quando stdout é pipe, pretty em terminal)"
+    )
+    .option(
+      "--full",
+      "Formato COMPLETO de antes (JSON indentado, campos internos e vazios); o padrão é a saída enxuta. " +
+        "O mesmo que CANGE_OUTPUT_PROFILE=full"
     );
 
   registerAuthCommand(program);
@@ -124,9 +133,24 @@ export function createProgram(): Command {
   registerAttachmentLinkCardCommand(attachmentCommand);
   registerAttachmentDownloadCommand(attachmentCommand);
 
-  const artifactCommand = program.command("artifact").description("Operações de artefato (páginas HTML versionadas em cards)");
+  const artifactCommand = program
+    .command("artifact")
+    .description("Operações de artefato (páginas HTML com CSS próprio, versionadas em cards ou conversas)");
   registerArtifactPublishCommand(artifactCommand);
   registerArtifactListCommand(artifactCommand);
+  registerArtifactGetCommand(artifactCommand);
+
+  // Rodada 5 (01/10): auto-aperfeiçoamento. O agente lê a PRÓPRIA cabeça e propõe
+  // mudanças (modelo, aprendizado, playbook); o dono do agente aprova antes de valer.
+  const agentCommand = program
+    .command("agent")
+    .description("A própria cabeça do agente (índice, modelos de artefato e propostas de mudança)");
+  registerAgentHeadCommands(agentCommand);
+
+  // Rodada 6 (02/10): o agente acha fluxos e cadastros que não acessa (catálogo de
+  // nomes) e PEDE acesso; quem pode convidar para o recurso decide no Cange.
+  registerCatalogCommand(program);
+  registerAccessCommands(program);
 
   const toolCommand = program.command("tool").description("Ferramentas de API do agente (agent_tool type='api')");
   registerToolCallCommand(toolCommand);
@@ -156,6 +180,8 @@ export function createProgram(): Command {
   registerManifestCommand(program);
   registerGuideCommand(program);
   registerMapCommand(program);
+  // Rodada 5 (custo): receitas raras sob demanda, fora do prompt fixo do agente.
+  registerRecipeCommand(program);
 
   return program;
 }

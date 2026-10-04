@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 
 import { CangeCliUsageError } from "../../client/errors.js";
+import { dropEmpty } from "../../utils/lean.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { envCardId, envFlowId } from "../env-defaults.js";
@@ -30,7 +31,7 @@ export function registerCardGetCommand(cardCommand: Command): void {
     .option("--raw", "Inclui a resposta crua da API com vínculos COMPACTADOS (valueCardFlow vira {id_card, title})")
     .option("--raw-full", "Resposta crua INTOCADA (pode passar de 8MB em card com muitos vínculos — evite)")
     .action(
-      createCommandAction(async ({ kit }, options: CardGetOptions) => {
+      createCommandAction(async ({ kit, profile }, options: CardGetOptions) => {
         // Defaults do ambiente do runner (flag explícita vence).
         options.flowId = options.flowId ?? envFlowId();
         options.cardId = options.cardId ?? envCardId();
@@ -66,6 +67,14 @@ export function registerCardGetCommand(cardCommand: Command): void {
         // O agente que precisar do cru pede --raw (vínculos compactados) ou
         // --raw-full (intocado, escape hatch).
         if (!options.raw && !options.rawFull) {
+          if (profile === "lean") {
+            // Rodada 5: sem os aliases (id_card, flow_id, step_id), sem `fields` (o
+            // mesmo objeto de `fieldValues`), sem flowHash/companyId e sem vazios.
+            return dropEmpty({
+              summary: leanCardSummary(summary),
+              ...(requestedFieldIds.length > 0 ? { requestedFieldIds } : {})
+            });
+          }
           return {
             summary,
             ...(requestedFieldIds.length > 0 ? { requestedFieldIds } : {})
@@ -125,4 +134,11 @@ function stripValueCardFlow(raw: unknown): unknown {
     out[key] = stripValueCardFlow(value);
   }
   return out;
+}
+
+/** Summary do cartão sem os aliases e campos internos (saída enxuta, rodada 5). */
+function leanCardSummary(summary: Record<string, unknown>): Record<string, unknown> {
+  const { id_card: _idCard, flow_id: _flowId, step_id: _stepId, fields: _fields, flowHash: _hash, companyId: _company, ...rest } =
+    summary;
+  return rest;
 }

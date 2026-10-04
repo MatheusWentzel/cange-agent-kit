@@ -483,9 +483,9 @@ describe("flow-build CLI dry-run", () => {
     }
 
     const output = writes.join("");
-    expect(output).toContain('"dryRun": true');
-    expect(output).toContain('"executed": false');
-    expect(output).toContain('"name": "Onboarding"');
+    expect(output).toContain('"dryRun":true');
+    expect(output).toContain('"executed":false');
+    expect(output).toContain('"name":"Onboarding"');
   });
 
   it("runs step-relationship set in dry-run", async () => {
@@ -529,10 +529,10 @@ describe("flow-build CLI dry-run", () => {
     }
 
     const output = writes.join("");
-    expect(output).toContain('"dryRun": true');
-    expect(output).toContain('"executed": false');
-    expect(output).toContain('"idFlow": "999"');
-    expect(output).toContain('"isActive": "0"');
+    expect(output).toContain('"dryRun":true');
+    expect(output).toContain('"executed":false');
+    expect(output).toContain('"idFlow":"999"');
+    expect(output).toContain('"isActive":"0"');
   });
 
   it("rejects field create when both --id-step and --form-id are provided", async () => {
@@ -687,8 +687,8 @@ describe("flow-build CLI dry-run", () => {
     }
 
     const output = writes.join("");
-    expect(output).toContain('"dryRun": true');
-    expect(output).toContain('"formId": "200"');
-    expect(output).toContain('"type": "TEXT_SHORT_FIELD"');
+    expect(output).toContain('"dryRun":true');
+    expect(output).toContain('"formId":"200"');
+    expect(output).toContain('"type":"TEXT_SHORT_FIELD"');
   });
 });

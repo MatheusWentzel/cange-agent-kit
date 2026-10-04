@@ -30,6 +30,49 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Não inventar chaves de `values`.
 - Se houver falha de autenticação, revisar `CANGE_ACCESS_TOKEN` ou `CANGE_EMAIL` / `CANGE_APIKEY`.
 
+## Formato da saída (padrão enxuto desde 01/10/2026)
+
+- O padrão é a saída ENXUTA: JSON sem indentação (em pipe), sem campo nulo ou vazio, sem aliases snake_case
+  (`id_card`, `flow_id`, `step_id`, `fields` duplicado), sem `raw` junto do resumo.
+- `--full` (opção global, em qualquer posição) ou `CANGE_OUTPUT_PROFILE=full` devolve o formato COMPLETO de
+  antes, byte a byte. `--raw`/`--raw-full` continuam crus.
+- `CANGE_OUTPUT_PROFILE` e `CANGE_OUTPUT` valem tanto do ambiente do processo quanto do `.env` do diretório
+  (o mesmo `.env` do token). Agente local ou script que lê o formato antigo (`raw` do `my-flows`,
+  `summary.fields` do `card get`, `fieldValues` do `card read`) põe `CANGE_OUTPUT_PROFILE=full` no `.env` do
+  clone ou no ambiente do processo. O ambiente do processo vence o `.env`.
+- O que muda no enxuto:
+  - `my-flows`: `summaries` [{id, title, formInitId, totalCards, access}] (sem `raw`);
+  - `card read`: `fields` [{id, title, value}] com o título do campo; vínculo em `cards` [{cardId, label}] e
+    cadastro em `entries` [{entryId, label}] dentro do campo; rich text em markdown, com `format: "markdown"`
+    no campo convertido (`--field-ids` devolve o valor original, para reescrever);
+  - `card list`: título real e `stepName` em cada cartão;
+  - `comment list`: os 15 mais recentes, em markdown (`--limit <n>` traz mais; `total` diz quantos existem);
+  - `map`: campos sem o hash `name` (o `values` aceita o id numérico do campo como chave em card create,
+    update-values, move, add-child (também no `linkField`) e register create/update; o kit traduz para o hash
+    antes de gravar e id inexistente falha sem gravar nada; `map --full` mostra o hash).
+- Receitas sob demanda: `cange recipe <anexo|comentar|criar-card|mover-card|publicar-artefato>` (texto cru).
+
+## Acesso do agente a fluxos e cadastros (desde 02/10/2026, só com token de run)
+
+- `cange catalog [--type flow|register|all] [--q texto] [--limit n]`: NOMES dos fluxos e cadastros que o agente
+  pode ver, com `access` "sim"/"não" e o papel (`items` [{id, name, type, access, role}]). No chat e na rotina a
+  visão é a de quem conversa (ou do dono da rotina) somada à do agente; numa automação sem conversa, só o que o
+  agente já vê. Nunca traz conteúdo. `--full` traz o `raw`; `--raw` devolve a resposta crua.
+- `cange access request --flow <id> | --register <id> [--role M] --reason "..."`: cria o PEDIDO de acesso no
+  servidor (não dá acesso sozinho e não pausa a execução). A aprovação concede sempre Membro (`--role A` dá erro de
+  uso: Administrador só pelo bloco Ferramentas > Cange). Quem pode convidar pessoas para o recurso decide. A
+  saída traz `approvalId`, `whoCanApprove` e `message` (a frase pronta para a resposta, ex.: "Pedi acesso ao
+  fluxo Compras. Quem pode liberar: Ana, Bruno.").
+- Fluxo: não achou no `my-flows` ou tomou 404 de acesso → `cange catalog --q <nome>` → `cange access request`.
+  Nunca diga que um fluxo não existe sem olhar o catálogo; nunca grave nomes do catálogo na cabeça.
+- Tarefa seguinte (desde 03/10/2026): quando o acesso (ou a mudança na cabeça, `cange agent head propose`) é um
+  MEIO para o que pediram numa conversa, passe `--then "<o que falta fazer>"`. O kit manda `then` no corpo; o
+  Cange guarda (uma linha, até 1.000 caracteres) só se o run é de conversa e, aprovado o pedido, retoma a conversa
+  sozinho uma vez com essa tarefa. A saída traz `continuation`: `combinada` (com `then`, a tarefa guardada),
+  `pedido anterior` (o pedido já estava aberto e o `--then` novo não vale) ou `sem conversa` (nada fica guardado).
+  Com `combinada`, diga que segue sozinho depois da aprovação; não peça ao usuário para avisar. Na cabeça, sem
+  `--then` aprovar só avisa na conversa.
+
 ## Sequência recomendada para mutações com values
 
 1. `cange my-flows`, `cange my-registers`, `cange my-tasks` e `cange notifications --is-archived N`

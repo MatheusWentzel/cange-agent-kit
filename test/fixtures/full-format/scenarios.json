@@ -1,0 +1,1226 @@
+{
+  "note": "Rodada 5 (R5-KR-09): cenários do formato completo. O golden.json saiu do kit f3e4810 (antes da saída enxuta).",
+  "scenarios": [
+    {
+      "name": "my-flows",
+      "routes": {
+        "GET /flow/my-flows": [
+          {
+            "id_flow": 316,
+            "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "CNG CRM",
+            "form_init_id": 900,
+            "company_id": 1,
+            "color": "#fff",
+            "icon": "FaFire",
+            "schema_view": "{\"fieldView\":[{\"id\":1}]}",
+            "dt_created": "2026-01-01",
+            "company_email_config_id": null,
+            "total_cards": 42,
+            "typeUserAccess": "A"
+          },
+          {
+            "id_flow": 317,
+            "name": "Compras",
+            "form_init_id": 901,
+            "total_cards": 0,
+            "typeUserAccess": ""
+          }
+        ]
+      },
+      "oldArgs": [
+        "my-flows"
+      ],
+      "variants": [
+        {
+          "args": [
+            "--full",
+            "my-flows"
+          ]
+        },
+        {
+          "args": [
+            "my-flows",
+            "--full"
+          ]
+        },
+        {
+          "args": [
+            "my-flows"
+          ],
+          "env": {
+            "CANGE_OUTPUT_PROFILE": "full"
+          }
+        }
+      ]
+    },
+    {
+      "name": "card-read",
+      "routes": {
+        "GET /card/": {
+          "id_card": 1001,
+          "flow_id": 316,
+          "flow_step_id": 485,
+          "title": "Pedido ACME",
+          "complete": "N",
+          "form_answers": [
+            {
+              "id_form_answer": 1,
+              "deleted": "N",
+              "form_answer_fields": [
+                {
+                  "field_id": 10,
+                  "field": {
+                    "id_field": 10,
+                    "name": "h10",
+                    "title": "Resumo",
+                    "type": "INPUT_RICH_TEXT_FIELD"
+                  },
+                  "value": "<p>Ver <a href=\"https://tela.example/x\">a tela</a></p>",
+                  "valueString": "<p>Ver <a href=\"https://tela.example/x\">a tela</a></p>",
+                  "deleted": "N"
+                },
+                {
+                  "field_id": 11,
+                  "field": {
+                    "id_field": 11,
+                    "name": "h11",
+                    "title": "Pedido pai",
+                    "type": "COMBO_BOX_FLOW_FIELD"
+                  },
+                  "value": "2002",
+                  "valueString": "Pedido pai X",
+                  "deleted": "N"
+                },
+                {
+                  "field_id": 12,
+                  "field": {
+                    "id_field": 12,
+                    "name": "h12",
+                    "title": "Valor",
+                    "type": "CURRENCY_FIELD"
+                  },
+                  "value": "10,00",
+                  "deleted": "N"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "oldArgs": [
+        "card",
+        "read",
+        "--flow-id",
+        "316",
+        "--card-id",
+        "1001"
+      ],
+      "variants": [
+        {
+          "args": [
+            "card",
+            "read",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001",
+            "--full"
+          ]
+        },
+        {
+          "args": [
+            "--full",
+            "card",
+            "read",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001"
+          ]
+        },
+        {
+          "args": [
+            "card",
+            "read",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001"
+          ],
+          "env": {
+            "CANGE_OUTPUT_PROFILE": "full"
+          }
+        }
+      ]
+    },
+    {
+      "name": "card-read-batch",
+      "routes": {
+        "GET /card/": {
+          "id_card": 1001,
+          "flow_id": 316,
+          "flow_step_id": 485,
+          "title": "Pedido ACME",
+          "complete": "N",
+          "form_answers": [
+            {
+              "id_form_answer": 1,
+              "deleted": "N",
+              "form_answer_fields": [
+                {
+                  "field_id": 10,
+                  "field": {
+                    "id_field": 10,
+                    "name": "h10",
+                    "title": "Resumo",
+                    "type": "INPUT_RICH_TEXT_FIELD"
+                  },
+                  "value": "<p>Ver <a href=\"https://tela.example/x\">a tela</a></p>",
+                  "valueString": "<p>Ver <a href=\"https://tela.example/x\">a tela</a></p>",
+                  "deleted": "N"
+                },
+                {
+                  "field_id": 11,
+                  "field": {
+                    "id_field": 11,
+                    "name": "h11",
+                    "title": "Pedido pai",
+                    "type": "COMBO_BOX_FLOW_FIELD"
+                  },
+                  "value": "2002",
+                  "valueString": "Pedido pai X",
+                  "deleted": "N"
+                },
+                {
+                  "field_id": 12,
+                  "field": {
+                    "id_field": 12,
+                    "name": "h12",
+                    "title": "Valor",
+                    "type": "CURRENCY_FIELD"
+                  },
+                  "value": "10,00",
+                  "deleted": "N"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "oldArgs": [
+        "card",
+        "read",
+        "--flow-id",
+        "316",
+        "--card-ids",
+        "1001,1002"
+      ],
+      "variants": [
+        {
+          "args": [
+            "card",
+            "read",
+            "--flow-id",
+            "316",
+            "--card-ids",
+            "1001,1002",
+            "--full"
+          ]
+        },
+        {
+          "args": [
+            "card",
+            "read",
+            "--flow-id",
+            "316",
+            "--card-ids",
+            "1001,1002"
+          ],
+          "env": {
+            "CANGE_OUTPUT_PROFILE": "full"
+          }
+        }
+      ]
+    },
+    {
+      "name": "card-get",
+      "routes": {
+        "GET /card/": {
+          "id_card": 1001,
+          "flow_id": 316,
+          "flow_step_id": 485,
+          "title": "Pedido ACME",
+          "complete": "N",
+          "form_answers": [
+            {
+              "id_form_answer": 1,
+              "deleted": "N",
+              "form_answer_fields": [
+                {
+                  "field_id": 10,
+                  "field": {
+                    "id_field": 10,
+                    "name": "h10",
+                    "title": "Resumo",
+                    "type": "INPUT_RICH_TEXT_FIELD"
+                  },
+                  "value": "<p>Ver <a href=\"https://tela.example/x\">a tela</a></p>",
+                  "valueString": "<p>Ver <a href=\"https://tela.example/x\">a tela</a></p>",
+                  "deleted": "N"
+                },
+                {
+                  "field_id": 11,
+                  "field": {
+                    "id_field": 11,
+                    "name": "h11",
+                    "title": "Pedido pai",
+                    "type": "COMBO_BOX_FLOW_FIELD"
+                  },
+                  "value": "2002",
+                  "valueString": "Pedido pai X",
+                  "deleted": "N"
+                },
+                {
+                  "field_id": 12,
+                  "field": {
+                    "id_field": 12,
+                    "name": "h12",
+                    "title": "Valor",
+                    "type": "CURRENCY_FIELD"
+                  },
+                  "value": "10,00",
+                  "deleted": "N"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "oldArgs": [
+        "card",
+        "get",
+        "--flow-id",
+        "316",
+        "--card-id",
+        "1001"
+      ],
+      "variants": [
+        {
+          "args": [
+            "card",
+            "get",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001",
+            "--full"
+          ]
+        },
+        {
+          "args": [
+            "card",
+            "get",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001"
+          ],
+          "env": {
+            "CANGE_OUTPUT_PROFILE": "full"
+          }
+        }
+      ]
+    },
+    {
+      "name": "card-get-summary-only",
+      "routes": {
+        "GET /card/": {
+          "id_card": 1001,
+          "flow_id": 316,
+          "flow_step_id": 485,
+          "title": "Pedido ACME",
+          "complete": "N",
+          "form_answers": [
+            {
+              "id_form_answer": 1,
+              "deleted": "N",
+              "form_answer_fields": [
+                {
+                  "field_id": 10,
+                  "field": {
+                    "id_field": 10,
+                    "name": "h10",
+                    "title": "Resumo",
+                    "type": "INPUT_RICH_TEXT_FIELD"
+                  },
+                  "value": "<p>Ver <a href=\"https://tela.example/x\">a tela</a></p>",
+                  "valueString": "<p>Ver <a href=\"https://tela.example/x\">a tela</a></p>",
+                  "deleted": "N"
+                },
+                {
+                  "field_id": 11,
+                  "field": {
+                    "id_field": 11,
+                    "name": "h11",
+                    "title": "Pedido pai",
+                    "type": "COMBO_BOX_FLOW_FIELD"
+                  },
+                  "value": "2002",
+                  "valueString": "Pedido pai X",
+                  "deleted": "N"
+                },
+                {
+                  "field_id": 12,
+                  "field": {
+                    "id_field": 12,
+                    "name": "h12",
+                    "title": "Valor",
+                    "type": "CURRENCY_FIELD"
+                  },
+                  "value": "10,00",
+                  "deleted": "N"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "oldArgs": [
+        "card",
+        "get",
+        "--flow-id",
+        "316",
+        "--card-id",
+        "1001",
+        "--field-ids",
+        "10,12",
+        "--summary-only"
+      ],
+      "variants": [
+        {
+          "args": [
+            "card",
+            "get",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001",
+            "--field-ids",
+            "10,12",
+            "--summary-only",
+            "--full"
+          ]
+        },
+        {
+          "args": [
+            "card",
+            "get",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001",
+            "--field-ids",
+            "10,12",
+            "--summary-only"
+          ],
+          "env": {
+            "CANGE_OUTPUT_PROFILE": "full"
+          }
+        }
+      ]
+    },
+    {
+      "name": "map",
+      "routes": {
+        "GET /flow/my-flows": [
+          {
+            "id_flow": 316,
+            "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "name": "CNG CRM",
+            "form_init_id": 900,
+            "company_id": 1,
+            "color": "#fff",
+            "icon": "FaFire",
+            "schema_view": "{\"fieldView\":[{\"id\":1}]}",
+            "dt_created": "2026-01-01",
+            "company_email_config_id": null,
+            "total_cards": 42,
+            "typeUserAccess": "A"
+          },
+          {
+            "id_flow": 317,
+            "name": "Compras",
+            "form_init_id": 901,
+            "total_cards": 0,
+            "typeUserAccess": ""
+          }
+        ],
+        "GET /flow": {
+          "id_flow": 316,
+          "flow_steps": [
+            {
+              "id_step": 485,
+              "name": "Priorizados",
+              "form_id": 658,
+              "index": 1
+            }
+          ]
+        },
+        "GET /field/by-flow": [
+          {
+            "id_field": 10,
+            "name": "hhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhh",
+            "title": "Resumo",
+            "type": "TEXT_SHORT_FIELD",
+            "required": "S",
+            "form_id": 900
+          },
+          {
+            "id_field": 11,
+            "name": "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk",
+            "title": "Fornecedor",
+            "type": "COMBO_BOX_FLOW_FIELD",
+            "form_id": 900,
+            "flow_id": 317
+          }
+        ]
+      },
+      "oldArgs": [
+        "map",
+        "--flow-id",
+        "316"
+      ],
+      "variants": [
+        {
+          "args": [
+            "--full",
+            "map",
+            "--flow-id",
+            "316"
+          ]
+        },
+        {
+          "args": [
+            "map",
+            "--flow-id",
+            "316"
+          ],
+          "env": {
+            "CANGE_OUTPUT_PROFILE": "full"
+          }
+        }
+      ]
+    },
+    {
+      "name": "card-list-v2",
+      "routes": {
+        "POST /flow/v2/query": {
+          "items": [
+            {
+              "card": {
+                "id_card": 1,
+                "flow_id": 316,
+                "title": "Cartão 1",
+                "flow_step_id": 485,
+                "user_id": 76
+              },
+              "fields": {}
+            },
+            {
+              "card": {
+                "id_card": 2,
+                "flow_id": 316,
+                "title": "Cartão 2",
+                "flow_step_id": 485,
+                "user_id": 76
+              },
+              "fields": {}
+            }
+          ],
+          "page_info": {
+            "has_more": false
+          }
+        }
+      },
+      "oldArgs": [
+        "card",
+        "list",
+        "--flow-id",
+        "316",
+        "--engine",
+        "v2"
+      ],
+      "variants": [
+        {
+          "args": [
+            "--full",
+            "card",
+            "list",
+            "--flow-id",
+            "316",
+            "--engine",
+            "v2"
+          ]
+        },
+        {
+          "args": [
+            "card",
+            "list",
+            "--flow-id",
+            "316",
+            "--engine",
+            "v2"
+          ],
+          "env": {
+            "CANGE_OUTPUT_PROFILE": "full"
+          }
+        }
+      ]
+    },
+    {
+      "name": "comment-list-digest",
+      "routes": {
+        "GET /card-comment/by-card": [
+          {
+            "id_card_comment": 1,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 1<br/>linha 2</p>",
+            "dt_created": "2026-09-01T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 2,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 2<br/>linha 2</p>",
+            "dt_created": "2026-09-02T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 3,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 3<br/>linha 2</p>",
+            "dt_created": "2026-09-03T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 4,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 4<br/>linha 2</p>",
+            "dt_created": "2026-09-04T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 5,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 5<br/>linha 2</p>",
+            "dt_created": "2026-09-05T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 6,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 6<br/>linha 2</p>",
+            "dt_created": "2026-09-06T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 7,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 7<br/>linha 2</p>",
+            "dt_created": "2026-09-07T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 8,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 8<br/>linha 2</p>",
+            "dt_created": "2026-09-08T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 9,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 9<br/>linha 2</p>",
+            "dt_created": "2026-09-09T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 10,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 10<br/>linha 2</p>",
+            "dt_created": "2026-09-10T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 11,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 11<br/>linha 2</p>",
+            "dt_created": "2026-09-11T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 12,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 12<br/>linha 2</p>",
+            "dt_created": "2026-09-12T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 13,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 13<br/>linha 2</p>",
+            "dt_created": "2026-09-13T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 14,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 14<br/>linha 2</p>",
+            "dt_created": "2026-09-14T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 15,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 15<br/>linha 2</p>",
+            "dt_created": "2026-09-15T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 16,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 16<br/>linha 2</p>",
+            "dt_created": "2026-09-16T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 17,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 17<br/>linha 2</p>",
+            "dt_created": "2026-09-17T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 18,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 18<br/>linha 2</p>",
+            "dt_created": "2026-09-18T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 19,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 19<br/>linha 2</p>",
+            "dt_created": "2026-09-19T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 20,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 20<br/>linha 2</p>",
+            "dt_created": "2026-09-20T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          }
+        ]
+      },
+      "oldArgs": [
+        "comment",
+        "list",
+        "--flow-id",
+        "316",
+        "--card-id",
+        "1001"
+      ],
+      "variants": [
+        {
+          "args": [
+            "comment",
+            "list",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001"
+          ],
+          "env": {
+            "CANGE_OUTPUT_PROFILE": "full"
+          }
+        }
+      ]
+    },
+    {
+      "name": "comment-list-full",
+      "routes": {
+        "GET /card-comment/by-card": [
+          {
+            "id_card_comment": 1,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 1<br/>linha 2</p>",
+            "dt_created": "2026-09-01T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 2,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 2<br/>linha 2</p>",
+            "dt_created": "2026-09-02T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 3,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 3<br/>linha 2</p>",
+            "dt_created": "2026-09-03T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 4,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 4<br/>linha 2</p>",
+            "dt_created": "2026-09-04T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 5,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 5<br/>linha 2</p>",
+            "dt_created": "2026-09-05T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 6,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 6<br/>linha 2</p>",
+            "dt_created": "2026-09-06T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 7,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 7<br/>linha 2</p>",
+            "dt_created": "2026-09-07T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 8,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 8<br/>linha 2</p>",
+            "dt_created": "2026-09-08T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 9,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 9<br/>linha 2</p>",
+            "dt_created": "2026-09-09T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 10,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 10<br/>linha 2</p>",
+            "dt_created": "2026-09-10T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 11,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 11<br/>linha 2</p>",
+            "dt_created": "2026-09-11T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 12,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 12<br/>linha 2</p>",
+            "dt_created": "2026-09-12T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 13,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 13<br/>linha 2</p>",
+            "dt_created": "2026-09-13T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 14,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 14<br/>linha 2</p>",
+            "dt_created": "2026-09-14T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 15,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 15<br/>linha 2</p>",
+            "dt_created": "2026-09-15T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 16,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 16<br/>linha 2</p>",
+            "dt_created": "2026-09-16T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 17,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 17<br/>linha 2</p>",
+            "dt_created": "2026-09-17T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 18,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 18<br/>linha 2</p>",
+            "dt_created": "2026-09-18T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 19,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 19<br/>linha 2</p>",
+            "dt_created": "2026-09-19T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          },
+          {
+            "id_card_comment": 20,
+            "card_id": 1001,
+            "user_id": 76,
+            "user": {
+              "id_user": 76,
+              "name": "Lia"
+            },
+            "description": "<p>comentário 20<br/>linha 2</p>",
+            "dt_created": "2026-09-20T10:00:00.000Z",
+            "dt_created_string": "01/09/2026 10:00",
+            "fixed": 0,
+            "attachments": []
+          }
+        ]
+      },
+      "oldArgs": [
+        "comment",
+        "list",
+        "--flow-id",
+        "316",
+        "--card-id",
+        "1001",
+        "--full"
+      ],
+      "variants": [
+        {
+          "args": [
+            "comment",
+            "list",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001",
+            "--full"
+          ]
+        },
+        {
+          "args": [
+            "--full",
+            "comment",
+            "list",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001"
+          ]
+        },
+        {
+          "args": [
+            "comment",
+            "list",
+            "--flow-id",
+            "316",
+            "--card-id",
+            "1001",
+            "--full"
+          ],
+          "env": {
+            "CANGE_OUTPUT_PROFILE": "full"
+          }
+        }
+      ]
+    }
+  ]
+}
