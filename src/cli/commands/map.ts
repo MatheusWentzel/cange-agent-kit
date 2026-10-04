@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 
 import { extractFlowSteps } from "../../contracts/payload-builder.js";
+import { dropEmpty } from "../../utils/lean.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 
@@ -35,7 +36,8 @@ export function registerMapCommand(program: Command): void {
     .option("--flow-id <id>", "Mapeia só este flow (mais rápido/enxuto)")
     .option("--max-flows <n>", "Máximo de flows a detalhar (default 15)")
     .action(
-      createCommandAction(async ({ kit }, options: MapOptions) => {
+      createCommandAction(async ({ kit, profile }, options: MapOptions) => {
+        const lean = profile === "lean";
         const { summaries } = await kit.contracts.getMyFlows();
 
         const maxFlows = options.maxFlows !== undefined ? Number(options.maxFlows) : 15;
@@ -80,9 +82,11 @@ export function registerMapCommand(program: Command): void {
             .filter((f) => f.type !== "DIVIDER_FIELD")
             .map((f) => {
               const link = f.id !== undefined ? rawLinkById.get(String(f.id)) : undefined;
+              // Rodada 5 (enxuto): sem o hash `name` (23% do map; o kit aceita o id
+              // numérico do campo em `values` e traduz). `--full` traz o hash.
               const out: Record<string, unknown> = {
                 id: f.id !== undefined ? Number(f.id) : undefined,
-                name: f.name,
+                ...(lean ? {} : { name: f.name }),
                 title: f.title,
                 type: f.type,
                 required: f.required,
@@ -118,6 +122,16 @@ export function registerMapCommand(program: Command): void {
           });
         }
 
+        if (lean) {
+          // Rodada 5: `relationships`/`registersUsed` repetiam o `linksToFlowId`/
+          // `registerId` que já está em cada campo; a dica vive no bloco do CLI.
+          return dropEmpty({
+            totalFlows: summaries.length,
+            mappedFlows: flowsOut.length,
+            truncated: wanted.length > toDetail.length,
+            flows: flowsOut
+          });
+        }
         return {
           totalFlows: summaries.length,
           mappedFlows: flowsOut.length,
@@ -135,7 +149,8 @@ export function registerMapCommand(program: Command): void {
 
   annotateCommand(command, {
     envelope:
-      "{ totalFlows, mappedFlows, truncated, flows[{id,name,formInitId,steps[],fields[]}], relationships[], registersUsed[], dica }",
+      "Enxuto (padrão): { totalFlows, mappedFlows, truncated, flows[{id,name,formInitId,steps[],fields[{id,title,type,required,formId,linksToFlowId?,registerId?}]}] }. " +
+      "Com --full: { totalFlows, mappedFlows, truncated, flows[{id,name,formInitId,steps[],fields[{id,name(hash),...}]}], relationships[], registersUsed[], dica }",
     fieldsLocation:
       "flows[].fields[].formId × flows[].steps[].formId distingue campo de criação vs de etapa; relationships liga flows via COMBO_BOX_FLOW_FIELD",
     example: "cange map            (ambiente inteiro)  ·  cange map --flow-id 22792   (um flow)"

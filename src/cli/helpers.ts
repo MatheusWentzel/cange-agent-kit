@@ -69,6 +69,44 @@ export async function normalizeNumericValueKeys(
     await ensureAuth();
   }
   const { fields } = await kit.contracts.getFieldsByFlow({ flowId });
+  return translateNumericKeys(fields, values, `do flow ${flowId}`, { flowId });
+}
+
+/**
+ * R5-KR-03: a mesma tradução id → hash para `register create`/`register update`
+ * (o `map` enxuto não mostra o hash). Os fields vêm do CADASTRO (`registerId`).
+ * Sem `registerId` (update só com `formAnswerId`) não há como traduzir: chave
+ * numérica vira erro de uso claro, em vez de ir para a API.
+ */
+export async function normalizeRegisterNumericValueKeys(
+  kit: { contracts: { getFieldsByRegister: (input: { registerId: string | number }) => Promise<{ fields: Array<{ id?: number | string; name: string; title?: string }> }> } },
+  registerId: string | number | undefined,
+  values: Record<string, unknown>,
+  ensureAuth?: () => Promise<unknown>
+): Promise<{ values: Record<string, unknown>; translatedKeys: Array<{ from: string; to: string; title?: string }> }> {
+  const numericKeys = Object.keys(values).filter((key) => /^\d+$/.test(key));
+  if (numericKeys.length === 0) {
+    return { values, translatedKeys: [] };
+  }
+  if (registerId === undefined || String(registerId).trim().length === 0) {
+    throw new CangeCliUsageError(
+      `Chave numérica em values (${numericKeys.join(", ")}) precisa do registerId no payload para virar o hash do field. ` +
+        "Informe registerId ou use o hash (name) do field (cange fields by-register --register-id <id>)."
+    );
+  }
+  if (ensureAuth) {
+    await ensureAuth();
+  }
+  const { fields } = await kit.contracts.getFieldsByRegister({ registerId });
+  return translateNumericKeys(fields, values, `do cadastro ${registerId}`, { registerId });
+}
+
+function translateNumericKeys(
+  fields: Array<{ id?: number | string; name: string; title?: string }>,
+  values: Record<string, unknown>,
+  scopeLabel: string,
+  scopeDetails: Record<string, unknown>
+): { values: Record<string, unknown>; translatedKeys: Array<{ from: string; to: string; title?: string }> } {
   const byId = new Map<string, { name: string; title?: string }>();
   for (const field of fields) {
     if (field.id !== undefined) {
@@ -83,8 +121,8 @@ export async function normalizeNumericValueKeys(
       const hit = byId.get(key);
       if (!hit) {
         throw new CangeValidationError(
-          `Chave numérica "${key}" em values não corresponde a nenhum field do flow ${flowId}. Use o hash (name) do field.`,
-          { details: { unknownFieldId: key, flowId } }
+          `Chave numérica "${key}" em values não corresponde a nenhum field ${scopeLabel}. Use o hash (name) do field.`,
+          { details: { unknownFieldId: key, ...scopeDetails } }
         );
       }
       out[hit.name] = value;

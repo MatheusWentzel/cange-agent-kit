@@ -4,7 +4,7 @@ import { CangeCliUsageError, CangeValidationError } from "../../client/errors.js
 import { createRegisterPayloadSchema } from "../../schemas/registers.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { createCommandAction } from "../context.js";
-import { assertValidationResult, readPayloadFile } from "../helpers.js";
+import { assertValidationResult, normalizeRegisterNumericValueKeys, readPayloadFile } from "../helpers.js";
 
 interface RegisterCreateOptions {
   payload: string;
@@ -22,7 +22,7 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
     .option("--register-id <id>", "ID do register para validação de fields")
     .option("--dry-run", "Exibe payload sem executar a mutação")
     .action(
-      createCommandAction(async ({ kit }, options: RegisterCreateOptions) => {
+      createCommandAction(async ({ kit, ensureAuth }, options: RegisterCreateOptions) => {
         const payloadRaw = await readPayloadFile<unknown>(options.payload);
         assertNoLegacyRegisterContext(payloadRaw);
         const parsed = createRegisterPayloadSchema.safeParse(payloadRaw);
@@ -32,6 +32,11 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
           });
         }
         const payload = parsed.data;
+        // R5-KR-03: o `map` enxuto não mostra o hash do campo; o id numérico vira hash
+        // pelos fields do cadastro (id inexistente falha antes de chamar a API).
+        payload.values = (
+          await normalizeRegisterNumericValueKeys(kit, payload.registerId ?? options.registerId, payload.values, ensureAuth)
+        ).values;
 
         if (options.validateFields) {
           const registerId = options.registerId ?? String(payload.registerId);

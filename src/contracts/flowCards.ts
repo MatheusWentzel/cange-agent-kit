@@ -22,6 +22,8 @@ export interface FetchFlowCardsInput {
   searchFieldScope?: "view" | "flow";
   limit?: number;
   pageSize?: number;
+  /** Rodada 5 (V2): título real do cartão mesmo sem view (`flags.ensure_card_title`). */
+  ensureCardTitle?: boolean;
 }
 
 export interface FetchFlowCardsResult {
@@ -125,7 +127,8 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
       isArchived: input.isArchived,
       searchFieldScope: input.searchFieldScope,
       pageSize: input.pageSize,
-      limit: input.limit
+      limit: input.limit,
+      ...(input.ensureCardTitle === true ? { ensureCardTitle: true } : {})
     });
     return {
       engine: "v2",

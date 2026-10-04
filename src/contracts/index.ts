@@ -1,6 +1,7 @@
 import type { CangeResolvedConfig } from "../client/config.js";
 import type { CangeClient } from "../client/http.js";
 
+import { createAgentHeadContracts } from "./agentHead.js";
 import { createArtifactsContracts } from "./artifacts.js";
 import { createAttachmentsContracts } from "./attachments.js";
 import { createCardsContracts } from "./cards.js";
@@ -16,6 +17,7 @@ import { createNotificationsContracts } from "./notifications.js";
 import { createPayloadBuilderContracts } from "./payload-builder.js";
 import { createRegisterQueryContracts } from "./registerQuery.js";
 import { createRegistersContracts } from "./registers.js";
+import { createResourceAccessContracts } from "./resourceAccess.js";
 import { createTimeTrackingContracts } from "./timeTracking.js";
 
 export function createContracts(params: { client: CangeClient; config: CangeResolvedConfig }) {
@@ -27,6 +29,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const notifications = createNotificationsContracts(params.client);
   const attachments = createAttachmentsContracts(params.client);
   const artifacts = createArtifactsContracts(params.client);
+  const agentHead = createAgentHeadContracts(params.client);
+  const resourceAccess = createResourceAccessContracts(params.client);
   const registers = createRegistersContracts(params.client);
   const registerQuery = createRegisterQueryContracts({ client: params.client, fields });
   const timeTracking = createTimeTrackingContracts(params.client);
@@ -73,6 +77,15 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getCardRelationship: cards.getCardRelationship,
     getCardAttachmentDownloads: attachments.getCardAttachmentDownloads,
     getArtifactsByCard: artifacts.getArtifactsByCard,
+    getArtifactsBySession: artifacts.getArtifactsBySession,
+    getArtifactSource: artifacts.getArtifactSource,
+    // Conferência do publish: POST, mas LEITURA (não grava; READ_VIA_POST no back).
+    validateArtifact: artifacts.validateArtifact,
+    // Rodada 5: a PRÓPRIA cabeça do agente (índice e um arquivo por vez).
+    getAgentHead: agentHead.getAgentHead,
+    getAgentHeadDoc: agentHead.getAgentHeadDoc,
+    // Rodada 6: catálogo de NOMES de fluxos e cadastros (sem conteúdo).
+    getAgentCatalog: resourceAccess.getAgentCatalog,
     getRegisterFormAnswer: registers.getRegisterFormAnswer,
     listCommentsByCard: comments.listCommentsByCard,
     flowBuildPing: flowV2Build.ping,
@@ -95,6 +108,10 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     uploadAttachment: attachments.uploadAttachment,
     linkAttachmentToCard: attachments.linkAttachmentToCard,
     publishArtifact: artifacts.publishArtifact,
+    // Rodada 5: cria o PEDIDO de aprovação da mudança na própria cabeça (o dono aplica).
+    proposeHeadChange: agentHead.proposeHeadChange,
+    // Rodada 6: cria o PEDIDO de acesso a um fluxo ou cadastro (quem pode convidar decide).
+    requestResourceAccess: resourceAccess.requestResourceAccess,
     createRegister: registers.createRegister,
     updateRegister: registers.updateRegister,
     createTimeTracking: timeTracking.createTimeTracking,

@@ -9,6 +9,7 @@ import {
   mapWithThrottle,
   retryAfterMs
 } from "../../utils/rateLimit.js";
+import { dropEmpty, htmlToMarkdown, looksLikeHtml, type OutputProfile } from "../../utils/lean.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { envCardId, envFlowId } from "../env-defaults.js";
@@ -74,7 +75,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
       `Lote: requisições por segundo (default ${DEFAULT_READ_RPS}; teto do backend em leitura: ${BACKEND_READ_RPS_LIMIT}/s, e estourar bloqueia a chave por ~5 min)`
     )
     .action(
-      createCommandAction(async ({ kit }, options: CardReadOptions) => {
+      createCommandAction(async ({ kit, profile }, options: CardReadOptions) => {
         // Defaults do ambiente do runner (flag explícita vence). Sem os dois →
         // erro CLARO aqui, não um usage error genérico.
         const flowId = options.flowId ?? envFlowId();
@@ -133,7 +134,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
               }
               try {
                 const result = await kit.contracts.getCard({ flowId, cardId });
-                return buildLeanRead(result, requested);
+                return buildLeanRead(result, requested, profile);
               } catch (error) {
                 // Um card com erro não derruba o lote — vira entrada de erro
                 // legível E entra na contagem: lote incompleto sai com exit 5,
@@ -162,7 +163,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
             errors,
             ...(notAttempted > 0 ? { notAttempted } : {}),
             ...(aborted ? { aborted } : {}),
-            cards
+            cards: profile === "lean" ? cards.map((card) => dropEmpty(card)) : cards
           };
           // `errors > 0 ? PARTIAL` mentia quando NADA foi lido (flow errado ⇒
           // 30 falhas com exit 5, que o contrato define como "parte passou").
@@ -180,13 +181,15 @@ export function registerCardReadCommand(cardCommand: Command): void {
           flowId: options.flowId,
           cardId: options.cardId
         });
-        return buildLeanRead(result, requested);
+        const read = buildLeanRead(result, requested, profile);
+        return profile === "lean" ? dropEmpty(read) : read;
       })
     );
 
   annotateCommand(command, {
     envelope:
-      "{ cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? } — com --card-ids: { count, ok, errors, notAttempted?, aborted?, cards: [<mesmo shape>; card que falhou vira {cardId, error}] }. Lote parcial sai com exit code 5; lote em que NADA foi lido sai com a categoria do erro (ex.: 4). Em 429 o lote PARA e o restante volta como notAttempted.",
+      "Enxuto (padrão): { cardId, title, flowId, flowName, stepId, stepName, dueDate?, completedAt?, responsibleName?, archived, complete, fields: [{id, title, value} | {id, title, cards: [{cardId, label}]} | {id, title, entries: [{entryId, label}]}] } (rich text em markdown; --field-ids devolve o valor original). " +
+      "Com --full: { cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? } — com --card-ids: { count, ok, errors, notAttempted?, aborted?, cards: [<mesmo shape>; card que falhou vira {cardId, error}] }. Lote parcial sai com exit code 5; lote em que NADA foi lido sai com a categoria do erro (ex.: 4). Em 429 o lote PARA e o restante volta como notAttempted.",
     fieldsLocation:
       "fieldValues: chave = field id, valor = texto legível (multi-valor vira array). links: vínculos COMBO_BOX_FLOW_FIELD — [{cardId, label}] (acha os FILHOS de um pai). registerLinks: COMBO_BOX_REGISTER_FIELD — [{entryId, label}] (o entryId pronto p/ usar em campo de register de outro card)",
     example: "card read --flow-id 22795 --card-ids 1223901,1223902,1223903"
@@ -196,10 +199,14 @@ export function registerCardReadCommand(cardCommand: Command): void {
 /** Monta a visão enxuta a partir do envelope do getCard (single e lote usam o mesmo). */
 function buildLeanRead(
   result: { raw: unknown; summary: unknown },
-  requestedFieldIds: string[]
+  requestedFieldIds: string[],
+  profile: OutputProfile = "full"
 ): Record<string, unknown> {
   const s = result.summary as Record<string, unknown>;
   const extracted = extractValuesAndLinks(result.raw);
+  if (profile === "lean") {
+    return buildAgentRead(s, extracted, requestedFieldIds);
+  }
 
   // Preferência: valores agregados do raw (multi-valor vira array, deletado
   // sai); fallback no summary legado quando o raw não tiver form_answers.
@@ -239,6 +246,94 @@ function buildLeanRead(
       ? { registerLinks: extracted.registerLinks }
       : {})
   };
+}
+
+/**
+ * Rodada 5 (saída enxuta, padrão): o TÍTULO de cada campo vem junto do valor (o
+ * agente rodava `map` só para saber o que era `fieldValues[381929]`), o vínculo
+ * aparece uma vez só, dentro do campo (antes o rótulo vinha em `fieldValues` E em
+ * `links`), e rich text vira markdown com os links preservados antes do corte.
+ * `--field-ids` devolve o valor ORIGINAL (sem converter nem cortar): é o que se
+ * usa para reescrever um campo.
+ */
+function buildAgentRead(
+  s: Record<string, unknown>,
+  extracted: ExtractedCard,
+  requestedFieldIds: string[]
+): Record<string, unknown> {
+  const values: Record<string, unknown> =
+    extracted.fieldValues ?? ((s.fieldValues ?? s.fields ?? {}) as Record<string, unknown>);
+  const titles = extracted.fieldTitles ?? {};
+  const links = extracted.links ?? {};
+  const registerLinks = extracted.registerLinks ?? {};
+  const requested = requestedFieldIds.length > 0;
+
+  const order: string[] = requested
+    ? requestedFieldIds
+    : Array.from(new Set([...Object.keys(values), ...Object.keys(links), ...Object.keys(registerLinks)]));
+
+  const fields = order.map((fieldId) => {
+    const entry: Record<string, unknown> = {
+      id: /^\d+$/.test(fieldId) ? Number(fieldId) : fieldId,
+      title: titles[fieldId]
+    };
+    if (links[fieldId]) {
+      entry.cards = links[fieldId];
+    } else if (registerLinks[fieldId]) {
+      entry.entries = registerLinks[fieldId];
+    } else {
+      const value = fieldId in values ? values[fieldId] : null;
+      if (requested) {
+        entry.value = value;
+      } else {
+        const readable = readableValue(fieldId, value);
+        entry.value = readable.value;
+        // R5-KR-07: o valor convertido de HTML para markdown vem MARCADO. Gravar o
+        // markdown de volta num campo rich text mostraria `[texto](url)` literal:
+        // antes de reescrever, o agente busca o original com `--field-ids`.
+        if (readable.converted) entry.format = "markdown";
+      }
+    }
+    return entry;
+  });
+
+  return {
+    cardId: s.cardId ?? s.id_card,
+    title: s.title,
+    flowId: s.flowId ?? s.flow_id,
+    flowName: s.flowName,
+    stepId: s.currentStepId ?? s.step_id,
+    stepName: s.stepName,
+    createdAt: s.createdAt,
+    dueDate: s.dueDate,
+    completedAt: s.completedAt,
+    responsibleUserId: s.responsibleUserId,
+    responsibleName: s.responsibleName,
+    archived: s.archived,
+    complete: s.complete,
+    fields
+  };
+}
+
+/**
+ * Valor legível: HTML vira markdown e o que passa do teto é cortado com marcador.
+ * `converted` diz se algum item veio de HTML (o campo sai com `format: "markdown"`).
+ */
+function readableValue(fieldId: string, value: unknown): { value: unknown; converted: boolean } {
+  let converted = false;
+  const one = (item: unknown): unknown => {
+    if (typeof item !== "string") return item;
+    const isHtml = looksLikeHtml(item);
+    if (isHtml) converted = true;
+    const text = isHtml ? htmlToMarkdown(item) : item;
+    if (text.length <= FIELD_VALUE_CAP) return text;
+    return (
+      text.slice(0, FIELD_VALUE_CAP) +
+      ` […truncado ${text.length - FIELD_VALUE_CAP} chars; use --field-ids ${fieldId} p/ o valor completo]`
+    );
+  };
+  const out = Array.isArray(value) ? value.map(one) : one(value);
+  return { value: out, converted };
 }
 
 /**
@@ -300,6 +395,8 @@ interface RegisterLink {
 
 interface ExtractedCard {
   fieldValues?: Record<string, unknown>;
+  /** Rodada 5: título de cada campo (do `field` do raw), para a saída enxuta. */
+  fieldTitles?: Record<string, string>;
   links?: Record<string, CardLink[]>;
   registerLinks?: Record<string, RegisterLink[]>;
 }
@@ -316,6 +413,7 @@ function extractValuesAndLinks(raw: unknown): ExtractedCard {
   if (formAnswers.length === 0) return {};
 
   const valuesByField = new Map<string, unknown[]>();
+  const titlesByField = new Map<string, string>();
   const linksByField = new Map<string, CardLink[]>();
   const registerLinksByField = new Map<string, RegisterLink[]>();
 
@@ -328,6 +426,8 @@ function extractValuesAndLinks(raw: unknown): ExtractedCard {
       const fieldId = pickIdish(answerField, ["field_id", "id_field", "id"]) ?? pickIdish(field ?? {}, ["id_field", "field_id", "id"]);
       if (fieldId === undefined) continue;
       const key = String(fieldId);
+      const fieldTitle = field ? pickText(field, ["title"]) : undefined;
+      if (fieldTitle !== undefined && !titlesByField.has(key)) titlesByField.set(key, fieldTitle);
 
       const valueString = pickText(answerField, ["valueString", "value_string"]);
       const rawValue = pickText(answerField, ["value"]);
@@ -379,6 +479,7 @@ function extractValuesAndLinks(raw: unknown): ExtractedCard {
 
   return {
     fieldValues: Object.keys(fieldValues).length > 0 ? fieldValues : undefined,
+    fieldTitles: titlesByField.size > 0 ? Object.fromEntries(titlesByField) : undefined,
     links: Object.keys(links).length > 0 ? links : undefined,
     registerLinks: Object.keys(registerLinks).length > 0 ? registerLinks : undefined
   };

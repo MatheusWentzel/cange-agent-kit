@@ -25,6 +25,8 @@ export interface QueryFlowV2Input {
   flowStepId?: number | string;
   isArchived?: boolean;
   searchFieldScope?: "view" | "flow";
+  /** Rodada 5: título real do cartão mesmo sem fieldView (`flags.ensure_card_title`). */
+  ensureCardTitle?: boolean;
 }
 
 export interface QueryFlowV2Result {
@@ -69,8 +71,12 @@ export function createFlowQueryContracts(client: CangeClient): FlowQueryContract
 
     const data = parsed.data;
     const flags =
-      data.isArchived !== undefined || data.searchFieldScope !== undefined
-        ? { isArchived: data.isArchived, search_field_scope: data.searchFieldScope }
+      data.isArchived !== undefined || data.searchFieldScope !== undefined || data.ensureCardTitle === true
+        ? {
+            isArchived: data.isArchived,
+            search_field_scope: data.searchFieldScope,
+            ...(data.ensureCardTitle === true ? { ensure_card_title: true } : {})
+          }
         : undefined;
 
     const raw = await client.post<unknown>("/flow/v2/query", {

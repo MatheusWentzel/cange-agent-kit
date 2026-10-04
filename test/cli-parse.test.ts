@@ -114,8 +114,8 @@ describe("cli parsing", () => {
     }
 
     const output = writes.join("");
-    expect(output).toContain("\"dryRun\": true");
-    expect(output).toContain("\"executed\": false");
+    expect(output).toContain("\"dryRun\":true");
+    expect(output).toContain("\"executed\":false");
   });
 
   it("runs card move-step-with-values in dry-run without mutating", async () => {
@@ -168,9 +168,9 @@ describe("cli parsing", () => {
     }
 
     const output = writes.join("");
-    expect(output).toContain("\"dryRun\": true");
-    expect(output).toContain("\"executed\": false");
-    expect(output).toContain("\"flowId\": 192");
+    expect(output).toContain("\"dryRun\":true");
+    expect(output).toContain("\"executed\":false");
+    expect(output).toContain("\"flowId\":192");
   });
 
   it("runs deprecated card move-step alias with idForm and values", async () => {
@@ -221,7 +221,7 @@ describe("cli parsing", () => {
     }
 
     const output = writes.join("");
-    expect(output).toContain("\"dryRun\": true");
+    expect(output).toContain("\"dryRun\":true");
     expect(output).toContain("deprecated");
   });
 
@@ -267,10 +267,10 @@ describe("cli parsing", () => {
     }
 
     const output = writes.join("");
-    expect(output).toContain("\"dryRun\": true");
-    expect(output).toContain("\"executed\": false");
-    expect(output).toContain("\"flowTagId\": 15543");
-    expect(output).toContain("\"cardId\": 210721");
+    expect(output).toContain("\"dryRun\":true");
+    expect(output).toContain("\"executed\":false");
+    expect(output).toContain("\"flowTagId\":15543");
+    expect(output).toContain("\"cardId\":210721");
   });
 
   it("runs notification read in dry-run without mutating", async () => {
@@ -314,8 +314,8 @@ describe("cli parsing", () => {
     }
 
     const output = writes.join("");
-    expect(output).toContain("\"dryRun\": true");
-    expect(output).toContain("\"executed\": false");
-    expect(output).toContain("\"notificationId\": 48107");
+    expect(output).toContain("\"dryRun\":true");
+    expect(output).toContain("\"executed\":false");
+    expect(output).toContain("\"notificationId\":48107");
   });
 });
