@@ -3,15 +3,11 @@ import type { Command } from "commander";
 import { CangeCliUsageError, CangeError, CangeValidationError } from "../../client/errors.js";
 import type { CangeAgentKit } from "../../index.js";
 import { readCarryOver } from "../../utils/carryOver.js";
-import {
-  findMissingRequired,
-  valuesOf,
-  type FormScope,
-  type ValueIssue
-} from "../../utils/valueResolver.js";
+import { valuesOf, type FormScope, type ValueIssue } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { EXIT_CODES } from "../exit-codes.js";
+import { originRequiredIssues } from "../move-required.js";
 import {
   addInlineValueOptions,
   authOnce,
@@ -47,6 +43,9 @@ import {
  *        formulário (o mover grava um snapshot novo; sem reenviar, eles sumiriam);
  *     3. etapa de destino: PUT /form/answer, depois de mover.
  *   No caso comum (só campos da etapa atual, ou nenhum) é UMA chamada só.
+ * - Decisão 1 (06/10): os obrigatórios da etapa atual são SEMPRE exigidos (com ou sem
+ *   --validate-fields/--dry-run). Faltou: nada é gravado e o erro traz o comando pronto
+ *   com os --set que faltam (ver `move-required.ts`).
  */
 
 export interface MoveInlineOptions extends InlineValueOptions {
@@ -69,14 +68,17 @@ export function registerCardMoveCommand(cardCommand: Command): void {
   const command = cardCommand
     .command("move")
     .description(
-      "MUTAÇÃO: move o cartão para outra etapa em 1 passo (origem = etapa atual). --set grava campos da etapa atual, do destino ou do formulário inicial"
+      "MUTAÇÃO: move o cartão para outra etapa em 1 passo (origem = etapa atual). Exige os obrigatórios da etapa atual; --set grava campos da etapa atual, do destino ou do formulário inicial"
     )
     .option("--card-id <id>", "Cartão (número ou link)")
     .option("--to <etapa>", "Etapa de destino: nome ou id")
     .option("--flow-id <id>", "Fluxo do cartão (opcional: vem do link do cartão ou do ambiente do run)");
   addInlineValueOptions(command);
   command
-    .option("--validate-fields", "Também exige os obrigatórios da etapa atual antes de mover")
+    .option(
+      "--validate-fields",
+      "Aceito sem efeito: os obrigatórios da etapa atual são sempre exigidos ao mover"
+    )
     .option("--fail-on-data-loss", "Bloqueia se algum campo preenchido da etapa atual não puder ser reenviado")
     .option("--dry-run", "Mostra as chamadas resolvidas e a validação, sem gravar (exit 2 se inválido)")
     .action(
@@ -90,7 +92,7 @@ export function registerCardMoveCommand(cardCommand: Command): void {
     envelope:
       "{ ok, cardId, flowId, fromStepId, toStepId, written[], kept, summary, warning? }. --dry-run: { dryRun, executed:false, calls[{call, action, form, payload}], validation }",
     fieldsLocation:
-      "Origem = etapa atual do cartão. Campo pelo título, id ou hash, de qualquer um dos 3 formulários (etapa atual, destino, inicial). Mesma etapa = use card update-values.",
+      "Origem = etapa atual do cartão. Mover exige os obrigatórios da etapa atual (faltou = exit 2 com o comando pronto); peça ao usuário o que não estiver no pedido. Campo pelo título, id ou hash, de qualquer um dos 3 formulários (etapa atual, destino, inicial). Mesma etapa = use card update-values.",
     example: 'card move --card-id 1234 --to "Agendamento" --set "Data da ligação=06/10/2026" --set "Valor do Negócio=2.500,00"'
   });
 }
@@ -147,10 +149,19 @@ export async function runInlineMove(
   const originValues = origin ? valuesOf(resolved, origin.formId) : {};
   const moveValues = { ...(carry?.values ?? {}), ...originValues };
 
-  const requiredIssues: ValueIssue[] = [];
-  if (origin && (options.validateFields || options.dryRun) && !skipsRequired(ctx.flowRecord, fromStep, toStep)) {
-    requiredIssues.push(...findMissingRequired(origin, moveValues, carry?.filled));
-  }
+  // Decisão 1 (06/10): SEMPRE, com ou sem --validate-fields/--dry-run. O que o cartão já
+  // tem na etapa atual conta (o mover reenvia; os que não dá para reenviar caem no aviso).
+  const requiredIssues = originRequiredIssues({
+    ctx,
+    fromStep,
+    toStep,
+    origin,
+    values: moveValues,
+    ...(carry ? { filled: carry.filled } : {}),
+    cardId,
+    ...(options.flowId !== undefined ? { flowId: options.flowId } : {}),
+    repeatSent: inline !== undefined && Object.keys(inline).length > 0
+  });
   const notKept = carry?.notKept ?? [];
   const dataLossIssues: ValueIssue[] =
     options.failOnDataLoss && notKept.length > 0
@@ -268,18 +279,5 @@ export async function runInlineMove(
       (written.length > 0 ? `; gravou ${fieldTitles(resolved)}.` : "."),
     ...(warning ? { warning } : {})
   };
-}
-
-/** Voltar etapa num fluxo com "pular obrigatórios ao voltar" ligado (como a tela). */
-function skipsRequired(
-  flow: Record<string, unknown>,
-  from: { index?: number | string },
-  to: { index?: number | string }
-): boolean {
-  const flag = String(flow.skipRequiredOnBackwardMove ?? "");
-  if (flag !== "1" && flag !== "S" && flag !== "true") return false;
-  const fromIndex = Number(from.index);
-  const toIndex = Number(to.index);
-  return Number.isFinite(fromIndex) && Number.isFinite(toIndex) && toIndex < fromIndex;
 }
 

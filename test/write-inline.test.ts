@@ -260,12 +260,13 @@ describe("card move em 1 passo", () => {
     expect(writes()).toEqual([]);
     expect(out.calls).toHaveLength(1);
     expect(out.calls[0]).toMatchObject({ call: "POST /card/v2/move-step", action: "card_move" });
-    expect(out.validation).toEqual({ valid: false, message: "Falta para a etapa Triagem (atual): Horas (número)" });
+    expect(out.validation.valid).toBe(false);
+    expect(out.validation.message.split("\n")[0]).toBe("Falta para a etapa Triagem (atual): Horas (número)");
     expect(process.exitCode).toBe(EXIT_CODES.USAGE);
   });
 
   it("etapa final marca complete S", async () => {
-    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Ganho"]);
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Ganho", "--set", "Horas=1"]);
     expect(writes()[0]?.body?.complete).toBe("S");
   });
 
@@ -291,7 +292,8 @@ describe("card move em 1 passo", () => {
   it("falha depois de uma escrita = exit 5 (parcial) com o que foi feito", async () => {
     putFailsWith = { status: 404, message: "Não foi possível encontrar o registro que você deseja alterar" };
     const out = (await run([
-      "card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--set", "Data da ligação=06/10/2026"
+      "card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento",
+      "--set", "Horas=1", "--set", "Data da ligação=06/10/2026"
     ])) as Record<string, any>;
     expect(process.exitCode).toBe(EXIT_CODES.PARTIAL);
     expect(out.done).toEqual(["POST /card/v2/move-step (etapa Triagem (atual))"]);

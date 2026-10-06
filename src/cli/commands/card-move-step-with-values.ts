@@ -10,7 +10,8 @@ import { getExpectedFormatByFieldType } from "../../utils/fieldTypeGuards.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { readPayloadFile } from "../helpers.js";
-import { findMissingRequired, type FormScope } from "../../utils/valueResolver.js";
+import { findMissingRequired, type FormScope, type ValueIssue } from "../../utils/valueResolver.js";
+import { checkPayloadMove } from "../move-required.js";
 import {
   addInlineValueOptions,
   authOnce,
@@ -50,7 +51,10 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
     .option("--to <etapa>", "Sem --payload: etapa de destino (nome ou id)");
   addInlineValueOptions(command);
   command
-    .option("--validate-fields", "Valida values contra fields do flow antes de mutar")
+    .option(
+      "--validate-fields",
+      "Também recusa chave desconhecida e cobra os obrigatórios do idForm (os da etapa atual são sempre exigidos)"
+    )
     .option(
       "--discover-required",
       "Descobre campos obrigatórios do form antes da mutação (sem executar escrita)"
@@ -128,16 +132,17 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         }
 
         // O wrapper de comando pula a autenticação em --dry-run (premissa de que
-        // dry-run não faz I/O). Mas a validação (getFieldsByFlow) e o detector de
-        // perda de dados (getCard) leem da API mesmo em dry-run — então garantimos
-        // o login aqui quando algum passo de leitura for rodar.
-        const willReadInDryRun = options.validateFields || !options.allowDataLoss;
-        if (options.dryRun && willReadInDryRun) {
-          await ensureAuth();
-        }
+        // dry-run não faz I/O). Mas a conferência dos obrigatórios da etapa atual
+        // (decisão 1, sempre) lê o fluxo e o cartão mesmo em dry-run: login aqui.
+        await auth();
+        const ctx = await loadFlowContext(kit, payload.flowId);
+        const targetFormId = String(payload.idForm ?? stepFormId(ctx.steps, payload.toStepId) ?? "");
+        const target = formScope(ctx.fields, targetFormId, describeForm(ctx, payload, targetFormId), 0);
+        const targetFields: NormalizedField[] = target.fields;
 
-        let targetFields: NormalizedField[] | undefined;
         let validation: ReturnType<typeof validationSummary> | undefined;
+        let finalValues: Record<string, unknown> = payload.values;
+        const issues: ValueIssue[] = [];
         const resolveNeeded = needsFieldResolution(
           { ...payload.values, ...(inline ?? {}) },
           options.validateFields === true || inline !== undefined
@@ -147,11 +152,6 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
           // estrutura consultada" para um campo da outra etapa (10 erros em 5 runs). Agora
           // a chave é procurada em todos os formulários do fluxo e o erro diz de qual etapa
           // o campo é; o `card move` separa os formulários sozinho.
-          await auth();
-          const ctx = await loadFlowContext(kit, payload.flowId);
-          const targetFormId = String(payload.idForm ?? stepFormId(ctx.steps, payload.toStepId) ?? "");
-          const target = formScope(ctx.fields, targetFormId, describeForm(ctx, payload, targetFormId), 0);
-          targetFields = target.fields;
           const others: FormScope[] = [];
           const seen = new Set([targetFormId]);
           const addOther = (formId: string | number | undefined, label: string): void => {
@@ -163,36 +163,45 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
           const init = initScope(ctx, 9);
           if (init) addOther(init.formId, init.label);
 
-          const { resolved, issues, passthrough } = await resolveLayers({
+          const resolution = await resolveLayers({
             layers: [payload.values, inline],
             forms: [target],
             outOfScope: others,
             lookups: createWriteLookups(kit, auth),
             passthroughUnknown: options.validateFields !== true
           });
-          const finalValues = mergedValues({ resolved, passthrough });
-          const requiredIssues = options.validateFields ? findMissingRequired(target, finalValues) : [];
-          const allIssues = [...issues, ...requiredIssues];
-          if (allIssues.some((issue) => issue.kind === "out_of_scope")) {
-            allIssues.push({
+          finalValues = mergedValues(resolution);
+          issues.push(...resolution.issues);
+          if (issues.some((issue) => issue.kind === "out_of_scope")) {
+            issues.push({
               kind: "invalid_value",
               blocking: true,
               text: `o idForm ${targetFormId} só grava ${target.label}. \`cange card move --card-id ${payload.cardId} --to ${payload.toStepId} --set "Campo=valor"\` separa os formulários sozinho`
             });
           }
-          if (options.dryRun) {
-            validation = validationSummary(allIssues);
-            if (!validation.valid) {
-              return withExitCode(
-                { ...createDryRunResult({ ...payload, values: finalValues }), validation },
-                EXIT_CODES.USAGE
-              );
-            }
-          } else {
-            throwIfInvalid(allIssues);
-          }
-          payload.values = finalValues;
         }
+
+        // Decisão 1 (06/10): os obrigatórios da etapa ATUAL do cartão, sempre (com ou sem
+        // --validate-fields/--dry-run). Lê o cartão uma vez (o detector de perda reaproveita).
+        const check = await checkPayloadMove(kit, payload, finalValues, ctx);
+        issues.push(...check.issues);
+        // --validate-fields com o idForm de OUTRO formulário: cobra também os obrigatórios dele
+        // (o da etapa atual já foi cobrado acima; sem repetir a mesma linha).
+        if (options.validateFields && targetFormId !== check.originFormId) {
+          issues.push(...findMissingRequired(target, finalValues));
+        }
+        if (options.dryRun) {
+          validation = validationSummary(issues);
+          if (!validation.valid) {
+            return withExitCode(
+              { ...createDryRunResult({ ...payload, values: finalValues }), validation },
+              EXIT_CODES.USAGE
+            );
+          }
+        } else {
+          throwIfInvalid(issues);
+        }
+        payload.values = finalValues;
 
         // M2 — Detector de perda de dados (read-before-write). Lê o estado atual
         // do card e aponta campos preenchidos do form alvo ausentes do `values`.
@@ -203,7 +212,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
               orphans: [],
               note: "Checagem de perda de dados desativada por --allow-data-loss."
             }
-          : await detectDataLoss({ kit, payload, targetFields });
+          : await detectDataLoss({ kit, payload, targetFields, card: check.card });
 
         if (dataLossCheck.orphans.length > 0 && options.failOnDataLoss) {
           throw new CangeValidationError(
@@ -237,7 +246,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
     mutates: true,
     envelope: "Com --payload: resposta do move (+ dataLossCheck). Sem --payload: igual a `card move`.",
     fieldsLocation:
-      "Prefira `card move --card-id N --to <etapa> --set ...` (1 passo). Com --payload, o idForm é o form da etapa ATUAL e os values são só desse form.",
+      "Prefira `card move --card-id N --to <etapa> --set ...` (1 passo). Mover exige os obrigatórios da etapa atual (sempre). Com --payload, o idForm é o form da etapa ATUAL e os values são só desse form (reenvie o que o cartão já tem).",
     example: 'card move-step-with-values --card-id 1234 --to "Agendamento" --set "Data da ligação=06/10/2026"'
   });
 }

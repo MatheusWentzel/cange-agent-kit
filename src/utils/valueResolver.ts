@@ -57,7 +57,11 @@ export type ValueIssueKind =
   | "ambiguous_field"
   | "out_of_scope"
   | "invalid_value"
-  | "missing_required";
+  | "missing_required"
+  /** O mover não pode seguir como veio (etapa de origem errada, campo que ficaria vazio). */
+  | "move_conflict"
+  /** Como resolver (não bloqueia sozinho): sai no fim da mensagem, só quando há bloqueio. */
+  | "hint";
 
 export interface ValueIssue {
   kind: ValueIssueKind;
@@ -781,27 +785,30 @@ function checkCoercedValue(field: NormalizedField, value: unknown): ValueIssue |
  * Obrigatórios do formulário ainda vazios depois desta escrita. `alreadyFilled`
  * são os hashes que o cartão já tem preenchidos (contam como presentes).
  */
+export function missingRequiredFields(
+  form: FormScope,
+  values: Record<string, unknown>,
+  alreadyFilled: ReadonlySet<string> = new Set()
+): NormalizedField[] {
+  return form.fields.filter((field) => {
+    if (!field.required) return false;
+    const present = field.name in values ? !isMissingValue(values[field.name]) : alreadyFilled.has(field.name);
+    return !present;
+  });
+}
+
+/** Linha "Falta para <formulário>: Campo (tipo)" de um obrigatório vazio. */
+export function missingRequiredIssue(form: FormScope, field: NormalizedField): ValueIssue {
+  const label = `${fieldLabel(field)} (${describeExpected(field)})`;
+  return { kind: "missing_required", blocking: true, formLabel: form.label, fieldLabel: label, text: label };
+}
+
 export function findMissingRequired(
   form: FormScope,
   values: Record<string, unknown>,
   alreadyFilled: ReadonlySet<string> = new Set()
 ): ValueIssue[] {
-  const issues: ValueIssue[] = [];
-  for (const field of form.fields.filter((item) => item.required)) {
-    const value = values[field.name];
-    const present =
-      field.name in values ? !isMissingValue(value) : alreadyFilled.has(field.name);
-    if (!present) {
-      issues.push({
-        kind: "missing_required",
-        blocking: true,
-        formLabel: form.label,
-        fieldLabel: `${fieldLabel(field)} (${describeExpected(field)})`,
-        text: `${fieldLabel(field)} (${describeExpected(field)})`
-      });
-    }
-  }
-  return issues;
+  return missingRequiredFields(form, values, alreadyFilled).map((field) => missingRequiredIssue(form, field));
 }
 
 function isMissingValue(value: unknown): boolean {
@@ -832,11 +839,16 @@ export function formatValueIssues(issues: ValueIssue[]): string {
     invalid_value: "Valor inválido",
     unknown_field: "Campo desconhecido",
     ambiguous_field: "Campo ambíguo",
-    out_of_scope: "Campo de outro formulário"
+    out_of_scope: "Campo de outro formulário",
+    move_conflict: "Para mover"
   };
   for (const issue of issues) {
-    if (issue.kind === "missing_required") continue;
+    if (issue.kind === "missing_required" || issue.kind === "hint") continue;
     lines.push(`${prefix[issue.kind] ?? "Problema"}: ${issue.text}`);
+  }
+  // Dica de como resolver: por último, sem prefixo (é o próximo passo, não um problema).
+  for (const issue of issues) {
+    if (issue.kind === "hint") lines.push(issue.text);
   }
   return lines.join("\n");
 }

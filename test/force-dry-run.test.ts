@@ -93,8 +93,22 @@ describe("CANGE_FORCE_DRY_RUN: toda escrita do kit vira dry-run", () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const url = new URL(String(input));
       calls.push({ method: (init?.method ?? "GET").toUpperCase(), path: url.pathname });
-      // GET genérico com o que o dry-run inline precisa (form_init_id do fluxo).
-      return new Response(JSON.stringify({ ok: true, warnings: [], id_flow: 192, form_init_id: 662 }), {
+      // GET genérico com o que o dry-run inline precisa (form_init_id do fluxo). O mover
+      // confere os obrigatórios da etapa atual (decisão 1): o fluxo traz as etapas e o
+      // cartão está na 484, sem obrigatório no form 658.
+      const body = url.pathname.replace(/\/+$/, "") === "/card"
+        ? { id_card: 5, flow_id: 192, flow_step_id: 484, form_answers: [] }
+        : {
+            ok: true,
+            warnings: [],
+            id_flow: 192,
+            form_init_id: 662,
+            flow_steps: [
+              { id_step: 484, name: "Backlog", form_id: 658, index: 1 },
+              { id_step: 485, name: "Priorizados", form_id: 659, index: 2 }
+            ]
+          };
+      return new Response(JSON.stringify(body), {
         status: 200,
         headers: { "content-type": "application/json" }
       });

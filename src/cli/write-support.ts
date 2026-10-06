@@ -278,7 +278,10 @@ export function mergedValues(result: { resolved: ResolvedValue[]; passthrough: R
 
 export function validationSummary(issues: ValueIssue[]): { valid: true } | { valid: false; message: string } {
   const blocking = issues.filter((issue) => issue.blocking);
-  return blocking.length === 0 ? { valid: true } : { valid: false, message: formatValueIssues(blocking) };
+  if (blocking.length === 0) return { valid: true };
+  // A dica (kind "hint") não bloqueia sozinha: só entra na mensagem de um bloqueio.
+  const hints = issues.filter((issue) => issue.kind === "hint");
+  return { valid: false, message: formatValueIssues([...blocking, ...hints]) };
 }
 
 /** Erro de validação compacto (exit 2), nada gravado. */

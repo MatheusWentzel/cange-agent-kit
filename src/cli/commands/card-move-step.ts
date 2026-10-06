@@ -4,8 +4,11 @@ import { CangeValidationError } from "../../client/errors.js";
 import { moveCardStepPayloadSchema } from "../../schemas/cards.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { annotateCommand } from "../command-metadata.js";
-import { createCommandAction } from "../context.js";
+import { createCommandAction, withExitCode } from "../context.js";
+import { EXIT_CODES } from "../exit-codes.js";
 import { assertValidationResult, readPayloadFile } from "../helpers.js";
+import { checkPayloadMove } from "../move-required.js";
+import { authOnce, throwIfInvalid, validationSummary } from "../write-support.js";
 
 interface CardMoveStepOptions {
   payload: string;
@@ -18,10 +21,10 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
     .command("move-step")
     .description("MUTAÇÃO (DEPRECATED): use `card move-step-with-values`")
     .requiredOption("--payload <path>", "Caminho do JSON de payload")
-    .option("--validate-fields", "Valida values contra fields do flow antes de mutar")
+    .option("--validate-fields", "Valida values contra fields do idForm (os obrigatórios da etapa atual são sempre exigidos)")
     .option("--dry-run", "Exibe payload sem executar a mutação")
     .action(
-      createCommandAction(async ({ kit }, options: CardMoveStepOptions) => {
+      createCommandAction(async ({ kit, ensureAuth }, options: CardMoveStepOptions) => {
         // Item 6: aviso de deprecação em stderr (não polui stdout/JSON).
         process.stderr.write(
           "⚠️  `card move-step` está DEPRECATED — use `card move-step-with-values`. " +
@@ -35,6 +38,8 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
           });
         }
         const payload = parsed.data;
+        // O wrapper pula o login em --dry-run, mas este comando sempre lê (fluxo e cartão).
+        await authOnce(kit, ensureAuth)();
 
         if (options.validateFields) {
           const fieldsData = await kit.contracts.getFieldsByFlow({ flowId: payload.flowId });
@@ -63,13 +68,21 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
           assertValidationResult(validation.valid, validation);
         }
 
+        // Decisão 1 (06/10): o alias também exige os obrigatórios da etapa ATUAL do cartão,
+        // sempre (lê fluxo e cartão, inclusive em --dry-run).
+        const check = await checkPayloadMove(kit, payload);
+        const validation = validationSummary(check.issues);
+
         if (options.dryRun) {
           const result = createDryRunResult(payload);
-          return {
+          const output = {
             ...result,
+            validation,
             note: `${result.note} Comando deprecated: use card move-step-with-values.`
           };
+          return validation.valid ? output : withExitCode(output, EXIT_CODES.USAGE);
         }
+        throwIfInvalid(check.issues);
 
         const result = await kit.contracts.moveCardStepWithValues(payload);
         return {

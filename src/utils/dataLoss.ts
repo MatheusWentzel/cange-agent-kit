@@ -38,6 +38,8 @@ interface DetectDataLossInput {
   };
   /** Fields do form alvo já carregados (reuso quando --validate-fields rodou antes). */
   targetFields?: NormalizedField[];
+  /** Cartão já lido (a conferência dos obrigatórios lê antes): evita o 2º GET /card. */
+  card?: { raw: unknown };
 }
 
 interface FilledValue {
@@ -83,10 +85,12 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
       }
     }
 
-    const card = await kit.contracts.getCard({
-      flowId: payload.flowId,
-      cardId: payload.cardId
-    });
+    const card =
+      input.card ??
+      (await kit.contracts.getCard({
+        flowId: payload.flowId,
+        cardId: payload.cardId
+      }));
 
     const filled = extractFilledFields(card.raw, idForm, fieldById);
     const payloadNames = new Set(Object.keys(payload.values));
