@@ -69,9 +69,12 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
     lines: [
       "Um comando só: `cange card move --card-id <id> --to \"<etapa de destino>\" [--set \"Campo=valor\"]`.",
       "- A origem é a etapa ATUAL do cartão (o kit lê); o destino vai pelo nome ou pelo id da etapa.",
+      "- Mover exige os obrigatórios da etapa atual (regra da plataforma, igual à tela). Mande-os no MESMO comando com",
+      "  `--set`; se não estão no pedido, pergunte ao usuário (não invente). Faltou: nada é gravado (exit 2) e a",
+      "  mensagem diz quais campos e traz o comando pronto com os `--set` que faltam.",
       "- `--set` aceita campo da etapa atual, da etapa de destino ou do formulário inicial: o kit manda cada um para",
       "  o lugar certo e reenvia o que o cartão já tem na etapa atual (nada some).",
-      "- Para checar os obrigatórios da etapa atual antes de mover, use `--validate-fields` (ou `--dry-run` para só ver).",
+      "- Quer conferir antes? O mesmo comando com `--dry-run` mostra as chamadas e o que falta, sem gravar.",
       "- Só gravar campos, sem mover: `cange card update-values --card-id <id> --set \"Campo=valor\"`.",
       "  Nunca mova o cartão para a própria etapa para gravar campo.",
       "Avançado: `cange card move-step-with-values --payload <arquivo>` (idForm = form da etapa ATUAL)."

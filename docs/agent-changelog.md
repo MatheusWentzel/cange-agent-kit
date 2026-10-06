@@ -4,6 +4,29 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-06
 
+### Mover exige os obrigatórios da etapa atual, sempre (decisão 1 do Matheus)
+
+**Regra para playbooks e agentes: mover exige os obrigatórios da etapa atual; peça os valores ao usuário se não
+estiverem no pedido.** É a regra base da plataforma (a tela só move depois de validar o formulário da etapa atual).
+
+- **Todo caminho de mover cobra, sempre:** `card move`, `card move-step-with-values` (com e sem `--payload`) e
+  `card move-step` (deprecado). Antes o kit só cobrava com `--validate-fields` ou `--dry-run`, e o back
+  (`POST /card/v2/move-step`) não cobra: agente que movia com obrigatório vazio passa a receber exit `2`, nada gravado.
+- **Caminho certo em 1 passo:** o erro diz quais campos faltam e termina com a regra e o comando pronto, com os `--set`
+  que faltam (o `card move` grava os campos da etapa atual dentro do próprio mover):
+  `cange card move --card-id 55 --to "Agendamento" --set "Horas=<número>" --set "Qualificado=<Sim | Não>"`.
+  Com `--set` já no pedido, a dica pede para repeti-los; no `--payload`, lembra que dá para pôr no `values`.
+- O que o cartão já tem na etapa atual conta (o `card move` reenvia). No `--payload`, o mover regrava o formulário da
+  etapa atual só com o `values`: obrigatório preenchido no cartão e fora do `values` bloqueia (ficaria vazio), com a
+  dica de incluir ou usar `card move`. Payload com `idForm` de outro formulário não toca a etapa atual.
+- No `--payload`, a etapa cobrada é a REAL do cartão (o kit lê o cartão); `fromStepId` diferente dela é erro.
+- Obrigatórios da etapa de DESTINO não são cobrados ao entrar (a tela também não pede): valem quando o cartão sair.
+- Exceção única, igual à tela: voltar etapa num fluxo com "pular obrigatórios ao voltar" (`skipRequiredOnBackwardMove`).
+- `--validate-fields` segue aceito: no `card move` não muda nada; no `--payload`, continua recusando chave
+  desconhecida e cobrando também os obrigatórios do `idForm` quando ele é de outro formulário.
+- `CANGE_FORCE_DRY_RUN` (conferência do gate do runner): a mesma cobrança aparece em `validation` (exit `2`), sem gravar.
+- O caminho por `--payload` agora lê o fluxo e o cartão também em `--dry-run` (antes podia sair sem ler nada).
+
 ### Sem o fluxo, o kit descobre pelo número do cartão (F6, runs 357 e 362)
 
 - Comando de cartão com `--card-id` numérico, sem `--flow-id` e sem `RUNNER_FLOW_ID`/`CANGE_CARD_FLOW_ID` no ambiente,

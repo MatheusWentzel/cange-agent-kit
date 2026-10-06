@@ -138,12 +138,12 @@ export const JOURNEYS: Journey[] = [
     title: "Mover um card de etapa",
     when: "avançar o card para outra etapa do fluxo",
     steps: [
-      "cange map --flow-id <f> (ou cange flow get --flow-id <f>) — descubra os ids das etapas de ORIGEM e DESTINO.",
-      "cange template step-move --flow-id <f> --from-step-id <origem> --to-step-id <destino> --card-id <c> — gera o payloadSkeleton PRONTO (com os campos obrigatórios do move e o cardId preenchido). Grave-o num arquivo .json e preencha os values.",
-      "cange card move-step-with-values --payload <arquivo.json> --dry-run — valide; depois rode sem --dry-run."
+      "cange card move --card-id <c> --to \"<etapa de destino>\" --set \"Campo=valor\" (1 passo: a origem é a etapa atual do cartão; o --set grava campos da etapa atual dentro do próprio mover).",
+      "Mover exige os obrigatórios da etapa atual (regra da plataforma, igual à tela). Se o pedido não traz os valores, pergunte ao usuário antes de mover; faltou, o kit não grava (exit 2) e devolve o comando pronto com os --set que faltam.",
+      "Avançado: cange template step-move --flow-id <f> --from-step-id <origem> --to-step-id <destino> --card-id <c> gera o payloadSkeleton para `card move-step-with-values --payload <arquivo.json>`."
     ],
     pitfall:
-      "O template exige --from-step-id E --to-step-id (não existe --step-id). O skeleton já sai com ids numéricos — use-o como base em vez de montar o payload do zero."
+      "Não invente valor de obrigatório para passar da validação. O obrigatório da etapa de DESTINO não é cobrado ao entrar (vale quando o cartão sair de lá). O template exige --from-step-id E --to-step-id (não existe --step-id)."
   },
   {
     id: "achar_estrutura",

@@ -379,6 +379,10 @@ Compatibilidade: também aceita `id_notification`.
 - Em movimentação com `values`, usar `idForm = flow_step.form_id` da etapa atual.
 - `flow.form_init_id` é apenas para criação (`card create`), não para mover etapa.
 - Se houver `values`, preencher obrigatórios (`required = 1`) do formulário alvo.
+- Mover exige os obrigatórios da etapa atual; peça os valores ao usuário se não estiverem no pedido. O kit cobra
+  sempre, em todo caminho de mover (`card move`, `card move-step-with-values` com ou sem `--payload`,
+  `card move-step`), e o erro traz o comando `card move ... --set` pronto. Exceção única, igual à tela: voltar etapa
+  em fluxo com "pular obrigatórios ao voltar".
 - Validar antes de mutar:
   - `card update-values --validate-fields --dry-run`
   - `card move-step-with-values --validate-fields --dry-run`

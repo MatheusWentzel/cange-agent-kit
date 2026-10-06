@@ -30,6 +30,9 @@ Use este repositório como camada segura para operar o Cange via CLI.
   3. `--dry-run`
   4. execução real
 - Escrita em 1 passo é o padrão (ver `AGENTS.md`, "Escrita em 1 passo"): `card create --flow-id N --set ...`, `card update-values --card-id N --set ...`, `card move --card-id N --to <etapa> --set ...`, `comment create --card-id N --text ... --mention ...`. No mover, a origem é a etapa atual e o kit manda cada campo para o formulário certo (etapa atual vai no próprio mover, como a tela). Com `--payload` (avançado), o `idForm` do mover é o form da etapa ATUAL; ⚠️ **NUNCA** o form de criação (`form_init`): o contrato rejeita (guard), pois isso criaria um `form_answer` duplicado sob o `form_init` que vence o FlowQuery V2 e zera os campos do card no V2/Kanban. Nunca mover para a própria etapa para gravar campo: use `card update-values`.
+- **Mover exige os obrigatórios da etapa atual; peça os valores ao usuário se não estiverem no pedido.** O kit cobra
+  sempre, em todo caminho de mover (com ou sem `--validate-fields`/`--dry-run`); faltou = exit 2, nada gravado, com o
+  comando `card move ... --set` pronto. Exceção única, igual à tela: voltar etapa em fluxo com "pular obrigatórios ao voltar".
 - Para marcar notificação como lida/arquivada, usar `notification read`.
 - Para construir fluxos (fluxo, etapas, campos, relacionamentos), usar `cange flow-build ...` (Flow V2 Build API):
   - bodies são **strict** — não enviar chaves extras.

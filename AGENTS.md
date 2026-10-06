@@ -16,7 +16,13 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Para mover etapa de card, usar `card move --card-id <id> --to <etapa>` (ou `card move-step-with-values`, que sem `--payload` é o mesmo).
 - Quando não houver campos para preencher, enviar `values: {}`.
 - Ao mover etapa com `--payload`, o `idForm` do payload deve ser o `form_id` da etapa atual (`flow_step.form_id`), não o `form_init_id` do fluxo, e os `values` só desse formulário (o `card move` separa os formulários sozinho).
-- Ao mover etapa, preencher todos os campos com `required = "1"` do `form_id` da etapa atual antes de mover.
+- **Mover exige os obrigatórios da etapa atual; peça os valores ao usuário se não estiverem no pedido** (decisão do
+  Matheus, 06/10/2026: regra base da plataforma, igual à tela). O kit cobra SEMPRE, em todo caminho de mover
+  (`card move`, `card move-step-with-values` com ou sem `--payload`, `card move-step`), com ou sem `--validate-fields`
+  e `--dry-run`. Faltou: exit `2`, nada gravado, e a mensagem traz o comando pronto para gravar e mover no mesmo passo
+  (`card move ... --set "Campo=valor"`: o campo da etapa atual vai dentro do próprio mover). Não invente valor para
+  passar da validação. Exceção única, igual à tela: VOLTAR etapa num fluxo com "pular obrigatórios ao voltar" ligado.
+  Os obrigatórios da etapa de destino não são cobrados ao entrar (valem quando o cartão sair de lá).
 - Ao mover etapa, **preservar os campos já preenchidos** (read-before-move): o move grava um form_answer NOVO contendo só o que vier em `values` — campos do `form_id` da etapa não reenviados ficam vazios (perda de dados). Ler o card antes (`card get`) e incluir no `values` os campos já preenchidos, além dos obrigatórios. O kit detecta e avisa campos preenchidos ausentes do `values`; use `--allow-data-loss` para confirmar perda intencional ou `--fail-on-data-loss` para bloquear.
 - **Nunca fazer self-move** (`fromStepId === toStepId`) para "criar"/preencher um form_answer: duplica o form_answer e o snapshot vazio mais recente sobrepõe o preenchido. Para apenas atualizar values sem mover, usar `card update-values`. O kit bloqueia self-move por padrão (`--allow-self-move` força).
 - Usar `step-form --flow-id <id> --step-id <id>` para descobrir obrigatórios da etapa antes de montar payload.
@@ -94,6 +100,8 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   (o fluxo vem do link do cartão ou do ambiente do run; sem o fluxo, o kit descobre pelo número do cartão).
 - Mover: `cange card move --card-id <id> --to "<etapa por nome ou id>" [--set "Campo=valor"]`
   (origem = etapa atual do cartão, lida pelo kit; `card move-step-with-values` sem `--payload` faz o mesmo).
+  Mover exige os obrigatórios da etapa atual: mande-os no mesmo comando com `--set`; se não estiverem no pedido,
+  pergunte ao usuário antes de mover.
 - Comentar e mencionar: `cange comment create --card-id <id> --text "<texto>" [--mention <id|e-mail|nome>]...`
   (a menção vai em `mentions`, que gera a notificação, E vira `@[Nome](id)` no texto).
 - Cadastro: `cange register create --register-id <id> --set ...` e
@@ -113,9 +121,15 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   chamada. Falha depois de uma escrita = exit `5` com `done` (o que foi gravado).
 - `--dry-run` em qualquer escrita imprime o payload RESOLVIDO (chave hash, valor no tipo do campo) e `validation`
   (`{valid}` ou `{valid:false, message}`), sem gravar. Exit `0` válido, `2` inválido.
-- `--validate-fields` também cobra os obrigatórios (na criação e na etapa atual, ao mover).
+- `--validate-fields` também cobra os obrigatórios na criação. Ao mover, os obrigatórios da etapa atual são cobrados
+  SEMPRE (a flag segue aceita, sem efeito no `card move`).
 - Erro de validação vem numa mensagem só, curta, com tudo que falta ou está errado:
   `Falta para a etapa Agendamento: Data da ligação (data), Agendamento (Sim | Não)`. Exit `2`, nada gravado.
+  No mover, a mensagem termina com a regra e o comando pronto, por exemplo:
+  `cange card move --card-id 55 --to "Agendamento" --set "Horas=<número>" --set "Qualificado=<Sim | Não>"`.
+- Mover com `--payload`: o kit lê o cartão e cobra a etapa ATUAL dele (fromStepId diferente da etapa real = erro).
+  O payload grava o formulário da etapa atual de novo só com o `values`: obrigatório que o cartão já tem e não veio no
+  `values` também bloqueia (ficaria vazio). O `card move` reenvia isso sozinho.
 - Sucesso: uma linha em `summary` (cartão, campos, etapa) e os ids.
 - Nunca mova o cartão para a própria etapa para gravar campo: o `PUT /form/answer` cria a resposta da etapa atual
   quando falta. O kit trata sozinho o 409 `STEP_FORM_ANSWER_BUSY` (1 nova tentativa) e o 422 `FIELD_FORM_MISMATCH`
@@ -181,7 +195,8 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   - quando precisar de campos específicos do card, usar `card get --field-ids <id1,id2,...> --summary-only`.
   - obter os fields do flow e filtrar pelo `form_id` da etapa atual para identificar campos obrigatórios (`required = "1"`).
   - usar `card move-step-with-values --discover-required` para listar requireds do `form_id` antes de montar o payload final.
-  - preencher todos os obrigatórios da etapa atual no `values` do payload de movimentação.
+  - preencher todos os obrigatórios da etapa atual no `values` do payload de movimentação (o kit recusa sem eles;
+    se o pedido não traz os valores, pergunte ao usuário).
   - o `idForm` do payload deve ser o `form_id` da etapa atual, não o `form_init_id` do fluxo.
   - chamadas sugeridas:
     - `cange --output json my-tasks --flow-id <flowId> --step-id <stepId>`
