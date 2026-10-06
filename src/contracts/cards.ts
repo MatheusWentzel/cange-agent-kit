@@ -30,7 +30,13 @@ export interface CardsContracts {
    * leitura no back. 404 = cartão inexistente, sem acesso ou back sem a rota.
    */
   locateCard: (input: { cardId: number | string }) => Promise<LocatedCard>;
-  getCard: (input: { cardId: number | string; flowId: number | string; companyId?: number | string }) => Promise<{
+  getCard: (input: {
+    cardId: number | string;
+    flowId: number | string;
+    companyId?: number | string;
+    /** Cartão de modo teste (deleted 'T'): o GET /card só acha com isTestMode=true. */
+    isTestMode?: boolean;
+  }) => Promise<{
     raw: unknown;
     summary: CardSummary;
   }>;
@@ -226,7 +232,8 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         query: {
           id_card: toNumber(parsed.data.cardId),
           flow_id: toNumber(parsed.data.flowId),
-          company_id: parsed.data.companyId !== undefined ? toNumber(parsed.data.companyId) : undefined
+          company_id: parsed.data.companyId !== undefined ? toNumber(parsed.data.companyId) : undefined,
+          isTestMode: parsed.data.isTestMode === true ? true : undefined
         }
       });
 

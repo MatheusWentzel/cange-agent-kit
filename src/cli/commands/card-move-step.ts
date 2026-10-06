@@ -78,6 +78,7 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
           const output = {
             ...result,
             validation,
+            ...(check.warning ? { warning: check.warning } : {}),
             note: `${result.note} Comando deprecated: use card move-step-with-values.`
           };
           return validation.valid ? output : withExitCode(output, EXIT_CODES.USAGE);
@@ -87,7 +88,7 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
         const result = await kit.contracts.moveCardStepWithValues(payload);
         return {
           ...result,
-          warning: "Comando deprecated: use card move-step-with-values."
+          warning: [check.warning, "Comando deprecated: use card move-step-with-values."].filter(Boolean).join(" ")
         };
       })
     );

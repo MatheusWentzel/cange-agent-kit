@@ -7,7 +7,7 @@ import { valuesOf, type FormScope, type ValueIssue } from "../../utils/valueReso
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { EXIT_CODES } from "../exit-codes.js";
-import { originRequiredIssues } from "../move-required.js";
+import { originRequired } from "../move-required.js";
 import {
   addInlineValueOptions,
   authOnce,
@@ -151,7 +151,7 @@ export async function runInlineMove(
 
   // Decisão 1 (06/10): SEMPRE, com ou sem --validate-fields/--dry-run. O que o cartão já
   // tem na etapa atual conta (o mover reenvia; os que não dá para reenviar caem no aviso).
-  const requiredIssues = originRequiredIssues({
+  const required = originRequired({
     ctx,
     fromStep,
     toStep,
@@ -173,7 +173,7 @@ export async function runInlineMove(
           }
         ]
       : [];
-  const allIssues = [...issues, ...requiredIssues, ...dataLossIssues];
+  const allIssues = [...issues, ...required.issues, ...dataLossIssues];
 
   const isEnd = String(toStep.raw.isEndStep ?? toStep.raw.is_end_step ?? "") === "1";
   const calls: PlannedCall[] = [];
@@ -214,10 +214,14 @@ export async function runInlineMove(
     });
   }
 
-  const warning =
-    notKept.length > 0
-      ? `Não reenviados (ficam vazios na ${stepLabel(fromStep)}): ${notKept.map((item) => item.title ?? item.name).join(", ")}.`
-      : undefined;
+  const warnings = [
+    ...(notKept.length > 0
+      ? [`Não reenviados (ficam vazios na ${stepLabel(fromStep)}): ${notKept.map((item) => item.title ?? item.name).join(", ")}.`]
+      : []),
+    // Obrigatório com condicional vazio não bloqueia (o kit não avalia a condicional): avisa.
+    ...(required.warning ? [required.warning] : [])
+  ];
+  const warning = warnings.length > 0 ? warnings.join(" ") : undefined;
 
   if (options.dryRun) {
     const validation = validationSummary(allIssues);

@@ -222,23 +222,21 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
           );
         }
 
+        // Obrigatório com condicional vazio não bloqueia (o kit não avalia a condicional): avisa.
         if (options.dryRun) {
           return {
             ...createDryRunResult(payload),
             ...(validation ? { validation } : {}),
+            ...(check.warning ? { warning: check.warning } : {}),
             dataLossCheck
           };
         }
 
         const result = await kit.contracts.moveCardStepWithValues(payload);
-        if (dataLossCheck.orphans.length > 0) {
-          return {
-            ...result,
-            warning: dataLossCheck.note,
-            dataLossCheck
-          };
-        }
-        return result;
+        const hasOrphans = dataLossCheck.orphans.length > 0;
+        const warnings = [...(hasOrphans ? [dataLossCheck.note] : []), ...(check.warning ? [check.warning] : [])];
+        if (warnings.length === 0) return result;
+        return { ...result, warning: warnings.join(" "), ...(hasOrphans ? { dataLossCheck } : {}) };
       })
     );
 

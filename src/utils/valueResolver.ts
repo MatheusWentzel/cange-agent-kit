@@ -782,8 +782,20 @@ function checkCoercedValue(field: NormalizedField, value: unknown): ValueIssue |
 }
 
 /**
+ * Campo oculto no formulário (`show_on_form = "S"`, vem no raw do GET /field/by-flow).
+ * A tela nunca cobra: o FormBuilder (activeHiddenFields, ligado no cartão, na criação e no
+ * formulário público) zera `required` e `validations` desse campo antes de validar.
+ * Costuma ser preenchido por automação.
+ */
+export function isHiddenOnForm(field: NormalizedField): boolean {
+  const flag = field.raw?.show_on_form ?? field.raw?.showOnForm;
+  return typeof flag === "string" && flag.trim().toUpperCase() === "S";
+}
+
+/**
  * Obrigatórios do formulário ainda vazios depois desta escrita. `alreadyFilled`
- * são os hashes que o cartão já tem preenchidos (contam como presentes).
+ * são os hashes que o cartão já tem preenchidos (contam como presentes). Campo oculto
+ * no formulário não conta como obrigatório (igual à tela).
  */
 export function missingRequiredFields(
   form: FormScope,
@@ -791,7 +803,7 @@ export function missingRequiredFields(
   alreadyFilled: ReadonlySet<string> = new Set()
 ): NormalizedField[] {
   return form.fields.filter((field) => {
-    if (!field.required) return false;
+    if (!field.required || isHiddenOnForm(field)) return false;
     const present = field.name in values ? !isMissingValue(values[field.name]) : alreadyFilled.has(field.name);
     return !present;
   });

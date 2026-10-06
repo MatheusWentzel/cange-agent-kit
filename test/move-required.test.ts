@@ -19,7 +19,7 @@ import { FORCE_DRY_RUN_ENV } from "../src/utils/forceDryRun.js";
 const envBackup = { ...process.env };
 const stdout: string[] = [];
 const stderr: string[] = [];
-const requests: Array<{ method: string; path: string; body?: Record<string, unknown> }> = [];
+const requests: Array<{ method: string; path: string; query: URLSearchParams; body?: Record<string, unknown> }> = [];
 
 const STEPS = [
   { id_step: 1, name: "Triagem", form_id: 901, index: 1 },
@@ -49,6 +49,9 @@ const FIELDS = [
 
 let flow: Record<string, unknown>;
 let card: Record<string, unknown>;
+let fields: Array<Record<string, unknown>>;
+/** Cartão de modo teste (deleted 'T'): o GET /card só acha com isTestMode=true, como o back. */
+let testModeCard = false;
 
 /** Cartão 55 na Triagem, com Observação preenchida (Horas e Qualificado vazios). */
 function cardIn(stepId: number, answers: Array<Record<string, unknown>> = []): Record<string, unknown> {
@@ -95,6 +98,8 @@ beforeEach(() => {
   requests.length = 0;
   flow = { id_flow: 316, name: "CNG CRM", form_init_id: 900, flow_steps: STEPS };
   card = cardIn(1);
+  fields = FIELDS;
+  testModeCard = false;
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
     stdout.push(String(chunk));
     return true;
@@ -107,10 +112,13 @@ beforeEach(() => {
     const url = new URL(String(input));
     const method = (init?.method ?? "GET").toUpperCase();
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
-    requests.push({ method, path: url.pathname, body });
+    requests.push({ method, path: url.pathname, query: url.searchParams, body });
     if (method === "GET" && url.pathname === "/flow") return json(flow);
-    if (method === "GET" && url.pathname === "/field/by-flow") return json(FIELDS);
-    if (method === "GET" && url.pathname === "/card/") return json(card);
+    if (method === "GET" && url.pathname === "/field/by-flow") return json(fields);
+    if (method === "GET" && url.pathname === "/card/") {
+      if (testModeCard && url.searchParams.get("isTestMode") !== "true") return json({ message: "Card não encontrado" }, 404);
+      return json(card);
+    }
     if (method === "PUT" && url.pathname === "/form/answer") return json({ id_card: 55 });
     if (method === "POST" && url.pathname === "/card/v2/move-step") return json({ id_card: 55, flow_step_id: body?.to_step_id });
     return json({ message: `rota não mockada: ${method} ${url.pathname}` }, 404);
@@ -281,9 +289,68 @@ describe("move-step-with-values --payload: obrigatórios da etapa atual do cart�
     expect(writes()).toEqual([]);
     const message = errorMessage();
     expect(message).toContain("Falta para a etapa Triagem (atual): Horas (número), Qualificado (Sim | Não)");
+    // O `card move` da dica só grava o que vier nele: manda repetir o que já ia no payload.
     expect(message).toContain(
-      'cange card move --card-id 55 --flow-id 316 --to "Agendamento" --set "Horas=<número>" --set "Qualificado=<Sim | Não>" (ou inclua esses campos no values do payload)'
+      'cange card move --card-id 55 --flow-id 316 --to "Agendamento" --set "Horas=<número>" --set "Qualificado=<Sim | Não>" ' +
+        "(repita como --set o que já ia no payload: Observação; ou inclua os que faltam no values do payload)"
     );
+  });
+
+  it("payload com values do destino: a dica manda repetir esses campos (senão o card move os perderia)", async () => {
+    const file = await payloadFile({
+      flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 902, values: { h_data: "2026-10-06T00:00:00.000Z" }
+    });
+    await run(["card", "move-step-with-values", "--payload", file, "--allow-data-loss"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(writes()).toEqual([]);
+    expect(errorMessage()).toContain(
+      '--set "Qualificado=<Sim | Não>" (repita como --set o que já ia no payload: Data da ligação; ou inclua os que faltam no values do payload)'
+    );
+  });
+
+  it("payload com --set junto: o --set entra na lista do que repetir", async () => {
+    const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: {} });
+    await run(["card", "move-step-with-values", "--payload", file, "--set", "Horas=2"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    const message = errorMessage();
+    expect(message).toContain("Falta para a etapa Triagem (atual): Qualificado (Sim | Não)");
+    expect(message).toContain("(repita como --set o que já ia no payload: Horas; ou inclua os que faltam no values do payload)");
+  });
+
+  it("payload sem nada no values: a dica só lembra do values do payload", async () => {
+    const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: {} });
+    await run(["card", "move-step-with-values", "--payload", file]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(errorMessage()).toContain('--set "Qualificado=<Sim | Não>" (ou inclua esses campos no values do payload)');
+  });
+
+  it("cartão de modo teste (isTestMode no payload): lê o cartão com isTestMode e move", async () => {
+    testModeCard = true;
+    const file = await payloadFile({
+      flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, isTestMode: true,
+      values: { h_obs: "cliente quente", h_horas: 2, h_qualif: "1" }
+    });
+    await run(["card", "move-step-with-values", "--payload", file]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    const cardReads = requests.filter((request) => request.path === "/card/");
+    expect(cardReads).toHaveLength(1);
+    expect(cardReads[0]?.query.get("isTestMode")).toBe("true");
+    expect(writes()).toHaveLength(1);
+    expect(writes()[0]).toMatchObject({ path: "/card/v2/move-step", body: { isTestMode: true } });
+  });
+
+  it("sem isTestMode no payload, o GET /card não manda o parâmetro", async () => {
+    const file = await payloadFile({
+      flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: { h_obs: "x", h_horas: 2, h_qualif: "1" }
+    });
+    await run(["card", "move-step-with-values", "--payload", file]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(requests.find((request) => request.path === "/card/")?.query.has("isTestMode")).toBe(false);
   });
 
   it("values com os obrigatórios (e o que o cartão já tem): move em 1 chamada", async () => {
@@ -374,6 +441,132 @@ describe("move-step-with-values --payload: obrigatórios da etapa atual do cart�
   });
 });
 
+describe("igual à tela: campo oculto e campo com condicional", () => {
+  /** Qualificado (obrigatório da Triagem) com condicional de campo, como o GET /flow devolve. */
+  function withConditionalOnQualificado(): void {
+    flow = {
+      ...flow,
+      flow_steps: STEPS.map((step) =>
+        step.id_step === 1
+          ? {
+              ...step,
+              form: {
+                id_form: 901,
+                fields: [
+                  { id_field: 30, name: "h_horas", conditionals: [] },
+                  { id_field: 32, name: "h_qualif", conditionals: [{ id_conditional: 7, type: "field", action: "1" }] }
+                ]
+              }
+            }
+          : step
+      )
+    };
+  }
+
+  it("obrigatório OCULTO no formulário (show_on_form S) vazio não bloqueia o mover", async () => {
+    fields = [
+      ...FIELDS,
+      { id_field: 34, name: "h_integ", title: "Código da integração", type: "TEXT_SHORT_FIELD", form_id: 901, required: "1", show_on_form: "S" }
+    ];
+    const out = await run([
+      "card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento",
+      "--set", "Horas=2", "--set", "Qualificado=Sim"
+    ]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(writes().map((write) => write.path)).toEqual(["/card/v2/move-step"]);
+    expect(out?.warning).toBeUndefined();
+  });
+
+  it("oculto também fica fora do erro quando outro obrigatório falta", async () => {
+    fields = [
+      ...FIELDS,
+      { id_field: 34, name: "h_integ", title: "Código da integração", type: "TEXT_SHORT_FIELD", form_id: 901, required: "1", show_on_form: "S" }
+    ];
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    const message = errorMessage();
+    expect(message).toContain("Falta para a etapa Triagem (atual): Horas (número), Qualificado (Sim | Não)\n");
+    expect(message).not.toContain("Código da integração");
+  });
+
+  it("--payload: oculto vazio no values não bloqueia", async () => {
+    fields = [
+      ...FIELDS,
+      { id_field: 34, name: "h_integ", title: "Código da integração", type: "TEXT_SHORT_FIELD", form_id: 901, required: "1", show_on_form: "S" }
+    ];
+    const file = await payloadFile({
+      flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: { h_obs: "x", h_horas: 2, h_qualif: "1" }
+    });
+    await run(["card", "move-step-with-values", "--payload", file]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(writes().map((write) => write.path)).toEqual(["/card/v2/move-step"]);
+  });
+
+  it("obrigatório com CONDICIONAL vazio não bloqueia: move e devolve o aviso", async () => {
+    withConditionalOnQualificado();
+    const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--set", "Horas=2"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(writes().map((write) => write.path)).toEqual(["/card/v2/move-step"]);
+    expect(out?.warning).toContain("Obrigatórios com condicional vazios na etapa Triagem (atual): Qualificado (Sim | Não).");
+    expect(out?.warning).toContain("o kit não avalia condicionais");
+    expect(out?.warning).not.toContain("—");
+  });
+
+  it("condicional + outro obrigatório faltando: bloqueia só pelo outro e a dica cita o condicional", async () => {
+    withConditionalOnQualificado();
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(writes()).toEqual([]);
+    const message = errorMessage();
+    expect(message).toContain("Falta para a etapa Triagem (atual): Horas (número)\n");
+    expect(message).toContain(
+      "Também vazios, com condicional (a tela só exige se o campo aparecer para este cartão): Qualificado (Sim | Não)."
+    );
+    expect(message).toContain('--to "Agendamento" --set "Horas=<número>"');
+    expect(message).not.toContain('--set "Qualificado=');
+  });
+
+  it("dry-run (gate) com só o condicional vazio: válido e com o aviso", async () => {
+    withConditionalOnQualificado();
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--set", "Horas=2"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(writes()).toEqual([]);
+    expect(out).toMatchObject({ dryRun: true, validation: { valid: true } });
+    expect(out?.warning).toContain("Obrigatórios com condicional vazios na etapa Triagem (atual): Qualificado");
+  });
+
+  it("--payload com só o condicional vazio: move e devolve o aviso", async () => {
+    withConditionalOnQualificado();
+    const file = await payloadFile({
+      flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: { h_obs: "cliente quente", h_horas: 2 }
+    });
+    const out = await run(["card", "move-step-with-values", "--payload", file]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(writes().map((write) => write.path)).toEqual(["/card/v2/move-step"]);
+    expect(out?.warning).toContain("Obrigatórios com condicional vazios na etapa Triagem (atual): Qualificado (Sim | Não).");
+  });
+
+  it("card move-step (deprecado) com só o condicional vazio: move e junta o aviso ao de deprecado", async () => {
+    withConditionalOnQualificado();
+    const file = await payloadFile({
+      flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: { h_obs: "x", h_horas: 2 }
+    });
+    const out = await run(["card", "move-step", "--payload", file]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(out?.warning).toContain("Obrigatórios com condicional vazios");
+    expect(out?.warning).toContain("Comando deprecated");
+  });
+});
+
 describe("card move-step (deprecado): também cobra", () => {
   it("faltou obrigatório da etapa atual: exit 2, nada gravado", async () => {
     const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: {} });
@@ -437,6 +630,39 @@ describe("dica do comando", () => {
       'cange card move --card-id 55 --to 7 --set "h_a=<número>" --set "h_b=<texto>" --set "h_c=<texto>" --set "Contrato=<id do anexo>"'
     );
     expect(hint.text).not.toContain("—");
+  });
+
+  it("texto que o shell interpreta: título e etapa viram hash e id; placeholder sai escapado", () => {
+    const fields = [
+      { id: 1, name: "h_cmd", title: "Valor $(whoami)", type: "NUMBER_FIELD", formId: 901, required: true },
+      { id: 2, name: "h_crase", title: "Código `id`", type: "TEXT_SHORT_FIELD", formId: 901, required: true },
+      { id: 3, name: "h_barra", title: "Pasta C:\\dados", type: "TEXT_SHORT_FIELD", formId: 901, required: true },
+      {
+        id: 4,
+        name: "h_opcao",
+        title: "Plano",
+        type: "RADIO_BOX_FIELD",
+        formId: 901,
+        required: true,
+        options: [
+          { value: "1", label: 'Plano "Pro"' },
+          { value: "2", label: "R$ 10 `x`" }
+        ]
+      }
+    ];
+    const steps = [
+      { id: 1, name: "Triagem", raw: {} },
+      { id: 9, name: "Cobrança $HOME", raw: {} }
+    ];
+    const hint = moveRequiredHint({ missing: fields as never, origin: origin(fields), steps, toStep: steps[1], cardId: 55 });
+    const command = hint.text.split("\n")[1] ?? "";
+
+    expect(command).toBe(
+      'cange card move --card-id 55 --to 9 --set "h_cmd=<número>" --set "h_crase=<texto>" --set "h_barra=<texto>" ' +
+        '--set "Plano=<Plano \\"Pro\\" | R\\$ 10 \\`x\\`>"'
+    );
+    expect(command).not.toContain("$(");
+    expect(command).not.toContain("$HOME");
   });
 
   it("skipsRequiredOnBackwardMove: só voltando e só com a flag ligada", () => {

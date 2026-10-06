@@ -260,6 +260,22 @@ describe("mensagem compacta", () => {
     const missing = findMissingRequired(ETAPA, { h_valor: 1 }, new Set(["h_data", "h_agenda"]));
     expect(missing).toEqual([]);
   });
+
+  it("obrigatório oculto no formulário (show_on_form S) não é cobrado, igual à tela", () => {
+    const oculto = field({
+      id: 30,
+      name: "h_oculto",
+      title: "Código da integração",
+      type: "TEXT_SHORT_FIELD",
+      formId: 902,
+      required: true,
+      raw: { show_on_form: "S" }
+    });
+    const visivel = field({ ...oculto, name: "h_visivel", title: "Contato", raw: { show_on_form: "N" } });
+    const form: FormScope = { ...ETAPA, fields: [oculto, visivel] };
+    const missing = findMissingRequired(form, {});
+    expect(missing.map((issue) => issue.text)).toEqual(["Contato (texto)"]);
+  });
 });
 
 describe("readCarryOver: campos que o cartão já tem na etapa atual", () => {

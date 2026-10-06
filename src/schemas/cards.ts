@@ -99,7 +99,8 @@ export const moveCardStepPayloadSchema = moveCardStepBasePayloadSchema;
 export const getCardParamsSchema = z.object({
   cardId: idLikeSchema,
   flowId: idLikeSchema,
-  companyId: idLikeSchema.optional()
+  companyId: idLikeSchema.optional(),
+  isTestMode: z.boolean().optional()
 });
 
 export const listCardsByFlowParamsSchema = z.object({
