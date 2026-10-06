@@ -121,6 +121,40 @@ describe("cli parsing", () => {
   it("runs card move-step-with-values in dry-run without mutating", async () => {
     process.env.CANGE_ACCESS_TOKEN = "token";
 
+    // O dry-run do mover LÊ o fluxo e o cartão (tradução de campos e checagem de
+    // perda de dados). Sem mock, o teste batia em api.cange.me (produção) e
+    // estourava os 5 s quando a rede demorava. Rotas fixas; qualquer outra URL falha.
+    const MOCKED_ROUTES: Record<string, unknown> = {
+      "GET /field/by-flow": [
+        { id_field: 501, name: "customer_name", title: "Cliente", type: "TEXT_SHORT_FIELD", form_id: 662, required: "0" }
+      ],
+      "GET /card": {
+        id_card: 7,
+        flow_id: 192,
+        flow_step_id: 11,
+        title: "Cartão de teste",
+        form_answers: []
+      }
+    };
+    const calledUrls: string[] = [];
+    const unmocked: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const key = `${(init?.method ?? "GET").toUpperCase()} ${url.pathname.replace(/\/+$/, "")}`;
+      calledUrls.push(`${key}${url.search}`);
+      if (!(key in MOCKED_ROUTES)) {
+        unmocked.push(`${key}${url.search}`);
+        return new Response(JSON.stringify({ message: `rota não mockada: ${key}` }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify(MOCKED_ROUTES[key]), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
+
     const payloadPath = join(tmpdir(), `cange-card-move-step-${Date.now()}.json`);
     await writeFile(
       payloadPath,
@@ -171,6 +205,9 @@ describe("cli parsing", () => {
     expect(output).toContain("\"dryRun\":true");
     expect(output).toContain("\"executed\":false");
     expect(output).toContain("\"flowId\":192");
+    // Nada fora do mock (nem produção) e nenhuma escrita.
+    expect(unmocked).toEqual([]);
+    expect(calledUrls.every((call) => call.startsWith("GET "))).toBe(true);
   });
 
   it("runs deprecated card move-step alias with idForm and values", async () => {
