@@ -19,6 +19,7 @@ import { createRegisterQueryContracts } from "./registerQuery.js";
 import { createRegistersContracts } from "./registers.js";
 import { createResourceAccessContracts } from "./resourceAccess.js";
 import { createTimeTrackingContracts } from "./timeTracking.js";
+import { createUsersContracts } from "./users.js";
 
 export function createContracts(params: { client: CangeClient; config: CangeResolvedConfig }) {
   const discovery = createDiscoveryContracts(params);
@@ -34,6 +35,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const registers = createRegistersContracts(params.client);
   const registerQuery = createRegisterQueryContracts({ client: params.client, fields });
   const timeTracking = createTimeTrackingContracts(params.client);
+  const users = createUsersContracts(params.client);
   const flowV2Build = createFlowV2BuildContracts(params.client);
   const flowQuery = createFlowQueryContracts(params.client);
   const flowViews = createFlowViewsContracts(params.client);
@@ -87,6 +89,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     // Rodada 6: catálogo de NOMES de fluxos e cadastros (sem conteúdo).
     getAgentCatalog: resourceAccess.getAgentCatalog,
     getRegisterFormAnswer: registers.getRegisterFormAnswer,
+    // P5 (05/10): usuários da empresa para campo de usuário e menção por nome/e-mail.
+    listCompanyUsers: users.listCompanyUsers,
     listCommentsByCard: comments.listCommentsByCard,
     flowBuildPing: flowV2Build.ping,
     listFlowBuildFieldTypes: flowV2Build.listFieldTypes,

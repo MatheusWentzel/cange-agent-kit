@@ -27,6 +27,7 @@ import { registerCardCommentListCommand } from "./commands/card-comment-list.js"
 import { registerCardCreateCommand } from "./commands/card-create.js";
 import { registerCardGetCommand } from "./commands/card-get.js";
 import { registerCardReadCommand } from "./commands/card-read.js";
+import { registerCardMoveCommand } from "./commands/card-move.js";
 import { registerCardMoveStepCommand } from "./commands/card-move-step.js";
 import { registerCardMoveStepWithValuesCommand } from "./commands/card-move-step-with-values.js";
 import { registerCardUpdateCommand } from "./commands/card-update.js";
@@ -121,6 +122,8 @@ export function createProgram(): Command {
   registerCardUpdateValuesCommand(cardCommand);
   registerCardMoveStepCommand(cardCommand);
   registerCardMoveStepWithValuesCommand(cardCommand);
+  // P5 (05/10): mover em 1 passo (origem = etapa atual, destino por nome ou id).
+  registerCardMoveCommand(cardCommand);
   registerCardAddLabelCommand(cardCommand);
   registerCardRelationshipCommand(cardCommand);
   registerCardAddChildCommand(cardCommand);

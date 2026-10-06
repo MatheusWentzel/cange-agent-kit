@@ -5,21 +5,34 @@ import { addChildCardPayloadSchema } from "../../schemas/cards.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { createCommandAction } from "../context.js";
 import { normalizeNumericValueKeys, readPayloadFile } from "../helpers.js";
+import {
+  addInlineValueOptions,
+  authOnce,
+  createWriteLookups,
+  mergedValues,
+  needsFieldResolution,
+  parseInlineValues,
+  resolveLayers,
+  scopesFromFields,
+  throwIfInvalid,
+  type InlineValueOptions
+} from "../write-support.js";
 
-interface CardAddChildOptions {
+interface CardAddChildOptions extends InlineValueOptions {
   payload: string;
   dryRun?: boolean;
 }
 
 export function registerCardAddChildCommand(cardCommand: Command): void {
-  cardCommand
+  const command = cardCommand
     .command("add-child")
     .description(
       "MUTAÇÃO: cria um card filho em outro fluxo e o vincula ao campo 'Meus Fluxos' do pai. O campo é multi-valor e REPLACE — passe parent.existingChildIds para não apagar vínculos existentes (read-modify-write)."
     )
     .requiredOption("--payload <path>", "Caminho do JSON de payload (child + parent)")
-    .option("--dry-run", "Exibe o payload normalizado sem executar a mutação")
-    .action(
+    .option("--dry-run", "Exibe o payload normalizado sem executar a mutação");
+  addInlineValueOptions(command, "campos do card FILHO; vencem o child.values do arquivo");
+  command.action(
       createCommandAction(async ({ kit, ensureAuth }, options: CardAddChildOptions) => {
         const payloadRaw = await readPayloadFile<unknown>(options.payload);
         const parsed = addChildCardPayloadSchema.safeParse(payloadRaw);
@@ -35,7 +48,24 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
         // id → hash ANTES do POST (values pelo fluxo filho, linkField pelo fluxo
         // pai); id que não existe falha aqui, antes de criar qualquer coisa.
         const { child, parent } = parsed.data;
-        child.values = (await normalizeNumericValueKeys(kit, child.flowId, child.values, ensureAuth)).values;
+        // P4: chaves e valores do filho pelo resolvedor único (título, id, rótulo,
+        // número em texto, data), contra o formulário do filho (child.idForm).
+        const inline = parseInlineValues(options);
+        if (needsFieldResolution({ ...child.values, ...(inline ?? {}) }, inline !== undefined)) {
+          const auth = authOnce(kit, ensureAuth);
+          await auth();
+          const { fields } = await kit.contracts.getFieldsByFlow({ flowId: child.flowId });
+          const { target, others } = scopesFromFields(fields, child.idForm);
+          const { resolved, issues, passthrough } = await resolveLayers({
+            layers: [child.values, inline],
+            forms: [{ ...target, label: "formulário do card filho" }],
+            outOfScope: others,
+            lookups: createWriteLookups(kit, auth),
+            passthroughUnknown: true
+          });
+          throwIfInvalid(issues);
+          child.values = mergedValues({ resolved, passthrough });
+        }
         if (/^\d+$/.test(parent.linkField)) {
           const link = await normalizeNumericValueKeys(kit, parent.flowId, { [parent.linkField]: true }, ensureAuth);
           parent.linkField = Object.keys(link.values)[0] ?? parent.linkField;

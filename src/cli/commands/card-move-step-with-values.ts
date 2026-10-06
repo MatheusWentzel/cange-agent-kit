@@ -7,32 +7,55 @@ import { moveCardStepWithValuesPayloadSchema } from "../../schemas/cards.js";
 import { detectDataLoss, type DataLossCheck } from "../../utils/dataLoss.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { getExpectedFormatByFieldType } from "../../utils/fieldTypeGuards.js";
+import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
-import { assertValidationResult, normalizeNumericValueKeys, readPayloadFile } from "../helpers.js";
+import { readPayloadFile } from "../helpers.js";
+import { findMissingRequired, type FormScope } from "../../utils/valueResolver.js";
+import {
+  addInlineValueOptions,
+  authOnce,
+  createWriteLookups,
+  formScope,
+  initScope,
+  loadFlowContext,
+  mergedValues,
+  needsFieldResolution,
+  parseInlineValues,
+  resolveLayers,
+  stepLabel,
+  throwIfInvalid,
+  validationSummary
+} from "../write-support.js";
+import { withExitCode } from "../context.js";
+import { EXIT_CODES } from "../exit-codes.js";
+import { runInlineMove, type MoveInlineOptions } from "./card-move.js";
 
-interface CardMoveStepWithValuesOptions {
+interface CardMoveStepWithValuesOptions extends MoveInlineOptions {
   payload?: string;
-  validateFields?: boolean;
-  dryRun?: boolean;
   discoverRequired?: boolean;
   flowId?: string;
   formId?: string;
   allowSelfMove?: boolean;
   allowDataLoss?: boolean;
-  failOnDataLoss?: boolean;
 }
 
 export function registerCardMoveStepWithValuesCommand(cardCommand: Command): void {
-  cardCommand
+  const command = cardCommand
     .command("move-step-with-values")
-    .description("MUTAÇÃO: move cartão de etapa com values")
-    .option("--payload <path>", "Caminho do JSON de payload")
+    .description(
+      "MUTAÇÃO: move cartão de etapa. Caminho curto: `card move --card-id N --to <etapa> --set ...` (mesmas flags aqui sem --payload)"
+    )
+    .option("--payload <path>", "AVANÇADO: arquivo JSON {flowId, cardId, fromStepId, toStepId, idForm, values}")
+    .option("--card-id <id>", "Sem --payload: cartão a mover (origem = etapa atual)")
+    .option("--to <etapa>", "Sem --payload: etapa de destino (nome ou id)");
+  addInlineValueOptions(command);
+  command
     .option("--validate-fields", "Valida values contra fields do flow antes de mutar")
     .option(
       "--discover-required",
       "Descobre campos obrigatórios do form antes da mutação (sem executar escrita)"
     )
-    .option("--flow-id <id>", "Flow ID para descoberta quando não houver payload")
+    .option("--flow-id <id>", "Fluxo (descoberta, ou o cartão no modo sem --payload)")
     .option("--form-id <id>", "Form ID para descoberta quando não houver payload")
     .option(
       "--allow-self-move",
@@ -64,8 +87,12 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         }
 
         if (!options.payload) {
+          if (options.cardId !== undefined || options.to !== undefined || parseInlineValues(options)) {
+            return runInlineMove(kit, ensureAuth, options, "card move-step-with-values");
+          }
           throw new CangeCliUsageError(
-            "Informe --payload para mover o card ou use --discover-required para descoberta."
+            'Informe o cartão e o destino: `cange card move --card-id <id> --to "<etapa>" [--set "Campo=valor"]` ' +
+              "(ou --payload <arquivo>, ou --discover-required)."
           );
         }
 
@@ -77,7 +104,8 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
           });
         }
         const payload = parsed.data;
-        payload.values = (await normalizeNumericValueKeys(kit, payload.flowId, payload.values, ensureAuth)).values;
+        const inline = parseInlineValues(options);
+        const auth = authOnce(kit, ensureAuth);
 
         // M1 — Guard de self-move. O endpoint /card/v2/move-step NÃO bloqueia
         // fromStepId === toStepId (diferente da v1), e cada move cria um
@@ -109,31 +137,61 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         }
 
         let targetFields: NormalizedField[] | undefined;
-        if (options.validateFields) {
-          const fieldsData = await kit.contracts.getFieldsByFlow({ flowId: payload.flowId });
-          targetFields = fieldsData.fields.filter(
-            (field) => String(field.formId) === String(payload.idForm)
-          );
+        let validation: ReturnType<typeof validationSummary> | undefined;
+        const resolveNeeded = needsFieldResolution(
+          { ...payload.values, ...(inline ?? {}) },
+          options.validateFields === true || inline !== undefined
+        );
+        if (resolveNeeded) {
+          // P4: o validate-fields filtrava SÓ pelo idForm do payload e dizia "não existe na
+          // estrutura consultada" para um campo da outra etapa (10 erros em 5 runs). Agora
+          // a chave é procurada em todos os formulários do fluxo e o erro diz de qual etapa
+          // o campo é; o `card move` separa os formulários sozinho.
+          await auth();
+          const ctx = await loadFlowContext(kit, payload.flowId);
+          const targetFormId = String(payload.idForm ?? stepFormId(ctx.steps, payload.toStepId) ?? "");
+          const target = formScope(ctx.fields, targetFormId, describeForm(ctx, payload, targetFormId), 0);
+          targetFields = target.fields;
+          const others: FormScope[] = [];
+          const seen = new Set([targetFormId]);
+          const addOther = (formId: string | number | undefined, label: string): void => {
+            if (formId === undefined || seen.has(String(formId))) return;
+            seen.add(String(formId));
+            others.push(formScope(ctx.fields, formId, label, 9));
+          };
+          for (const step of ctx.steps) addOther(step.formId, describeForm(ctx, payload, String(step.formId)));
+          const init = initScope(ctx, 9);
+          if (init) addOther(init.formId, init.label);
 
-          if (targetFields.length === 0) {
-            throw new CangeValidationError(
-              "Nenhum field encontrado para o idForm informado no flow.",
-              {
-                details: {
-                  flowId: payload.flowId,
-                  idForm: payload.idForm
-                }
-              }
-            );
-          }
-
-          const validation = kit.contracts.validateValuesAgainstFields({
-            values: payload.values,
-            fields: targetFields,
-            requireRequiredFields: true,
-            targetFormId: payload.idForm
+          const { resolved, issues, passthrough } = await resolveLayers({
+            layers: [payload.values, inline],
+            forms: [target],
+            outOfScope: others,
+            lookups: createWriteLookups(kit, auth),
+            passthroughUnknown: options.validateFields !== true
           });
-          assertValidationResult(validation.valid, validation);
+          const finalValues = mergedValues({ resolved, passthrough });
+          const requiredIssues = options.validateFields ? findMissingRequired(target, finalValues) : [];
+          const allIssues = [...issues, ...requiredIssues];
+          if (allIssues.some((issue) => issue.kind === "out_of_scope")) {
+            allIssues.push({
+              kind: "invalid_value",
+              blocking: true,
+              text: `o idForm ${targetFormId} só grava ${target.label}. \`cange card move --card-id ${payload.cardId} --to ${payload.toStepId} --set "Campo=valor"\` separa os formulários sozinho`
+            });
+          }
+          if (options.dryRun) {
+            validation = validationSummary(allIssues);
+            if (!validation.valid) {
+              return withExitCode(
+                { ...createDryRunResult({ ...payload, values: finalValues }), validation },
+                EXIT_CODES.USAGE
+              );
+            }
+          } else {
+            throwIfInvalid(allIssues);
+          }
+          payload.values = finalValues;
         }
 
         // M2 — Detector de perda de dados (read-before-write). Lê o estado atual
@@ -158,6 +216,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         if (options.dryRun) {
           return {
             ...createDryRunResult(payload),
+            ...(validation ? { validation } : {}),
             dataLossCheck
           };
         }
@@ -173,6 +232,32 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         return result;
       })
     );
+
+  annotateCommand(command, {
+    mutates: true,
+    envelope: "Com --payload: resposta do move (+ dataLossCheck). Sem --payload: igual a `card move`.",
+    fieldsLocation:
+      "Prefira `card move --card-id N --to <etapa> --set ...` (1 passo). Com --payload, o idForm é o form da etapa ATUAL e os values são só desse form.",
+    example: 'card move-step-with-values --card-id 1234 --to "Agendamento" --set "Data da ligação=06/10/2026"'
+  });
+}
+
+/** Rótulo do formulário para as mensagens: etapa atual, destino, inicial. */
+function describeForm(
+  ctx: Awaited<ReturnType<typeof loadFlowContext>>,
+  payload: { fromStepId: number; toStepId: number },
+  formId: string
+): string {
+  const step = ctx.steps.find((item) => String(item.formId) === formId);
+  if (!step) return ctx.formInitId === formId ? "formulário inicial" : `form ${formId}`;
+  if (String(step.id) === String(payload.fromStepId)) return `${stepLabel(step)} (atual)`;
+  if (String(step.id) === String(payload.toStepId)) return `${stepLabel(step)} (destino)`;
+  return stepLabel(step);
+}
+
+function stepFormId(steps: Array<{ id?: number | string; formId?: number | string }>, stepId: number): string | undefined {
+  const step = steps.find((item) => String(item.id) === String(stepId));
+  return step?.formId !== undefined ? String(step.formId) : undefined;
 }
 
 async function discoverRequiredForMove(

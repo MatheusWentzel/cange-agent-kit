@@ -1,4 +1,4 @@
-import { CangeValidationError } from "../client/errors.js";
+import { CangeApiError, CangeValidationError } from "../client/errors.js";
 import type { CangeClient } from "../client/http.js";
 import {
   addCardLabelPayloadSchema,
@@ -281,14 +281,17 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         });
       }
 
-      const raw = await client.put<unknown>("/form/answer", {
-        body: {
-          id_form: parsed.data.idForm,
-          flow_id: parsed.data.flowId,
-          card_id: parsed.data.cardId,
-          values: parsed.data.values
-        }
-      });
+      const data = parsed.data;
+      const send = (idForm: number) =>
+        client.put<unknown>("/form/answer", {
+          body: {
+            id_form: idForm,
+            flow_id: data.flowId,
+            card_id: data.cardId,
+            values: data.values
+          }
+        });
+      const raw = await putFormAnswerWithRecovery(send, data.idForm, data.cardId);
 
       return {
         raw,
@@ -444,6 +447,84 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
       };
     }
   };
+}
+
+/** `complement` do erro do back (`{ status, message, complement: { code, ... } }`). */
+export function apiErrorComplement(error: unknown): Record<string, unknown> | undefined {
+  if (!(error instanceof CangeApiError)) return undefined;
+  const details = error.details;
+  if (!details || typeof details !== "object") return undefined;
+  const record = details as Record<string, unknown>;
+  const complement = record.complement;
+  if (complement && typeof complement === "object" && !Array.isArray(complement)) {
+    return complement as Record<string, unknown>;
+  }
+  return typeof record.code === "string" ? record : undefined;
+}
+
+function busyRetryDelayMs(): number {
+  const override = Number(process.env.CANGE_BUSY_RETRY_MS);
+  return Number.isFinite(override) && override >= 0 ? override : 1000;
+}
+
+/**
+ * P1 (F2b, contrato do back 05/10) no `PUT /form/answer`:
+ *  - o back CRIA a resposta da etapa atual quando falta (nada de mover o cartão
+ *    para a própria etapa para gravar campo);
+ *  - 409 `STEP_FORM_ANSWER_BUSY` (outra gravação no cartão): tenta de novo 1 vez
+ *    depois de ~1 s;
+ *  - 422 `FIELD_FORM_MISMATCH` (campo mandado com o form errado): refaz 1 vez com
+ *    o `expected_form_id`; se ainda falhar, vale a mensagem do back;
+ *  - 422 `STEP_FORM_NOT_CURRENT` (form de outra etapa, sem resposta): repassa a
+ *    mensagem do back em 1 linha com o caminho certo (`cange card move --set`).
+ */
+async function putFormAnswerWithRecovery(
+  send: (idForm: number) => Promise<unknown>,
+  idForm: number,
+  cardId: number
+): Promise<unknown> {
+  let currentForm = idForm;
+  let busyRetried = false;
+  let formRetried = false;
+  for (;;) {
+    try {
+      return await send(currentForm);
+    } catch (error) {
+      const complement = apiErrorComplement(error);
+      const code = typeof complement?.code === "string" ? complement.code : undefined;
+      const status = error instanceof CangeApiError ? error.status : undefined;
+
+      if (status === 409 && code === "STEP_FORM_ANSWER_BUSY" && !busyRetried) {
+        busyRetried = true;
+        await new Promise((resolve) => setTimeout(resolve, busyRetryDelayMs()));
+        continue;
+      }
+      if (status === 422 && code === "FIELD_FORM_MISMATCH" && !formRetried) {
+        const expected = Number(complement?.expected_form_id);
+        if (Number.isInteger(expected) && expected > 0 && expected !== currentForm) {
+          formRetried = true;
+          currentForm = expected;
+          continue;
+        }
+      }
+      if (status === 422 && code === "STEP_FORM_NOT_CURRENT" && error instanceof CangeApiError) {
+        const steps = Array.isArray(complement?.steps) ? (complement.steps as Array<Record<string, unknown>>) : [];
+        const stepName = typeof steps[0]?.name === "string" ? (steps[0].name as string) : undefined;
+        const hint = stepName
+          ? ` Grave ao mover para ela: cange card move --card-id ${cardId} --to "${stepName}" --set "Campo=valor".`
+          : ` Grave ao mover para a etapa do campo: cange card move --card-id ${cardId} --to "<etapa>" --set "Campo=valor".`;
+        throw new CangeApiError(`${error.message.replace(/\s+/g, " ").trim()}${hint}`, {
+          ...(error.status !== undefined ? { status: error.status } : {}),
+          ...(error.endpoint !== undefined ? { endpoint: error.endpoint } : {}),
+          ...(error.method !== undefined ? { method: error.method } : {}),
+          code: "STEP_FORM_NOT_CURRENT",
+          details: complement,
+          cause: error
+        });
+      }
+      throw error;
+    }
+  }
 }
 
 function extractChildCardId(raw: unknown): number | undefined {

@@ -13,7 +13,7 @@ interface GuardDefinition {
   guard: GuardFn;
 }
 
-interface OptionDescriptor {
+export interface OptionDescriptor {
   value: string | number;
   label?: string;
 }
@@ -269,7 +269,7 @@ function emailGuard(): GuardDefinition {
   };
 }
 
-function extractAllowedOptionDescriptors(options: unknown): OptionDescriptor[] {
+export function extractAllowedOptionDescriptors(options: unknown): OptionDescriptor[] {
   if (!Array.isArray(options)) {
     return [];
   }

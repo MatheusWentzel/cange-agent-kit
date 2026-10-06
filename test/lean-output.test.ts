@@ -61,7 +61,16 @@ describe("recipe (receitas sob demanda)", () => {
   });
 
   it("lista as receitas de escrita e a do anexo", () => {
-    expect(recipeNames()).toEqual(["anexo", "comentar", "criar-card", "mover-card", "publicar-artefato", "cadastro-por-nome"]);
+    expect(recipeNames()).toEqual([
+      "anexo",
+      "comentar",
+      "mencionar",
+      "criar-card",
+      "mover-card",
+      "gravar-campos",
+      "publicar-artefato",
+      "cadastro-por-nome"
+    ]);
   });
 
   it("receita desconhecida falha com erro de uso", () => {

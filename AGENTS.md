@@ -13,9 +13,9 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Para card create, usar `flow.form_init_id`.
 - Para register create/update, usar `register.form_id`.
 - Para register create, o payload precisa do `registerId` (id do cadastro) **na raiz**, além do `idForm`: o backend resolve a referência por `register_id` no body. Sem ele, 404 "não foi possível encontrar a referência do formulário" — que parece falta de acesso, mas é payload. No register update, mandar `registerId` junto do `formAnswerId`.
-- Para mover etapa de card, sempre usar `card move-step-with-values`, mesmo sem obrigatórios.
+- Para mover etapa de card, usar `card move --card-id <id> --to <etapa>` (ou `card move-step-with-values`, que sem `--payload` é o mesmo).
 - Quando não houver campos para preencher, enviar `values: {}`.
-- Ao mover etapa, o `idForm` do payload deve ser o `form_id` da etapa atual (`flow_step.form_id`), não o `form_init_id` do fluxo.
+- Ao mover etapa com `--payload`, o `idForm` do payload deve ser o `form_id` da etapa atual (`flow_step.form_id`), não o `form_init_id` do fluxo, e os `values` só desse formulário (o `card move` separa os formulários sozinho).
 - Ao mover etapa, preencher todos os campos com `required = "1"` do `form_id` da etapa atual antes de mover.
 - Ao mover etapa, **preservar os campos já preenchidos** (read-before-move): o move grava um form_answer NOVO contendo só o que vier em `values` — campos do `form_id` da etapa não reenviados ficam vazios (perda de dados). Ler o card antes (`card get`) e incluir no `values` os campos já preenchidos, além dos obrigatórios. O kit detecta e avisa campos preenchidos ausentes do `values`; use `--allow-data-loss` para confirmar perda intencional ou `--fail-on-data-loss` para bloquear.
 - **Nunca fazer self-move** (`fromStepId === toStepId`) para "criar"/preencher um form_answer: duplica o form_answer e o snapshot vazio mais recente sobrepõe o preenchido. Para apenas atualizar values sem mover, usar `card update-values`. O kit bloqueia self-move por padrão (`--allow-self-move` força).
@@ -24,7 +24,7 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
 - Usar `template flow-create`, `template register-create` e `template step-move` antes de mutações quando necessário.
 - Usar `--validate-fields` e `--dry-run` antes de mutações quando apropriado.
 - Se `--validate-fields` falhar com `UNKNOWN_FIELD_TYPE`, omitir `--validate-fields` e executar apenas com `--dry-run`. Tipos não mapeados na validação local não impedem a mutação na API.
-- `--payload` sempre deve receber caminho de arquivo JSON, nunca JSON inline.
+- `--payload` (avançado) sempre recebe caminho de arquivo JSON, nunca JSON inline. Valores inline: `--set` / `--values-json`.
 - Inputs de mutação fora de `values` devem usar camelCase (`flowId`, `cardId`, `registerId` etc).
 - Não inventar IDs.
 - Não inventar chaves de `values`.
@@ -50,7 +50,45 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
   - `map`: campos sem o hash `name` (o `values` aceita o id numérico do campo como chave em card create,
     update-values, move, add-child (também no `linkField`) e register create/update; o kit traduz para o hash
     antes de gravar e id inexistente falha sem gravar nada; `map --full` mostra o hash).
-- Receitas sob demanda: `cange recipe <anexo|comentar|criar-card|mover-card|publicar-artefato|cadastro-por-nome>` (texto cru).
+- Receitas sob demanda: `cange recipe <anexo|comentar|mencionar|criar-card|mover-card|gravar-campos|publicar-artefato|cadastro-por-nome>` (texto cru).
+
+## Escrita em 1 passo (padrão desde 06/10/2026)
+
+O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--payload <arquivo>` virou opção avançada.
+
+- Criar: `cange card create --flow-id <id> --set "Título=Pedido ACME" --set "Valor=R$ 2.500,00"`
+- Gravar campos sem mover: `cange card update-values --card-id <id> --set "Data da ligação=06/10/2026"`
+  (o fluxo vem do link do cartão ou do ambiente do run; fora dele, `--flow-id`).
+- Mover: `cange card move --card-id <id> --to "<etapa por nome ou id>" [--set "Campo=valor"]`
+  (origem = etapa atual do cartão, lida pelo kit; `card move-step-with-values` sem `--payload` faz o mesmo).
+- Comentar e mencionar: `cange comment create --card-id <id> --text "<texto>" [--mention <id|e-mail|nome>]...`
+  (a menção vai em `mentions`, que gera a notificação, E vira `@[Nome](id)` no texto).
+- Cadastro: `cange register create --register-id <id> --set ...` e
+  `cange register update --register-id <id> --form-answer-id <entrada> --set ...`.
+- Valores inline: `--set "Campo=valor"` (repetível, o primeiro `=` separa) ou `--values-json '{"Campo": valor}'`.
+  Com `--payload` junto, o inline vence.
+- Chave do campo (todas as escritas, inclusive `--payload`): hash (`name`), id numérico ou TÍTULO do campo
+  (sem diferença de maiúscula/acento). Título repetido: vale a etapa atual, depois o formulário inicial; empate é erro
+  listando as opções (use o id).
+- Valor como na tela: número e moeda em texto ("2500", "2.500,00", "R$ 2.500,00", "2500.5"; "2.500" é ambíguo e dá
+  erro), percentual "90%", data "06/10/2026" ou ISO, opção pelo rótulo, checkbox "A, B", interruptor sim/não,
+  usuário por id, e-mail ou nome (único na empresa), cadastro por id, lista de ids ou nome da entrada (busca no
+  cadastro; 0 ou 2+ resultados = erro com os candidatos).
+- `card move`: cada campo é procurado na etapa atual, no destino e no formulário inicial e vai para a chamada certa
+  (o back aceita UM formulário por chamada): inicial = `PUT /form/answer` antes; etapa atual = no próprio mover (com os
+  campos que o cartão já tem nessa etapa, para nada sumir); destino = `PUT /form/answer` depois. No caso comum é UMA
+  chamada. Falha depois de uma escrita = exit `5` com `done` (o que foi gravado).
+- `--dry-run` em qualquer escrita imprime o payload RESOLVIDO (chave hash, valor no tipo do campo) e `validation`
+  (`{valid}` ou `{valid:false, message}`), sem gravar. Exit `0` válido, `2` inválido.
+- `--validate-fields` também cobra os obrigatórios (na criação e na etapa atual, ao mover).
+- Erro de validação vem numa mensagem só, curta, com tudo que falta ou está errado:
+  `Falta para a etapa Agendamento: Data da ligação (data), Agendamento (Sim | Não)`. Exit `2`, nada gravado.
+- Sucesso: uma linha em `summary` (cartão, campos, etapa) e os ids.
+- Nunca mova o cartão para a própria etapa para gravar campo: o `PUT /form/answer` cria a resposta da etapa atual
+  quando falta. O kit trata sozinho o 409 `STEP_FORM_ANSWER_BUSY` (1 nova tentativa) e o 422 `FIELD_FORM_MISMATCH`
+  (refaz com o formulário certo); o 422 `STEP_FORM_NOT_CURRENT` (campo de outra etapa) volta em 1 linha com o
+  `cange card move --to "<etapa>"` certo. Cartão excluído: 404 `CARD_DELETED`, mensagem repassada como veio.
+- Receitas: `cange recipe criar-card | gravar-campos | mover-card | comentar | mencionar`.
 
 ## Sinônimos e ids flexíveis (desde 05/10/2026)
 
@@ -86,7 +124,7 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
   Com `combinada`, diga que segue sozinho depois da aprovação; não peça ao usuário para avisar. Na cabeça, sem
   `--then` aprovar só avisa na conversa.
 
-## Sequência recomendada para mutações com values
+## Sequência recomendada para mutações com values (modo avançado, `--payload`)
 
 1. `cange my-flows`, `cange my-registers`, `cange my-tasks` e `cange notifications --is-archived N`
 2. `cange flow get ...` ou `cange register get ...`

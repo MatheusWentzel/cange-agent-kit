@@ -23,11 +23,31 @@ import type { CangeAgentKit } from "../../index.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { exitCodeForBatch } from "../exit-codes.js";
-import { assertValidationResult, normalizeNumericValueKeys, readPayloadFile } from "../helpers.js";
+import { readPayloadFile } from "../helpers.js";
+import { EXIT_CODES } from "../exit-codes.js";
+import { findMissingRequired, valuesOf, type ResolverLookups } from "../../utils/valueResolver.js";
+import {
+  addInlineValueOptions,
+  authOnce as authOnceShared,
+  createWriteLookups,
+  fieldTitles,
+  initScope,
+  loadFlowContext,
+  mergedValues,
+  needsFieldResolution,
+  otherStepScopes,
+  parseInlineValues,
+  resolveLayers,
+  scopesFromFields,
+  throwIfInvalid,
+  validationSummary,
+  type InlineValueOptions
+} from "../write-support.js";
 
 type CreateCardPayload = z.infer<typeof createCardPayloadSchema>;
 
-interface CardCreateOptions {
+interface CardCreateOptions extends InlineValueOptions {
+  flowId?: string;
   payload?: string;
   payloadDir?: string;
   payloads?: string;
@@ -76,14 +96,15 @@ export function registerCardCreateCommand(cardCommand: Command): void {
     .description(
       "MUTAÇÃO: cria card a partir de payload JSON — 1 card (--payload) ou LOTE (--payload-dir/--payloads) com throttle, retry em 429 e resumo por payload"
     )
-    .option("--payload <path>", "Caminho do JSON de payload (1 card)")
+    .option("--flow-id <id>", "1 passo: fluxo do card novo (com --set/--values-json, sem arquivo)")
+    .option("--payload <path>", "AVANÇADO: caminho do JSON de payload (1 card)")
     .option(
       "--payload-dir <dir>",
       `LOTE: diretório com arquivos .json, um por card (ordem alfanumérica, máx ${BATCH_MAX_PAYLOADS})`
     )
     .option("--payloads <paths>", "LOTE: caminhos .json separados por vírgula")
-    .option("--validate-fields", "Valida values contra fields do flow antes de mutar")
-    .option("--dry-run", "Exibe payload (ou o plano do lote) sem executar a mutação")
+    .option("--validate-fields", "Valida values contra fields do flow antes de mutar (inclui obrigatórios)")
+    .option("--dry-run", "Exibe payload resolvido e validação (ou o plano do lote) sem executar a mutação")
     .option("--full", "Devolve o envelope completo (raw + summary). Default: só {cardId, stepId, createdAt}")
     .option(
       "--rps <n>",
@@ -93,8 +114,17 @@ export function registerCardCreateCommand(cardCommand: Command): void {
       "--max-retries <n>",
       `Tentativas adicionais por card em 429 (default ${DEFAULT_MAX_RETRIES}). 5xx/timeout NÃO são repetidos: create não é idempotente`
     )
-    .action(
+  addInlineValueOptions(command, "1 card");
+  command.action(
       createCommandAction(async ({ kit, ensureAuth }, options: CardCreateOptions) => {
+        const inline = parseInlineValues(options);
+        const noSource = options.payload === undefined && options.payloadDir === undefined && options.payloads === undefined;
+        if (noSource && (inline !== undefined || options.flowId !== undefined)) {
+          return runInlineCreate(kit, ensureAuth, options, inline ?? {});
+        }
+        if (inline && !noSource && options.payload === undefined) {
+          throw new CangeCliUsageError("--set/--values-json valem para 1 card (com --payload ou --flow-id), não para o lote.");
+        }
         const { batch, sources } = await resolveSources(options);
         const rps = parseRps(options.rps);
         const maxRetries = parseMaxRetries(options.maxRetries);
@@ -110,12 +140,21 @@ export function registerCardCreateCommand(cardCommand: Command): void {
         // este comando existe para evitar — lote parcial.
         const items = await loadItems(kit, sources, {
           validateFields: options.validateFields === true,
-          ensureAuth: authenticateOnce(kit, ensureAuth)
+          ensureAuth: authenticateOnce(kit, ensureAuth),
+          dryRun: options.dryRun === true,
+          ...(inline ? { inline } : {})
         });
 
         if (options.dryRun) {
           if (!batch) {
-            return createDryRunResult(items[0]!.payload);
+            const item = items[0]!;
+            if (item.validation) {
+              return withExitCode(
+                { ...createDryRunResult(item.payload), validation: item.validation },
+                item.validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
+              );
+            }
+            return createDryRunResult(item.payload);
           }
           return createDryRunResult({
             batch: true,
@@ -180,11 +219,74 @@ export function registerCardCreateCommand(cardCommand: Command): void {
   annotateCommand(command, {
     mutates: true,
     envelope:
-      "1 card: { cardId, stepId, flowId, createdAt }. LOTE: { requested, created, failed, notAttempted, cardIds, cards[], failures[]?, notAttemptedPayloads[]?, aborted?, warning? }",
+      "1 card: { cardId, stepId, flowId, createdAt } (+ summary no modo --set). LOTE: { requested, created, failed, notAttempted, cardIds, cards[], failures[]?, notAttemptedPayloads[]?, aborted?, warning? }",
     fieldsLocation:
       "LOTE: `cardIds`/`cards[].cardId` são os ÚNICOS ids que existem — NÃO deduza ids por sequência. `failures[]`/`notAttemptedPayloads[]` são os payloads a reprocessar. Exit code 5 = lote INCOMPLETO (parte criada, parte não); 0 só quando tudo passou.",
-    example: "card create --payload-dir ./payloads/itens --validate-fields"
+    example: 'card create --flow-id 316 --set "Título=Pedido ACME" --set "Valor=R$ 2.500,00" (lote: card create --payload-dir ./payloads/itens --validate-fields)'
   });
+}
+
+/**
+ * P5: 1 card em 1 passo, sem arquivo:
+ *   cange card create --flow-id 316 --set "Título=Pedido ACME" --set "Valor=R$ 2.500,00"
+ */
+async function runInlineCreate(
+  kit: CangeAgentKit,
+  ensureAuth: () => Promise<unknown>,
+  options: CardCreateOptions,
+  inline: Record<string, unknown>
+): Promise<unknown> {
+  if (options.flowId === undefined) {
+    throw new CangeCliUsageError('Informe o fluxo: `cange card create --flow-id <id> --set "Campo=valor"`.');
+  }
+  if (options.payloadDir !== undefined || options.payloads !== undefined) {
+    throw new CangeCliUsageError("--set/--values-json valem para 1 card; o lote usa --payload-dir/--payloads.");
+  }
+  const auth = authOnceShared(kit, ensureAuth);
+  await auth();
+  const ctx = await loadFlowContext(kit, options.flowId);
+  const init = initScope(ctx, 0);
+  if (!init) {
+    throw new CangeValidationError(`O fluxo ${options.flowId} não tem formulário inicial (form_init_id).`);
+  }
+  const { resolved, issues } = await resolveLayers({
+    layers: [inline],
+    forms: [init],
+    outOfScope: otherStepScopes(ctx, new Set([init.formId])),
+    lookups: createWriteLookups(kit, auth)
+  });
+  const values = valuesOf(resolved);
+  const allIssues =
+    options.validateFields || options.dryRun ? [...issues, ...findMissingRequired(init, values)] : issues;
+  const payload: CreateCardPayload = {
+    flowId: Number(options.flowId),
+    idForm: Number(init.formId),
+    origin: "/cange-agent-kit",
+    values
+  };
+
+  if (options.dryRun) {
+    const validation = validationSummary(allIssues);
+    return withExitCode(
+      { ...createDryRunResult(payload), validation },
+      validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
+    );
+  }
+  throwIfInvalid(allIssues);
+
+  const { value: result } = await withRetry(
+    () => kit.contracts.createCard(payload).catch(rethrowWithVerifyHint),
+    { maxRetries: parseMaxRetries(options.maxRetries), shouldRetry: isRateLimitError }
+  );
+  if (options.full) return result;
+  const created = toCreatedCard(result);
+  return {
+    ok: true,
+    ...created,
+    summary:
+      `Cartão ${String(created.cardId)} criado no fluxo ${ctx.flowName ?? options.flowId}` +
+      (resolved.length > 0 ? `; gravou ${fieldTitles(resolved)}.` : ".")
+  };
 }
 
 interface BatchItem {
@@ -192,6 +294,8 @@ interface BatchItem {
   source: string;
   payload: CreateCardPayload;
   translatedKeys: Array<{ from: string; to: string; title?: string }>;
+  /** Só no dry-run de 1 card com resolução: resultado da validação. */
+  validation?: ReturnType<typeof validationSummary>;
 }
 
 interface CreatedCard {
@@ -270,16 +374,18 @@ async function listJsonFiles(dir: string): Promise<string[]> {
 interface LoadItemsOptions {
   validateFields: boolean;
   ensureAuth: () => Promise<unknown>;
+  /** --set/--values-json sobre o --payload (o inline vence). */
+  inline?: Record<string, unknown>;
+  /** Dry-run de 1 card: validação inválida vira resultado (exit 2), não erro. */
+  dryRun?: boolean;
 }
 
 /** Descoberta compartilhada pelo lote: 1 GET por flow, não 1 por payload. */
 interface DiscoveryDeps {
-  fieldsKit: Parameters<typeof normalizeNumericValueKeys>[0];
-  initForm: (flowId: string | number) => Promise<InitFormContext>;
-  validateValuesAgainstFields: CangeAgentKit["contracts"]["validateValuesAgainstFields"];
+  fields: (flowId: string | number) => ReturnType<CangeAgentKit["contracts"]["getFieldsByFlow"]>;
+  formInitId: (flowId: string | number) => Promise<number | string | undefined>;
+  lookups: ResolverLookups;
 }
-
-type InitFormContext = Awaited<ReturnType<CangeAgentKit["contracts"]["getFlowInitFormFields"]>>;
 
 /**
  * Lê, normaliza e (opcionalmente) valida todos os payloads.
@@ -292,14 +398,14 @@ async function loadItems(
   sources: string[],
   options: LoadItemsOptions
 ): Promise<BatchItem[]> {
-  const deps = createDiscoveryDeps(kit);
+  const deps = createDiscoveryDeps(kit, options.ensureAuth);
 
   const items: BatchItem[] = [];
   const invalid: Array<{ payload: string; error: string; details?: unknown }> = [];
 
   for (const source of sources) {
     try {
-      items.push(await loadItem(deps, source, options));
+      items.push(await loadItem(deps, source, options, sources.length === 1));
     } catch (error) {
       if (sources.length === 1) {
         throw error;
@@ -327,35 +433,39 @@ async function loadItems(
  * um lote de 28 cards faria 28 GETs extras — requisições que contam no MESMO
  * teto que o lote está tentando não estourar.
  */
-function createDiscoveryDeps(kit: CangeAgentKit): DiscoveryDeps {
+function createDiscoveryDeps(kit: CangeAgentKit, ensureAuth: () => Promise<unknown>): DiscoveryDeps {
   const fieldsCache = new Map<string, ReturnType<CangeAgentKit["contracts"]["getFieldsByFlow"]>>();
-  const formCache = new Map<string, Promise<InitFormContext>>();
+  const flowCache = new Map<string, Promise<number | string | undefined>>();
 
   return {
-    fieldsKit: {
-      contracts: {
-        getFieldsByFlow: (input: { flowId: string | number }) => {
-          const key = String(input.flowId);
-          const hit = fieldsCache.get(key) ?? kit.contracts.getFieldsByFlow(input);
-          fieldsCache.set(key, hit);
-          return hit;
-        }
-      }
-    },
-    initForm: (flowId) => {
+    fields: (flowId) => {
       const key = String(flowId);
-      const hit = formCache.get(key) ?? kit.contracts.getFlowInitFormFields({ flowId });
-      formCache.set(key, hit);
+      const hit = fieldsCache.get(key) ?? kit.contracts.getFieldsByFlow({ flowId });
+      fieldsCache.set(key, hit);
       return hit;
     },
-    validateValuesAgainstFields: kit.contracts.validateValuesAgainstFields
+    formInitId: (flowId) => {
+      const key = String(flowId);
+      const hit =
+        flowCache.get(key) ??
+        kit.contracts.getFlow({ idFlow: key }).then((flow) => flow.summary.formInitId);
+      flowCache.set(key, hit);
+      return hit;
+    },
+    lookups: createWriteLookups(kit, ensureAuth)
   };
 }
 
+/**
+ * P4: chaves e valores passam pelo resolvedor único (título, id, rótulo, número
+ * em texto, data dd/mm/aaaa). Payload só com hash e sem --validate-fields segue
+ * direto, sem GET extra.
+ */
 async function loadItem(
   deps: DiscoveryDeps,
   source: string,
-  options: LoadItemsOptions
+  options: LoadItemsOptions,
+  single: boolean
 ): Promise<BatchItem> {
   const payloadRaw = await readPayloadFile<unknown>(source);
   const parsed = createCardPayloadSchema.safeParse(payloadRaw);
@@ -365,43 +475,50 @@ async function loadItem(
     });
   }
   const payload = parsed.data;
-  const normalized = await normalizeNumericValueKeys(
-    deps.fieldsKit,
-    payload.flowId,
-    payload.values,
-    options.ensureAuth
-  );
-  payload.values = normalized.values;
+  const merged = { ...payload.values, ...(options.inline ?? {}) };
+  if (!needsFieldResolution(merged, options.validateFields || options.inline !== undefined)) {
+    return { source, payload, translatedKeys: [] };
+  }
 
+  // A resolução consulta a API; em --dry-run o CLI pula a autenticação global.
+  await options.ensureAuth();
   if (options.validateFields) {
-    // A validação consulta a API; em --dry-run o CLI pula a autenticação
-    // global, então garantimos o token aqui (combinação --validate-fields
-    // --dry-run é a recomendada nos playbooks).
-    await options.ensureAuth();
-    const formContext = await deps.initForm(payload.flowId);
-    if (String(formContext.formId) !== String(payload.idForm)) {
+    const formInitId = await deps.formInitId(payload.flowId);
+    if (formInitId !== undefined && String(formInitId) !== String(payload.idForm)) {
       throw new CangeValidationError(
         "idForm divergente do formulário inicial do flow (flow.form_init_id).",
         {
           details: {
             payload: source,
             payloadIdForm: payload.idForm,
-            flowFormInitId: formContext.formId
+            flowFormInitId: formInitId
           }
         }
       );
     }
-
-    const validation = deps.validateValuesAgainstFields({
-      values: payload.values,
-      fields: formContext.fields,
-      requireRequiredFields: true,
-      ...(formContext.formId !== undefined ? { targetFormId: formContext.formId } : {})
-    });
-    assertValidationResult(validation.valid, { payload: source, ...validation });
   }
 
-  return { source, payload, translatedKeys: normalized.translatedKeys };
+  const { fields } = await deps.fields(payload.flowId);
+  const { target, others } = scopesFromFields(fields, payload.idForm);
+  const scoped = { ...target, label: "formulário inicial" };
+  const { resolved, issues, passthrough } = await resolveLayers({
+    layers: [payload.values, options.inline],
+    forms: [scoped],
+    outOfScope: others,
+    lookups: deps.lookups,
+    passthroughUnknown: !options.validateFields
+  });
+  const values = mergedValues({ resolved, passthrough });
+  const allIssues = options.validateFields ? [...issues, ...findMissingRequired(scoped, values)] : issues;
+  const validation = validationSummary(allIssues);
+  if (!validation.valid && !(single && options.dryRun)) {
+    throwIfInvalid(allIssues);
+  }
+  payload.values = values;
+  const translatedKeys = resolved
+    .filter((item) => item.key !== item.field.name)
+    .map((item) => ({ from: item.key, to: item.field.name, ...(item.field.title ? { title: item.field.title } : {}) }));
+  return { source, payload, translatedKeys, ...(single ? { validation } : {}) };
 }
 
 /**
