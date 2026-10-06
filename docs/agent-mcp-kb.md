@@ -132,7 +132,7 @@ Convenção (também exposta em `manifest.envelopeConvention` e no `--help` de c
 - `pnpm cli flow views list --flow-id <id> [--include-schema]`
   - Lista as **visualizações (views salvas)** do flow com resumo de filtros/colunas/ordenação (usar `.views`; `raw` é pesado).
 - `pnpm cli comment list --flow-id <id> --card-id <id> [--full]`
-  - Default é digest: `{ summaries[], total }` com `description` capada em 800 chars (marcador ensina o caminho de volta). `--full` devolve `{raw, summaries[], total}` com o teor COMPLETO (pesado — comentários com transcrição chegam a 100KB+). `--summary-only` é legado (o digest já é o default). `--flow-id` defaulta de `CANGE_CARD_FLOW_ID`.
+  - Default é digest: `{ summaries[], total }` com `description` capada em 800 chars (marcador ensina o caminho de volta). `--full` devolve `{raw, summaries[], total}` com o teor COMPLETO (pesado — comentários com transcrição chegam a 100KB+). `--summary-only` é legado (o digest já é o default). `--flow-id` defaulta de `CANGE_CARD_FLOW_ID`; sem ele, o kit descobre o fluxo pelo número do cartão (`GET /card/locate`, saída com `resolved`).
 - `pnpm cli my-registers [--name <search>]`
 
 ### Mutações

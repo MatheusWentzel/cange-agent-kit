@@ -7,12 +7,12 @@ import { loadEnv } from "../utils/env.js";
 import { FORCED_WRITE_COMMANDS, isForceDryRun } from "../utils/forceDryRun.js";
 import { resolveOutputProfile, type OutputProfile } from "../utils/lean.js";
 import { createCliPrinter, type CliPrinter, type OutputMode } from "../utils/output.js";
-import { encodeToon, ListOutput, resolveOutputFormat, type OutputFormat } from "../utils/toon.js";
+import { encodeToon, ListOutput, listOutput, resolveOutputFormat, type OutputFormat } from "../utils/toon.js";
 
 import { getCommandMeta } from "./command-metadata.js";
 import { EXIT_CODES, exitCodeForError, type ExitCode } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
-import { normalizeIdOptions, type HashResolver } from "./resource-ref.js";
+import { normalizeIdOptions, type CardLocator, type FlowResolution, type HashResolver } from "./resource-ref.js";
 
 export interface CliCommandContext {
   kit: CangeAgentKit;
@@ -73,16 +73,20 @@ export function createCommandAction<TArgs extends unknown[]>(
       }
 
       // P7: ids de fluxo, cadastro e cartão aceitam número, link do Cange ou hash.
+      // F6: cartão só pelo número, sem fluxo → o fluxo vem do GET /card/locate.
       const commandOptions = args.at(-2);
+      let resolved: FlowResolution | undefined;
       if (commandOptions && typeof commandOptions === "object") {
-        await normalizeIdOptions(
+        const authOnDemand = createAuthOnDemand(ctx, requiresAuth);
+        ({ resolved } = await normalizeIdOptions(
           commandOptions as Record<string, unknown>,
-          createHashResolver(ctx, requiresAuth),
-          command
-        );
+          createHashResolver(ctx, authOnDemand),
+          command,
+          createCardLocator(ctx, authOnDemand)
+        ));
       }
 
-      const output = await handler(ctx, ...args);
+      const output = withResolution(await handler(ctx, ...args), resolved);
       if (output instanceof CliOutcome) {
         if (output.value !== undefined) {
           printOutput(ctx, output.value);
@@ -166,20 +170,55 @@ async function createContext(command: Command): Promise<CliCommandContext> {
 }
 
 /**
- * Hash de fluxo/cadastro → id pelas rotas da tela (`GET /flow?hash=`, `GET /register?hash=`).
- * Em dry-run a autenticação foi pulada: autentica aqui, só quando há hash.
+ * Em dry-run a autenticação foi pulada: as leituras de resolução (hash, cartão)
+ * autenticam aqui, uma vez, só quando precisam da rede.
  */
-function createHashResolver(ctx: CliCommandContext, alreadyAuthenticated: boolean): HashResolver {
+function createAuthOnDemand(ctx: CliCommandContext, alreadyAuthenticated: boolean): () => Promise<void> {
   let authenticated = alreadyAuthenticated;
+  return async () => {
+    if (authenticated) return;
+    await ctx.ensureAuth();
+    authenticated = true;
+  };
+}
+
+/** Hash de fluxo/cadastro → id pelas rotas da tela (`GET /flow?hash=`, `GET /register?hash=`). */
+function createHashResolver(ctx: CliCommandContext, ensureAuth: () => Promise<void>): HashResolver {
   return async (kind, hash) => {
-    if (!authenticated) {
-      await ctx.ensureAuth();
-      authenticated = true;
-    }
+    await ensureAuth();
     const result =
       kind === "flow" ? await ctx.kit.contracts.getFlow({ hash }) : await ctx.kit.contracts.getRegister({ hash });
     return result.summary.id;
   };
+}
+
+/**
+ * Cartão → fluxo pelo `GET /card/locate` (F6). É leitura: vale também com
+ * CANGE_FORCE_DRY_RUN (o cliente só recusa escrita).
+ */
+function createCardLocator(ctx: CliCommandContext, ensureAuth: () => Promise<void>): CardLocator {
+  return async (cardId) => {
+    await ensureAuth();
+    return ctx.kit.contracts.locateCard({ cardId });
+  };
+}
+
+/**
+ * Fluxo descoberto pelo número do cartão: a saída diz de onde ele veio, em
+ * `resolved`, para o agente (e quem audita o run) ver qual fluxo foi usado.
+ */
+function withResolution(output: unknown, resolved: FlowResolution | undefined): unknown {
+  if (!resolved) return output;
+  if (output instanceof CliOutcome) {
+    return new CliOutcome(withResolution(output.value, resolved), output.exitCode);
+  }
+  if (output instanceof ListOutput) {
+    return listOutput({ ...output.envelope, resolved }, output.listKey);
+  }
+  if (output && typeof output === "object" && !Array.isArray(output)) {
+    return { ...(output as Record<string, unknown>), resolved };
+  }
+  return output;
 }
 
 function getCommandFromArgs(args: unknown[]): Command {

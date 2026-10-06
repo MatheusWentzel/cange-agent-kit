@@ -4,6 +4,14 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-06
 
+### Sem o fluxo, o kit descobre pelo número do cartão (F6, runs 357 e 362)
+
+- Comando de cartão com `--card-id` numérico, sem `--flow-id` e sem `RUNNER_FLOW_ID`/`CANGE_CARD_FLOW_ID` no ambiente,
+  chama `GET /card/locate?id_card=N` (back: mesmo acesso da leitura, 404 genérico) e usa o fluxo devolvido. A saída
+  ganha `resolved: { flow_id, flow_name, via: "card-locate" }`. É leitura: vale também com `CANGE_FORCE_DRY_RUN`.
+- Back sem a rota (404) ou cartão sem acesso: o comando dá o erro de sempre, agora com a dica do link do cartão.
+- `--payload` continua com o `flowId` do arquivo (o kit não consulta o cartão nesse modo).
+
 ### Listas e contas: página de 20 vale para todo agente; `truncated` também no V1 (3ª revisão da F2c)
 
 - **`card list` no enxuto devolve 20 cartões por página para QUALQUER agente** (antes da F2c vinham todos). Playbook que

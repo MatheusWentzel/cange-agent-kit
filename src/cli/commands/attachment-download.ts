@@ -6,6 +6,7 @@ import type { Command } from "commander";
 import { CangeCliUsageError, CangeValidationError } from "../../client/errors.js";
 import { createCommandAction } from "../context.js";
 import { envCardId, envFlowId } from "../env-defaults.js";
+import { FLOW_FROM_CARD_HINT } from "../resource-ref.js";
 
 interface AttachmentDownloadOptions {
   flowId?: string;
@@ -46,10 +47,11 @@ export function registerAttachmentDownloadCommand(attachmentCommand: Command): v
         // Defaults do ambiente do runner (flag explícita vence).
         options.flowId = options.flowId ?? envFlowId();
         options.cardId = options.cardId ?? envCardId();
-        if (!options.flowId || !options.cardId) {
-          throw new CangeCliUsageError(
-            "--flow-id e --card-id são obrigatórios (em automação, RUNNER_FLOW_ID/RUNNER_CARD_ID do ambiente são usados como default)."
-          );
+        if (!options.cardId) {
+          throw new CangeCliUsageError("--card-id é obrigatório (em automação, RUNNER_CARD_ID do ambiente é o default).");
+        }
+        if (!options.flowId) {
+          throw new CangeCliUsageError(FLOW_FROM_CARD_HINT);
         }
         const wantsFiles = typeof options.out === "string" && options.out.trim().length > 0;
 

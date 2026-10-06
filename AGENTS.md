@@ -91,7 +91,7 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
 
 - Criar: `cange card create --flow-id <id> --set "Título=Pedido ACME" --set "Valor=R$ 2.500,00"`
 - Gravar campos sem mover: `cange card update-values --card-id <id> --set "Data da ligação=06/10/2026"`
-  (o fluxo vem do link do cartão ou do ambiente do run; fora dele, `--flow-id`).
+  (o fluxo vem do link do cartão ou do ambiente do run; sem o fluxo, o kit descobre pelo número do cartão).
 - Mover: `cange card move --card-id <id> --to "<etapa por nome ou id>" [--set "Campo=valor"]`
   (origem = etapa atual do cartão, lida pelo kit; `card move-step-with-values` sem `--payload` faz o mesmo).
 - Comentar e mencionar: `cange comment create --card-id <id> --text "<texto>" [--mention <id|e-mail|nome>]...`
@@ -131,6 +131,11 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   aceitam o número, o link do Cange (`https://app.cange.me/register/<hash>`, `.../flow/<hash>/card/<id>`,
   `cange://card/<id>`) ou o hash do link (fluxo e cadastro). O kit troca pelo id; o link do cartão também preenche o
   `--flow-id` ausente. Hash sem acesso: erro de uso com o caminho (`cange my-registers` / `cange catalog`).
+- **Sem o fluxo, o kit descobre pelo número do cartão** (desde 06/10/2026): comando de cartão (`card read`, `card get`,
+  `card move`, `card update-values`, `comment create`, `comment list`, `attachment download`) com `--card-id` numérico,
+  sem `--flow-id` e sem fluxo no ambiente do run, pergunta ao back (`GET /card/locate`, mesmo acesso da leitura) e usa
+  o fluxo dele. A saída traz `resolved: { flow_id, flow_name, via: "card-locate" }`. Não liste fluxos para achar o
+  cartão. Se não achar (número errado, sem acesso ou back antigo), o erro pede o link do cartão ou `--flow-id`.
   No `access request` o recurso é um que você NÃO acessa, então link e hash não resolvem: ache o id pelo nome
   (`cange catalog --q <nome>`) e peça com ele.
 - `register entries` e `register get` aceitam `--register` (como o `access request`). `card update` aceita

@@ -2,6 +2,8 @@ import type { Command } from "commander";
 
 import { CangeApiError, CangeAuthError, CangeCliUsageError } from "../client/errors.js";
 
+import { envFlowId } from "./env-defaults.js";
+
 /**
  * P7 (05/10, card #1367450): ids flexíveis nas opções de fluxo, cadastro e cartão.
  *
@@ -167,6 +169,24 @@ export function parseResourceRef(raw: string, kind: ResourceKind, flag = `--${ki
 /** Resolve hash → id. Implementação real: `GET /flow?hash=` e `GET /register?hash=`. */
 export type HashResolver = (kind: "flow" | "register", hash: string) => Promise<string | number | undefined>;
 
+/** Cartão → fluxo. Implementação real: `GET /card/locate?id_card=` (F6). */
+export type CardLocator = (cardId: string) => Promise<{ flowId: string | number; flowName?: string | null } | undefined>;
+
+/** Fluxo descoberto pelo kit; o comando devolve isso em `resolved` na saída. */
+export interface FlowResolution {
+  flow_id: number;
+  flow_name?: string | null;
+  via: "card-locate";
+}
+
+/**
+ * Dica única para "falta o fluxo": vale para todos os comandos de cartão. Sem o
+ * fluxo, o kit descobre pelo número do cartão; quando não dá (cartão sem acesso,
+ * inexistente ou back sem a rota), o caminho é o link do cartão ou o --flow-id.
+ */
+export const FLOW_FROM_CARD_HINT =
+  "Sem o fluxo, o kit descobre pelo número do cartão (--card-id). Não deu para descobrir: confira o número, ou passe o link do cartão em --card-id ou --flow-id.";
+
 /**
  * Devolve o id numérico (string) do valor de uma opção: número, link ou hash.
  * Hash sem acesso, inexistente ou sem resolvedor: erro de uso acionável (exit 2).
@@ -246,13 +266,18 @@ function flagOf(command: Command | undefined, attribute: string): string {
 /**
  * Normaliza, NO LUGAR, as opções de id de um comando: número, link ou hash viram o
  * id numérico (string, como o commander entrega). Link de cartão sem `--flow-id`
- * preenche o fluxo quando o comando tem essa opção. Só chama a rede para hash.
+ * preenche o fluxo quando o comando tem essa opção. Só chama a rede para hash e,
+ * com `locateCard`, para descobrir o fluxo de um cartão dado só pelo número.
+ *
+ * Retorna a resolução do fluxo quando ela veio do `GET /card/locate` (o chamador
+ * mostra em `resolved` na saída).
  */
 export async function normalizeIdOptions(
   options: Record<string, unknown>,
   resolveHash: HashResolver | undefined,
-  command?: Command
-): Promise<void> {
+  command?: Command,
+  locateCard?: CardLocator
+): Promise<{ resolved?: FlowResolution }> {
   const linkFlows: string[] = [];
   const unresolvedHint = command ? UNRESOLVED_HINTS.get(command) : undefined;
 
@@ -285,4 +310,55 @@ export async function normalizeIdOptions(
   if (declaresFlowId && options.flowId === undefined && linkFlows.length > 0) {
     options.flowId = await resolveResourceId(linkFlows[0]!, "flow", resolveHash, "--flow-id", unresolvedHint);
   }
+
+  // F6 (runs 357 e 362): o pedido traz só o número do cartão ("comente no cartão
+  // 1121343"). Sem --flow-id, sem fluxo no ambiente do run e sem --payload (que traz
+  // o próprio flowId), o kit pergunta ao back de qual fluxo é o cartão.
+  if (
+    declaresFlowId &&
+    options.flowId === undefined &&
+    options.payload === undefined &&
+    locateCard !== undefined &&
+    envFlowId() === undefined
+  ) {
+    const cardId = singleCardId(options);
+    if (cardId !== undefined) {
+      const located = await locateFlowOfCard(cardId, locateCard);
+      if (located) {
+        options.flowId = String(located.flow_id);
+        return { resolved: located };
+      }
+    }
+  }
+  return {};
+}
+
+function singleCardId(options: Record<string, unknown>): string | undefined {
+  for (const [attribute, kind] of Object.entries(ID_OPTION_KINDS)) {
+    if (kind !== "card") continue;
+    const value = options[attribute];
+    if (typeof value === "string" && POSITIVE_INT_RE.test(value)) return value;
+  }
+  return undefined;
+}
+
+/**
+ * `undefined` quando o back não acha (404: cartão inexistente, sem acesso ou back
+ * antigo sem a rota): o comando segue e dá o erro de sempre, com a dica do link.
+ * 401 e 5xx/rede sobem (não é o agente que errou).
+ */
+async function locateFlowOfCard(cardId: string, locateCard: CardLocator): Promise<FlowResolution | undefined> {
+  let located: Awaited<ReturnType<CardLocator>>;
+  try {
+    located = await locateCard(cardId);
+  } catch (error) {
+    if (error instanceof CangeAuthError) throw error;
+    if (error instanceof CangeApiError && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 401) {
+      return undefined;
+    }
+    throw error;
+  }
+  const flowId = Number(located?.flowId);
+  if (!Number.isInteger(flowId) || flowId <= 0) return undefined;
+  return { flow_id: flowId, flow_name: located?.flowName ?? null, via: "card-locate" };
 }

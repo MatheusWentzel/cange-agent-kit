@@ -17,7 +17,19 @@ import { toNumber } from "../schemas/common.js";
 import { extractArray, extractCardsByFlow, summarizeCard } from "./raw-adapters.js";
 import type { CardSummary } from "./types.js";
 
+/** Fluxo de um cartão descoberto só pelo número (`GET /card/locate`). */
+export interface LocatedCard {
+  cardId: number;
+  flowId: number;
+  flowName: string | null;
+}
+
 export interface CardsContracts {
+  /**
+   * F6: descobre o fluxo do cartão pelo número, com o mesmo controle de acesso da
+   * leitura no back. 404 = cartão inexistente, sem acesso ou back sem a rota.
+   */
+  locateCard: (input: { cardId: number | string }) => Promise<LocatedCard>;
   getCard: (input: { cardId: number | string; flowId: number | string; companyId?: number | string }) => Promise<{
     raw: unknown;
     summary: CardSummary;
@@ -185,6 +197,23 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
   }
 
   return {
+    async locateCard(input) {
+      const cardId = Number(String(input.cardId).trim());
+      if (!Number.isInteger(cardId) || cardId <= 0) {
+        throw new CangeValidationError("cardId inválido para locateCard.", { details: { cardId: input.cardId } });
+      }
+      const raw = await client.get<Record<string, unknown> | undefined>("/card/locate", { query: { id_card: cardId } });
+      const flowId = Number(raw?.flow_id);
+      if (!Number.isInteger(flowId) || flowId <= 0) {
+        throw new CangeApiError("Resposta inesperada de /card/locate (sem flow_id).", {
+          endpoint: "/card/locate",
+          details: raw
+        });
+      }
+      const flowName = typeof raw?.flow_name === "string" ? raw.flow_name : null;
+      return { cardId: Number(raw?.id_card ?? cardId), flowId, flowName };
+    },
+
     async getCard(input) {
       const parsed = getCardParamsSchema.safeParse(input);
       if (!parsed.success) {

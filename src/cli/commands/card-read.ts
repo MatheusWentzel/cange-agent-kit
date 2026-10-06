@@ -15,6 +15,7 @@ import type { NormalizedField } from "../../schemas/fields.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { envCardId, envFlowId } from "../env-defaults.js";
+import { FLOW_FROM_CARD_HINT } from "../resource-ref.js";
 import { exitCodeForBatch } from "../exit-codes.js";
 
 interface CardReadOptions {
@@ -99,9 +100,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
         // erro CLARO aqui, não um usage error genérico.
         const flowId = options.flowId ?? envFlowId();
         if (!flowId) {
-          throw new CangeCliUsageError(
-            "--flow-id é obrigatório (em automação, RUNNER_FLOW_ID/CANGE_CARD_FLOW_ID do ambiente são usados como default)."
-          );
+          throw new CangeCliUsageError(FLOW_FROM_CARD_HINT);
         }
         options.flowId = flowId;
         if (!options.cardId && !options.cardIds) {

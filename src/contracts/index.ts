@@ -68,6 +68,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     buildRegisterCreationTemplate: payloadBuilder.buildRegisterCreationTemplate,
     validateValuesAgainstFields: payloadBuilder.validateValuesAgainstFields,
     getCard: cards.getCard,
+    locateCard: cards.locateCard,
     listCardsByFlow: cards.listCardsByFlow,
     fetchFlowCards: flowCards.fetchFlowCards,
     resolveQueryEngine: flowCards.resolveQueryEngine,

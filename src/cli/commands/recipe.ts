@@ -36,7 +36,7 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
     lines: [
       "Um comando só, sem arquivo: `cange comment create --card-id <id> --text \"<texto em markdown>\"`.",
       "O grupo é `comment` e o subcomando é `create`: não existe `cange comment` sozinho nem `cange card comment`.",
-      "O fluxo do cartão vem do link do cartão ou do ambiente do run; fora dele, passe `--flow-id <id>`.",
+      "Não precisa do fluxo: sem `--flow-id`, o kit descobre pelo número do cartão (a saída mostra em `resolved`).",
       "Para avisar alguém, use `--mention` (receita `mencionar`).",
       "Avançado: `--payload <arquivo.json>` com `{ \"cardId\": <id>, \"description\": \"...\", \"mentions\": [] }` continua valendo."
     ]

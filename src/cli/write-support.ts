@@ -20,6 +20,7 @@ import {
 } from "../utils/valueResolver.js";
 
 import { envCardId, envFlowId } from "./env-defaults.js";
+import { FLOW_FROM_CARD_HINT } from "./resource-ref.js";
 
 /**
  * P5 (05/10, card #1367456): escrita em 1 passo. Toda escrita aceita valores
@@ -215,13 +216,11 @@ export function findStep(steps: FlowStepSummary[], ref: string): FlowStepSummary
   );
 }
 
-/** Fluxo do cartão: --flow-id (ou link do cartão) > ambiente do run. */
+/** Fluxo do cartão: --flow-id (ou link do cartão) > ambiente do run > GET /card/locate (já aplicado no parser). */
 export function resolveWriteFlowId(flowId: string | number | undefined): string {
   const resolved = flowId !== undefined ? String(flowId) : envFlowId();
   if (!resolved) {
-    throw new CangeCliUsageError(
-      "Informe --flow-id (ou passe o link do cartão em --card-id). No run do agente o fluxo do cartão vem do ambiente."
-    );
+    throw new CangeCliUsageError(FLOW_FROM_CARD_HINT);
   }
   return resolved;
 }
