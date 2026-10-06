@@ -7,6 +7,7 @@ import { SEARCH_SUGGESTION, editDistance, suggestForUnknownCommand } from "../sr
 import { EXIT_CODES } from "../src/cli/exit-codes.js";
 import { createProgram, runCli } from "../src/cli/index.js";
 import {
+  NO_ACCESS_LINK_HINT,
   normalizeIdOptions,
   parseCangeLink,
   parseResourceRef,
@@ -233,6 +234,43 @@ describe("CLI (fetch mockado)", () => {
     await run(["access", "request", "--register", `https://app.cange.me/register/${HASH}`, "--reason", "ler"]);
     const post = requests.find((r) => r.method === "POST");
     expect(post?.body).toEqual({ type: "register", resource_id: 7001, role: "M", reason: "ler" });
+  });
+
+  it("access request com link ou hash SEM acesso (caso real: 404 no GET por hash): manda ao catálogo, sem pedir nada", async () => {
+    // K1 (review kit#22): o recurso do pedido é, por definição, um que o agente não acessa;
+    // GET /register?hash= e GET /flow?hash= respondem 404 justamente por isso.
+    handler = (method, path) => {
+      if (method === "GET" && (path.endsWith("/register") || path.endsWith("/flow"))) {
+        return { status: 404, body: { message: "Não foi possivel encontrar o cadastro ou você não possuí acesso" } };
+      }
+      return { status: 201, body: { approval_id: 9, status: "pending", who_can_approve: [] } };
+    };
+    const cases: string[][] = [
+      ["access", "request", "--register", `https://app.cange.me/register/${HASH}`, "--reason", "ler"],
+      ["access", "request", "--flow", HASH, "--reason", "ler"]
+    ];
+    for (const args of cases) {
+      process.exitCode = undefined;
+      stderr.length = 0;
+      await run(args);
+      expect(process.exitCode, args.join(" ")).toBe(EXIT_CODES.USAGE);
+      const message = JSON.parse(stderr.join("")).message as string;
+      expect(message).toBe(NO_ACCESS_LINK_HINT);
+      expect(message).not.toContain("\n");
+      expect(message).not.toContain("—");
+    }
+    expect(requests.filter((r) => r.method === "POST")).toHaveLength(0);
+    expect(requests.some((r) => r.query.get("hash") === HASH)).toBe(true);
+  });
+
+  it("help do access request não promete hash nem link", () => {
+    const access = createProgram().commands.find((c) => c.name() === "access")!;
+    const request = access.commands.find((c) => c.name() === "request")!;
+    for (const long of ["--flow", "--register"]) {
+      const description = request.options.find((o) => o.long === long)?.description ?? "";
+      expect(description).toContain("Id numérico");
+      expect(description).not.toMatch(/hash|link/i);
+    }
   });
 
   it("catalog --search é sinônimo de --q", async () => {
