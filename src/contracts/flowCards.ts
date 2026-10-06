@@ -24,6 +24,10 @@ export interface FetchFlowCardsInput {
   pageSize?: number;
   /** Rodada 5 (V2): título real do cartão mesmo sem view (`flags.ensure_card_title`). */
   ensureCardTitle?: boolean;
+  /** C4: página seguinte (V2: cursor do back; V1: deslocamento na lista, em texto). */
+  cursor?: string;
+  /** C4: devolve `nextCursor`/`totalCount` também no V1 (o formato completo não pede). */
+  paginate?: boolean;
 }
 
 export interface FetchFlowCardsResult {
@@ -35,6 +39,8 @@ export interface FetchFlowCardsResult {
   truncated: boolean;
   totalCount?: number;
   executionStats?: FlowQueryExecutionStats;
+  /** C4: cursor da página seguinte (só quando pedido `limit` e há mais). */
+  nextCursor?: string;
 }
 
 export interface FlowCardsContracts {
@@ -128,7 +134,8 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
       searchFieldScope: input.searchFieldScope,
       pageSize: input.pageSize,
       limit: input.limit,
-      ...(input.ensureCardTitle === true ? { ensureCardTitle: true } : {})
+      ...(input.ensureCardTitle === true ? { ensureCardTitle: true } : {}),
+      ...(input.cursor !== undefined ? { startCursor: input.cursor } : {})
     });
     return {
       engine: "v2",
@@ -138,7 +145,8 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
       total: result.summaries.length,
       truncated: result.truncated,
       totalCount: result.totalCount,
-      executionStats: result.lastExecutionStats
+      executionStats: result.lastExecutionStats,
+      ...(result.nextCursor !== undefined ? { nextCursor: result.nextCursor } : {})
     };
   }
 
@@ -152,7 +160,15 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
       const step = String(input.flowStepId);
       summaries = summaries.filter((item) => String(item.currentStepId ?? item.step_id ?? "") === step);
     }
+    // C4: no V1 a lista vem inteira; o cursor é o deslocamento nela.
+    const offset = input.cursor !== undefined && /^\d+$/.test(input.cursor) ? Number(input.cursor) : 0;
+    const totalCount = summaries.length;
+    let nextCursor: string | undefined;
+    if (offset > 0) {
+      summaries = summaries.slice(offset);
+    }
     if (input.limit !== undefined) {
+      if (summaries.length > input.limit) nextCursor = String(offset + input.limit);
       summaries = summaries.slice(0, input.limit);
     }
     return {
@@ -161,7 +177,9 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
       fellBackToV1: false,
       summaries,
       total: summaries.length,
-      truncated: false
+      truncated: false,
+      ...(input.paginate ? { totalCount } : {}),
+      ...(input.paginate && nextCursor !== undefined ? { nextCursor } : {})
     };
   }
 

@@ -50,7 +50,40 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
   - `map`: campos sem o hash `name` (o `values` aceita o id numérico do campo como chave em card create,
     update-values, move, add-child (também no `linkField`) e register create/update; o kit traduz para o hash
     antes de gravar e id inexistente falha sem gravar nada; `map --full` mostra o hash).
-- Receitas sob demanda: `cange recipe <anexo|comentar|mencionar|criar-card|mover-card|gravar-campos|publicar-artefato|cadastro-por-nome>` (texto cru).
+- Receitas sob demanda: `cange recipe <anexo|comentar|mencionar|criar-card|mover-card|gravar-campos|publicar-artefato|cadastro-por-nome|contar-somar|ler-campos>` (texto cru).
+
+## Leitura menor: só o que precisa (desde 06/10/2026, card #1367459)
+
+Em produção o contexto que cresce a cada turno é 45% do custo. Pesavam: ler o cartão inteiro (e reler o mesmo cartão),
+calcular com python/jq sobre a saída do kit, ler o cadastro inteiro e repetir o `map`.
+
+- **Para contar ou somar, use `cange cards count` / `cange cards sum` (não python/jq sobre a lista).**
+  - `cange cards count --flow-id <id> [--by etapa | --by campo:"<título>"] [--where "<campo>=<valor>"]...`
+    → `{total, groups:[{key, stepId?, count}]}`.
+  - `cange cards sum --flow-id <id> --field "<título numérico>" [--by etapa | --by campo:"<título>"] [--where ...]`
+    → `{total, cards, groups:[{key, stepId?, sum}], ignored?}` (`ignored` = cartões com valor que não é número).
+  - Só cartões ATIVOS (não arquivados nem excluídos) e só os que o token enxerga. `--where` repete (todos valem),
+    `!=` nega, `etapa=<nome ou id>` filtra a etapa. Campo pelo título, id ou hash (a mesma resolução das escritas).
+  - Fonte: sem `--where` e agrupando por etapa (ou sem agrupar), o próprio back agrega (`POST /flow/v2/aggregations`,
+    o do cabeçalho do Kanban); o resto lê os cartões paginados (V2 só com os campos necessários, ou V1) e agrega no kit.
+    `truncated: true` = passou do teto (10 mil no agregador, 20 mil na leitura). `card count`/`card sum` são o mesmo.
+- **Leia só os campos que precisa com `--fields`:** `cange card read --card-id <id> --fields "Valor do Negócio,Data da ligação"`
+  (título sem diferença de maiúscula/acento, id ou hash; vale no lote `--card-ids`). Valor inteiro e legível (markdown).
+  Sem `--fields`, valor acima de 600 caracteres sai cortado com `…(cortado: use --fields "<campo>" para ler inteiro)`.
+  Para reescrever rich text, o original continua em `--field-ids <id>`. Não releia o mesmo cartão no mesmo run.
+- **Listas em páginas:** `card list` (e `cards list`), `register entries` e `my-flows` trazem 20 por padrão, com o total
+  (`totalCount` no card list, `total` nos outros) e `next` = o comando pronto da página seguinte (`--cursor`). `--limit` /
+  `--page-size` mudam o tamanho. `register entries` não traz mais o `raw` e corta valor longo em 600 caracteres.
+  `--full` mantém o formato de antes (lista inteira, com `raw`).
+- **`map` resumido:** `startFields` (formulário de criação) e `steps[{id, name, fields}]`; campo = `{id, title, type,
+  required? (só quando obrigatório), options? (rótulos, até 8) | optionsCount?, linksToFlowId?, registerId?}`. A lista
+  longa de opções está em `cange fields by-flow` / `step-form`; o `formId` de cada campo, em `map --full`.
+  Rode o `map` uma vez por run.
+- **TOON (EXPERIMENTAL, desligado por padrão):** `--format toon` (opção global) ou `CANGE_OUTPUT_FORMAT=toon` imprime as
+  LISTAS (`card list`, `register entries`, `my-flows`, `catalog`, `cards count/sum`) como tabela: escalares do envelope em
+  `chave: valor`, depois `lista[N]{campo1,campo2}:` e uma linha por item, valores separados por vírgula (com vírgula,
+  aspas ou quebra de linha, o valor vai entre aspas, escapado como JSON; objeto vira JSON). Os outros comandos e o
+  `--full` seguem em JSON. O JSON padrão não muda.
 
 ## Escrita em 1 passo (padrão desde 06/10/2026)
 

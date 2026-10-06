@@ -35,9 +35,9 @@ export const JOURNEYS: Journey[] = [
     title: "Entender o ambiente (mapa de flows, etapas, campos e vínculos)",
     when: "início de QUALQUER tarefa em que você ainda não conhece a estrutura (qual flow, quais etapas, onde cada campo vive, como os flows se relacionam)",
     steps: [
-      "cange map — devolve em UMA chamada: flows acessíveis, etapas (id/nome/form), campos (id/hash/título/tipo/obrigatório/form) e os RELACIONAMENTOS entre flows (COMBO_BOX_FLOW_FIELD) + cadastros usados.",
-      "cange map --flow-id <f> — versão enxuta de um flow só.",
-      "Com o mapa em mãos: campo com formId == formInitId é do form de CRIAÇÃO; campo com formId de uma etapa (steps[].formId) é campo de ETAPA."
+      "cange map: devolve em UMA chamada, resumido, os flows acessíveis, os campos do formulário de criação (startFields) e cada etapa (id, nome) com os campos dela (título, tipo, obrigatório, opções quando até 8, vínculo).",
+      "cange map --flow-id <f>: um flow só. Rode UMA vez por run e reaproveite (não repita o mapa).",
+      "Com o mapa em mãos: campo em startFields é do form de CRIAÇÃO; campo em steps[].fields é campo daquela ETAPA (--full traz o formId de cada um)."
     ],
     pitfall:
       "NÃO reconstrua o ambiente na unha (my-flows + flow get + fields by-flow flow a flow + tentativa-e-erro): isso queima dezenas de turnos. `cange map` substitui essa exploração inteira."
@@ -60,7 +60,8 @@ export const JOURNEYS: Journey[] = [
     title: "Ler um card e seus campos",
     when: "precisa dos valores atuais de um card",
     steps: [
-      "cange card read --flow-id <f> --card-id <c> — leitura ENXUTA: etapa atual + fieldValues legíveis (chave = field id, valor textual). Use este por PADRÃO.",
+      "cange card read --card-id <c> --fields \"<título>,<título>\": SÓ os campos que você precisa, inteiros. Prefira assim.",
+      "cange card read --flow-id <f> --card-id <c>: o cartão inteiro, enxuto (fields [{id, title, value}]; valor acima de 600 caracteres sai cortado com a dica do --fields). Já leu? Não leia de novo: use o que tem.",
       "Vários cards do MESMO flow: cange card read --flow-id <f> --card-ids <a,b,c> (até 30) — 1 comando lê o lote inteiro; NUNCA um comando por card.",
       "cange card get --flow-id <f> --card-id <c> — só quando precisar do `raw` completo (pesado: pode passar de 700 KB)."
     ],
@@ -125,7 +126,7 @@ export const JOURNEYS: Journey[] = [
     title: "Gravar campo de ETAPA sem mover o card",
     when: "precisa escrever num campo que pertence ao form de uma etapa (não ao form de criação) sem mudar o card de etapa",
     steps: [
-      "Descubra o form da etapa dona do campo: `cange map --flow-id <f>` (steps[].formId × fields[].formId).",
+      "Descubra a etapa dona do campo: `cange map --flow-id <f>` (o campo aparece em steps[].fields da etapa).",
       "cange card update-values --payload <arq.json> com { flowId, cardId, idForm: <FORM DA ETAPA>, values: {\"<hash>\": <valor>} } — o endpoint aceita qualquer form do flow.",
       "NÃO use --validate-fields neste caso: a validação client-side compara com o form de criação e daria falso UNKNOWN_FIELD."
     ],
@@ -155,6 +156,17 @@ export const JOURNEYS: Journey[] = [
     ]
   },
   {
+    id: "contar_somar",
+    title: "Contar ou somar cartões (quantos por etapa, total de um valor)",
+    when: "a tarefa pede contagem, total, soma ou distribuição de cartões de um fluxo",
+    steps: [
+      "cange cards count --flow-id <f> [--by etapa | --by campo:\"<título>\"] [--where \"<campo>=<valor>\"]: {total, groups}, só cartões ativos.",
+      "cange cards sum --flow-id <f> --field \"<título numérico>\" [--by etapa] [--where ...]: {total, cards, groups}."
+    ],
+    pitfall:
+      "NÃO liste os cartões para contar ou somar com python/jq: a lista pagina em 20 e o cálculo na mão erra e custa caro. `cards count`/`cards sum` já devolvem o número."
+  },
+  {
     id: "ler_cadastro",
     title: "Ler as entradas de um cadastro (register)",
     when: "listar registros (clientes, produtos, fornecedores…)",
@@ -168,7 +180,8 @@ export const JOURNEYS: Journey[] = [
 /** Regras de ouro — valem em quase toda interação de escrita/leitura. */
 export const GOLDEN_RULES: string[] = [
   "Comece pelo MAPA: `cange map` dá flows + etapas + campos + vínculos em 1 chamada — não reconstrua o ambiente na unha.",
-  "Ler card: `cange card read` (enxuto) por padrão; `card get` (com raw pesado) só quando precisar da estrutura crua.",
+  "Ler card: `cange card read --fields \"<títulos>\"` com só os campos que precisa (ou `card read` inteiro, enxuto); `card get` (com raw pesado) só quando precisar da estrutura crua. Não releia o mesmo cartão sem motivo.",
+  "Contar ou somar: `cange cards count` / `cange cards sum` (não python/jq sobre a lista). Listas vêm em páginas de 20 com `total` e `next`.",
   "Toda MUTAÇÃO (comment/update/move/add-child) usa `--payload <arquivo.json>` — caminho de ARQUIVO, NUNCA JSON inline. Leitura usa flags diretas.",
   "Em `values`, a chave é o `id`/`name` do field (de `fields by-flow`/`step-form`), e o valor de um campo de opção é o CÓDIGO (`value`), não o texto.",
   "Ler texto de campo: use `valueString`; `value` costuma ser só o código da opção.",

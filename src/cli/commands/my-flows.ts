@@ -1,7 +1,9 @@
 import type { Command } from "commander";
 
 import { extractArray } from "../../contracts/raw-adapters.js";
+import { CangeCliUsageError } from "../../client/errors.js";
 import { dropEmpty } from "../../utils/lean.js";
+import { listOutput } from "../../utils/toon.js";
 import { createCommandAction } from "../context.js";
 import { addSearchSynonyms } from "../helpers.js";
 
@@ -23,6 +25,19 @@ function numberOrUndefined(value: unknown): number | undefined {
 
 interface MyFlowsOptions {
   name?: string;
+  limit?: string;
+  cursor?: string;
+}
+
+/** C4: página padrão do enxuto. Com `--name` o filtro vale para todos antes de paginar. */
+export const MY_FLOWS_DEFAULT_LIMIT = 20;
+
+function positiveInt(value: string | undefined, flag: string): number | undefined {
+  if (value === undefined) return undefined;
+  if (!/^\d+$/.test(value.trim()) || Number(value) <= 0) {
+    throw new CangeCliUsageError(`${flag} deve ser um inteiro positivo.`);
+  }
+  return Number(value);
 }
 
 export function registerMyFlowsCommand(program: Command): void {
@@ -32,6 +47,8 @@ export function registerMyFlowsCommand(program: Command): void {
       "Lista os flows disponíveis para o usuário autenticado (enxuto: [{id, title, formInitId, totalCards, access}]; --full traz o raw)"
     )
     .option("--name <texto>", "Filtra pelo nome do fluxo (--q e --search são sinônimos)")
+    .option("--limit <n>", `Fluxos por página (enxuto: padrão ${MY_FLOWS_DEFAULT_LIMIT})`)
+    .option("--cursor <n>", "Página seguinte: o `--cursor` que veio em `next`")
     .action(
       createCommandAction(async ({ kit, profile }, options: MyFlowsOptions) => {
         const result = await kit.contracts.getMyFlows();
@@ -64,7 +81,23 @@ export function registerMyFlowsCommand(program: Command): void {
             };
           })
           .filter((_summary, index) => keep[index]);
-        return dropEmpty({ summaries, total: summaries.length });
+        // C4: página de 20 com o total e o comando da página seguinte.
+        const limit = positiveInt(options.limit, "--limit") ?? MY_FLOWS_DEFAULT_LIMIT;
+        if (options.cursor !== undefined && !/^\d+$/.test(options.cursor.trim())) {
+          throw new CangeCliUsageError("--cursor deve ser o número que veio em `next`.");
+        }
+        const offset = options.cursor !== undefined ? Number(options.cursor) : 0;
+        const page = summaries.slice(offset, offset + limit);
+        const next =
+          offset + limit < summaries.length
+            ? [
+                "cange my-flows",
+                ...(options.name ? [`--name ${JSON.stringify(options.name)}`] : []),
+                ...(options.limit ? [`--limit ${limit}`] : []),
+                `--cursor ${offset + limit}`
+              ].join(" ")
+            : undefined;
+        return listOutput(dropEmpty({ summaries: page, total: summaries.length, next }), "summaries");
       })
     );
   addSearchSynonyms(command, "name", ["q", "search"]);

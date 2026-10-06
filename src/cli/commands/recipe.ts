@@ -110,6 +110,28 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
       "4) 404 ou \"sem acesso\": `cange catalog --type register --q <nome do cadastro>` e, com access \"não\",",
       "   `cange access request --register <id> --reason \"<para que precisa>\"`. Não existe `cange search`."
     ]
+  },
+  "contar-somar": {
+    title: "Contar ou somar cartões de um fluxo (sem python)",
+    lines: [
+      "Contar: `cange cards count --flow-id <id> [--by etapa | --by campo:\"<título>\"] [--where \"<campo>=<valor>\"]`.",
+      "Somar: `cange cards sum --flow-id <id> --field \"<título do campo numérico>\" [--by etapa] [--where ...]`.",
+      "- Saída: `{total, groups:[{key, count}]}` (no sum: `{total, cards, groups:[{key, sum}]}`). Só cartões ativos (não arquivados",
+      "  nem excluídos) e só os que você enxerga.",
+      "- `--where` repete (todos valem): `--where \"Prioridade=Alta\" --where \"etapa=Em execução\"`; `!=` nega; valor vazio = `(vazio)`.",
+      "- Campo pelo título (sem diferença de maiúscula ou acento), id ou hash; título repetido = erro com os ids (use o id).",
+      "NÃO liste os cartões para contar ou somar com python/jq: a lista vem em páginas de 20 e o cálculo na mão erra e custa caro."
+    ]
+  },
+  "ler-campos": {
+    title: "Ler só os campos que precisa de um cartão",
+    lines: [
+      "`cange card read --card-id <id> --fields \"Valor do Negócio,Data da ligação\"`: só esses campos, com o valor inteiro e legível.",
+      "- Campo pelo título (sem diferença de maiúscula ou acento), id ou hash, separados por vírgula. Vale no lote (`--card-ids`).",
+      "- Sem `--fields` vem o cartão inteiro e valor acima de 600 caracteres sai cortado com a dica `use --fields \"<campo>\"`.",
+      "- Para REESCREVER um rich text, leia o original (HTML) com `--field-ids <id>`; o `--fields` devolve markdown.",
+      "- Já leu o cartão neste run? Use o que tem; não leia de novo sem motivo (cada leitura volta ao contexto em todo turno)."
+    ]
   }
 });
 

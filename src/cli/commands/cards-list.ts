@@ -6,6 +6,7 @@ import { extractFlowSteps } from "../../contracts/payload-builder.js";
 import type { CardSummary } from "../../contracts/types.js";
 import type { CangeAgentKit } from "../../index.js";
 import { dropEmpty } from "../../utils/lean.js";
+import { listOutput } from "../../utils/toon.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { addSearchSynonyms, parseOptionalBoolean } from "../helpers.js";
@@ -21,6 +22,22 @@ interface CardsListOptions {
   engine?: string;
   viewId?: string;
   search?: string;
+  cursor?: string;
+}
+
+/** C4: página padrão do enxuto (antes vinham todos os cartões do fluxo). */
+export const CARD_LIST_DEFAULT_LIMIT = 20;
+
+/** Comando pronto da página seguinte (o agente copia, não monta). */
+function nextPageCommand(options: CardsListOptions, cursor: string): string {
+  const parts = ["cange card list", `--flow-id ${options.flowId}`];
+  if (options.stepId) parts.push(`--step-id ${options.stepId}`);
+  if (options.viewId) parts.push(`--view-id ${options.viewId}`);
+  if (options.search) parts.push(`--search ${JSON.stringify(options.search)}`);
+  if (options.archived) parts.push(`--archived ${options.archived}`);
+  if (options.limit) parts.push(`--limit ${options.limit}`);
+  parts.push(`--cursor ${cursor}`);
+  return parts.join(" ");
 }
 
 function parseEngine(value: string | undefined): FlowQueryEngineChoice {
@@ -58,13 +75,17 @@ export function registerCardsListCommand(cardCommand: Command): void {
     .option("--step-id <id>", "Filtra cartões por etapa atual")
     .option("--view-id <id>", "ID de uma visualização salva (aplica filtros/colunas/ordenação dela)")
     .option("--engine <engine>", "Motor de query: auto (default) | v1 | v2", "auto")
-    .option("--limit <n>", "Limita quantidade de cartões retornados")
+    .option(
+      "--limit <n>",
+      `Cartões por página (enxuto: padrão ${CARD_LIST_DEFAULT_LIMIT}; --full: todos). Para CONTAR ou SOMAR use \`cange cards count\`/\`cards sum\`, não a lista`
+    )
+    .option("--cursor <cursor>", "Página seguinte: o `--cursor` que veio em `next` na chamada anterior")
     .option("--search <texto>", "Busca textual em todos os campos do fluxo (motor V2; --q é sinônimo)")
     .action(
       createCommandAction(async ({ kit, profile }, options: CardsListOptions) => {
         const lean = profile === "lean";
         const engine = parseEngine(options.engine);
-        const limit = parseLimit(options.limit);
+        const limit = parseLimit(options.limit) ?? (lean ? CARD_LIST_DEFAULT_LIMIT : undefined);
         const isArchived = parseOptionalBoolean(options.archived);
         const withPreAnswer = parseOptionalBoolean(options.withPreAnswer);
         const withTimeTracking = parseOptionalBoolean(options.withTimeTracking);
@@ -93,17 +114,29 @@ export function registerCardsListCommand(cardCommand: Command): void {
               (item) => String(item.currentStepId ?? item.step_id ?? "") === options.stepId
             );
           }
+          const matched = summaries.length;
+          const offset = lean && options.cursor && /^\d+$/.test(options.cursor) ? Number(options.cursor) : 0;
+          if (offset > 0) {
+            summaries = summaries.slice(offset);
+          }
+          let nextCursor: string | undefined;
           if (limit !== undefined) {
+            if (summaries.length > limit) nextCursor = String(offset + limit);
             summaries = summaries.slice(0, limit);
           }
 
           if (lean) {
-            return dropEmpty({
-              engine: "v1",
-              flowId: Number(options.flowId),
-              total: summaries.length,
-              summaries: await leanCardSummaries(kit, options.flowId, summaries)
-            });
+            return listOutput(
+              dropEmpty({
+                engine: "v1",
+                flowId: Number(options.flowId),
+                total: summaries.length,
+                totalCount: matched,
+                next: nextCursor ? nextPageCommand(options, nextCursor) : undefined,
+                summaries: await leanCardSummaries(kit, options.flowId, summaries)
+              }),
+              "summaries"
+            );
           }
           return { engine: "v1", raw: result.raw, summaries, total: summaries.length };
         }
@@ -118,18 +151,23 @@ export function registerCardsListCommand(cardCommand: Command): void {
           isArchived,
           limit,
           // Rodada 5: título real (sem view o V2 devolvia "(Sem título)").
-          ...(lean ? { ensureCardTitle: true } : {})
+          ...(lean ? { ensureCardTitle: true, paginate: true } : {}),
+          ...(lean && options.cursor ? { cursor: options.cursor } : {})
         });
 
         if (lean) {
-          return dropEmpty({
-            engine: result.engine,
-            flowId: Number(options.flowId),
-            total: result.total,
-            totalCount: result.totalCount,
-            truncated: result.truncated,
-            summaries: await leanCardSummaries(kit, options.flowId, result.summaries)
-          });
+          return listOutput(
+            dropEmpty({
+              engine: result.engine,
+              flowId: Number(options.flowId),
+              total: result.total,
+              totalCount: result.totalCount,
+              truncated: result.truncated,
+              next: result.nextCursor ? nextPageCommand(options, result.nextCursor) : undefined,
+              summaries: await leanCardSummaries(kit, options.flowId, result.summaries)
+            }),
+            "summaries"
+          );
         }
         return {
           engine: result.engine,
@@ -147,7 +185,7 @@ export function registerCardsListCommand(cardCommand: Command): void {
 
   annotateCommand(command, {
     envelope:
-      "Enxuto (padrão): { engine, flowId, total, totalCount, truncated, summaries[{cardId, title (real), currentStepId, stepName, responsibleUserId, responsibleName, dueDate, completedAt, complete, archived}] }. " +
+      `Enxuto (padrão): ${CARD_LIST_DEFAULT_LIMIT} por página: { engine, flowId, total (nesta página), totalCount (todos que casam), truncated, next? (comando pronto da página seguinte, com --cursor), summaries[{cardId, title (real), currentStepId, stepName, responsibleUserId, responsibleName, dueDate, completedAt, complete, archived}] }. ` +
       "Com --full, V2: { engine, total, totalCount, truncated, summaries[], executionStats }; " +
       "V1 (com --with-*): { engine, raw, summaries[], total }",
     fieldsLocation:

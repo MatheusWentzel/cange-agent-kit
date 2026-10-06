@@ -2,6 +2,24 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-10-06
+
+### Leitura menor (card #1367459, C4): `cards count/sum`, `card read --fields`, listas paginadas, `map` resumido, TOON
+
+- **Novos:** `cange cards count --flow-id N [--by etapa|campo:"<título>"] [--where "<campo>=<valor>"]` e
+  `cange cards sum --flow-id N --field "<título>" [--by ...] [--where ...]` → `{total, groups}` (só ativos, com o acesso
+  do token). Substituem listar + python/jq. Também como `card count` / `card sum`; `cards list` = `card list`.
+- **`card read --fields "<títulos, ids ou hashes>"`:** só esses campos, inteiros. Sem `--fields`, valor acima de 600
+  caracteres sai cortado com a dica (antes: 2.000).
+- **Listas (enxuto):** `card list`, `register entries` e `my-flows` em páginas de 20 com total e `next` (comando pronto
+  com `--cursor`). `register entries` sem `raw`. `--full` igual a antes.
+- **`map` (enxuto):** campos agrupados em `startFields` e `steps[].fields`, sem `formId` por campo, `required` só quando
+  obrigatório, opções em linha até 8 (`optionsCount` acima). Playbook que lia `flows[].fields[].formId` passa a ler os
+  grupos (ou usa `map --full`).
+- **TOON experimental:** `--format toon` / `CANGE_OUTPUT_FORMAT=toon` nas listas. Desligado por padrão.
+- Medido nos fixtures grandes do teste (`test/leitura-enxuta-c4.test.ts`): `card read` 13.742 → 6.671 caracteres;
+  `map` 7.638 → 6.422 (já com as opções curtas que antes não vinham).
+
 ## 2026-09-15
 
 ### `register create` volta a funcionar (payload agora leva `registerId`)

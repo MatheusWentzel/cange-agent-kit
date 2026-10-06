@@ -73,6 +73,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     resolveQueryEngine: flowCards.resolveQueryEngine,
     queryFlowV2: flowQuery.queryFlowV2,
     queryFlowV2All: flowQuery.queryFlowV2All,
+    aggregateFlowV2: flowQuery.aggregateFlowV2,
     getQueryEngineStatus: flowQuery.getQueryEngineStatus,
     listFlowViews: flowViews.listFlowViews,
     getFlowView: flowViews.getFlowView,

@@ -5,6 +5,7 @@ import { authenticateKit, createCangeAgentKit, type CangeAgentKit } from "../ind
 import { loadEnv } from "../utils/env.js";
 import { resolveOutputProfile, type OutputProfile } from "../utils/lean.js";
 import { createCliPrinter, type CliPrinter, type OutputMode } from "../utils/output.js";
+import { encodeToon, ListOutput, resolveOutputFormat, type OutputFormat } from "../utils/toon.js";
 
 import { EXIT_CODES, exitCodeForError, type ExitCode } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
@@ -19,6 +20,11 @@ export interface CliCommandContext {
    * (`--full` ou CANGE_OUTPUT_PROFILE=full).
    */
   profile: OutputProfile;
+  /**
+   * C4 (experimental): `toon` imprime as saídas de LISTA (as que o comando devolve
+   * com `listOutput`) como tabela de texto. Padrão `json`; `--full` ignora o TOON.
+   */
+  format: OutputFormat;
   ensureAuth: () => Promise<{ token: string; source: "access-token-env" | "session-login"; raw?: unknown }>;
 }
 
@@ -69,7 +75,7 @@ export function createCommandAction<TArgs extends unknown[]>(
       const output = await handler(ctx, ...args);
       if (output instanceof CliOutcome) {
         if (output.value !== undefined) {
-          ctx.printer.print(output.value);
+          printOutput(ctx, output.value);
         }
         if (output.exitCode !== EXIT_CODES.SUCCESS) {
           process.exitCode = output.exitCode;
@@ -77,13 +83,29 @@ export function createCommandAction<TArgs extends unknown[]>(
         return;
       }
       if (output !== undefined) {
-        ctx.printer.print(output);
+        printOutput(ctx, output);
       }
     } catch (error) {
       ctx.printer.printError(error);
       process.exitCode = exitCodeForError(error);
     }
   };
+}
+
+/**
+ * Lista declarada (`listOutput`): TOON só com `--format toon` no perfil enxuto; no
+ * resto, o envelope sai como JSON, igual a antes.
+ */
+function printOutput(ctx: CliCommandContext, value: unknown): void {
+  if (value instanceof ListOutput) {
+    if (ctx.format === "toon" && ctx.profile === "lean") {
+      process.stdout.write(`${encodeToon(value)}\n`);
+      return;
+    }
+    ctx.printer.print(value.envelope);
+    return;
+  }
+  ctx.printer.print(value);
 }
 
 /**
@@ -109,10 +131,11 @@ async function createContext(command: Command): Promise<CliCommandContext> {
   // configuram o kit). O createCangeAgentKit carregava tarde demais. O loadEnv
   // carrega uma vez por processo e não sobrescreve o ambiente de quem chamou.
   loadEnv();
-  const globalOptions = command.optsWithGlobals<{ output?: string; full?: boolean }>();
+  const globalOptions = command.optsWithGlobals<{ output?: string; full?: boolean; format?: string }>();
   // TTY-aware: sem --output/CANGE_OUTPUT, json em pipe e pretty em terminal.
   const outputMode = resolveOutputMode(globalOptions.output);
   const profile = resolveOutputProfile(globalOptions.full);
+  const format = resolveOutputFormat(globalOptions.format);
 
   const kit = createCangeAgentKit({
     configOverrides: {
@@ -127,6 +150,7 @@ async function createContext(command: Command): Promise<CliCommandContext> {
     printer,
     outputMode,
     profile,
+    format,
     ensureAuth: () => authenticateKit(kit)
   };
 }

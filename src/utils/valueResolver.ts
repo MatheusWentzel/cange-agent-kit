@@ -588,6 +588,30 @@ function findCandidates(key: string, forms: FormScope[]): FieldHit[] {
   return hits;
 }
 
+/**
+ * C4 (card #1367459): a MESMA resolução de chave das escritas (hash, id, título sem
+ * maiúscula/acento), para leitura (`card read --fields`) e agregação (`cards count/sum`).
+ * Devolve todos os campos que casam (sem prioridade): na leitura, título repetido em
+ * duas etapas traz os dois; quem precisa de um só decide com a lista.
+ */
+export function matchFieldsByKey(key: string, fields: NormalizedField[]): NormalizedField[] {
+  const form: FormScope = { formId: "*", label: "fluxo", fields, priority: 0 };
+  const seen = new Set<string>();
+  const out: NormalizedField[] = [];
+  for (const hit of findCandidates(key, [form])) {
+    const id = String(hit.field.id ?? hit.field.name);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    out.push(hit.field);
+  }
+  return out;
+}
+
+/** Títulos para a mensagem de "campo não existe" (até 15, sem repetir). */
+export function listFieldTitles(fields: NormalizedField[]): string {
+  return listTitles([{ formId: "*", label: "fluxo", fields, priority: 0 }]);
+}
+
 function pickByPriority(hits: FieldHit[]): FieldHit[] {
   // O mesmo campo (mesmo hash) visto por dois escopos conta uma vez só.
   const unique = new Map<string, FieldHit>();

@@ -38,7 +38,9 @@ export const queryFlowV2AllParamsSchema = queryFlowV2ParamsSchema
   .omit({ cursor: true })
   .extend({
     limit: z.number().int().positive().optional(),
-    maxPages: z.number().int().positive().max(200).optional()
+    maxPages: z.number().int().positive().max(200).optional(),
+    /** C4: cursor de onde começar (próxima página de uma listagem paginada). */
+    startCursor: z.string().optional()
   });
 
 export type QueryFlowV2AllParams = z.infer<typeof queryFlowV2AllParamsSchema>;

@@ -32,6 +32,7 @@ import { registerCardMoveStepCommand } from "./commands/card-move-step.js";
 import { registerCardMoveStepWithValuesCommand } from "./commands/card-move-step-with-values.js";
 import { registerCardUpdateCommand } from "./commands/card-update.js";
 import { registerCardUpdateValuesCommand } from "./commands/card-update-values.js";
+import { registerCardsAggregateCommands } from "./commands/cards-aggregate.js";
 import { registerCardsListCommand } from "./commands/cards-list.js";
 import { registerFieldsByFlowCommand } from "./commands/fields-by-flow.js";
 import { registerFieldsByRegisterCommand } from "./commands/fields-by-register.js";
@@ -79,6 +80,11 @@ export function createProgram(): Command {
       "--full",
       "Formato COMPLETO de antes (JSON indentado, campos internos e vazios); o padrão é a saída enxuta. " +
         "O mesmo que CANGE_OUTPUT_PROFILE=full"
+    )
+    .option(
+      "--format <formato>",
+      "EXPERIMENTAL: json (padrão) | toon. toon imprime as LISTAS (card list, register entries, my-flows, catalog, " +
+        "cards count/sum) como tabela: cabeçalho uma vez e uma linha por item. O mesmo que CANGE_OUTPUT_FORMAT=toon"
     );
 
   registerAuthCommand(program);
@@ -127,6 +133,14 @@ export function createProgram(): Command {
   registerCardAddLabelCommand(cardCommand);
   registerCardRelationshipCommand(cardCommand);
   registerCardAddChildCommand(cardCommand);
+  // C4 (06/10): contar e somar no kit (no lugar de python/jq sobre a lista).
+  registerCardsAggregateCommands(cardCommand);
+
+  const cardsCommand = program
+    .command("cards")
+    .description("Cartões de um fluxo: cards count (contar), cards sum (somar) e cards list (o mesmo que card list)");
+  registerCardsAggregateCommands(cardsCommand);
+  registerCardsListCommand(cardsCommand);
 
   const commentCommand = program.command("comment").description("Operações de comentário");
   registerCardCommentListCommand(commentCommand);

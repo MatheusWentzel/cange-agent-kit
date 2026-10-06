@@ -21,6 +21,7 @@ import {
   type ResourceType
 } from "../../contracts/resourceAccess.js";
 import { dropEmpty } from "../../utils/lean.js";
+import { listOutput } from "../../utils/toon.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { envChatSessionId } from "../env-defaults.js";
@@ -166,7 +167,7 @@ export function registerCatalogCommand(program: Command): void {
             note: notes.join(" ")
           };
         }
-        return dropEmpty({
+        return listOutput(dropEmpty({
           items: result.items.map((item) => ({
             id: item.id,
             name: item.name,
@@ -178,7 +179,7 @@ export function registerCatalogCommand(program: Command): void {
           truncated: result.truncated || undefined,
           anchor: result.anchor?.name ?? undefined,
           note: notes.join(" ")
-        });
+        }), "items");
       })
     );
   addSearchSynonyms(catalog, "q");
