@@ -1,3 +1,5 @@
+import { CangeError, CangeValidationError } from "../client/errors.js";
+
 import type { CardsContracts } from "./cards.js";
 import type { FlowQueryContracts } from "./flowQuery.js";
 import type { FlowsContracts } from "./flows.js";
@@ -55,6 +57,17 @@ interface FlowCardsDeps {
   flows: FlowsContracts;
   flowQuery: FlowQueryContracts;
   logger?: (message: string, context?: unknown) => void;
+}
+
+/**
+ * K3: quando a falha do V2 autoriza cair no V1. Só falha do MOTOR: rede/timeout (sem
+ * status), 5xx ou erro inesperado fora da API. 4xx é resposta de uso (401/403 acesso,
+ * 404 fluxo, 400 pedido, 429 limite): o V1 daria o mesmo erro, ou pior, uma resposta
+ * diferente sem aviso. Esses propagam.
+ */
+export function isQueryEngineFailure(error: unknown): boolean {
+  if (!(error instanceof CangeError)) return true;
+  return error.status === undefined || error.status >= 500;
 }
 
 /** Params que só o V2 sabe executar — se algum estiver presente, V1 não é opção. */
@@ -161,7 +174,7 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
       summaries = summaries.filter((item) => String(item.currentStepId ?? item.step_id ?? "") === step);
     }
     // C4: no V1 a lista vem inteira; o cursor é o deslocamento nela.
-    const offset = input.cursor !== undefined && /^\d+$/.test(input.cursor) ? Number(input.cursor) : 0;
+    const offset = parseV1Cursor(input.cursor);
     const totalCount = summaries.length;
     let nextCursor: string | undefined;
     if (offset > 0) {
@@ -177,7 +190,8 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
       fellBackToV1: false,
       summaries,
       total: summaries.length,
-      truncated: false,
+      // K5: o V1 também avisa que há mais (página do limit ou fluxo grande no back).
+      truncated: nextCursor !== undefined || result.truncated === true,
       ...(input.paginate ? { totalCount } : {}),
       ...(input.paginate && nextCursor !== undefined ? { nextCursor } : {})
     };
@@ -191,7 +205,9 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
       try {
         return await fetchViaV2(input);
       } catch (error) {
-        if (mustUseV2 || input.engine === "v2") {
+        // K2: com cursor, o V1 não continua a página do V2 (o cursor do V2 não é
+        // deslocamento): cair no V1 recomeçaria do zero e o agente releria em laço.
+        if (mustUseV2 || input.engine === "v2" || input.cursor !== undefined || !isQueryEngineFailure(error)) {
           throw error;
         }
         logger?.("Query V2 falhou; caindo para V1.", error);
@@ -204,4 +220,16 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
   }
 
   return { resolveQueryEngine, fetchFlowCards };
+}
+
+/** K2: cursor do V1 é o deslocamento na lista (número). Outro texto é cursor de outro motor. */
+export function parseV1Cursor(cursor: string | undefined): number {
+  if (cursor === undefined) return 0;
+  if (!/^\d+$/.test(cursor)) {
+    throw new CangeValidationError(
+      `--cursor "${cursor}" não é deste motor: no V1 o cursor é um número (deslocamento). ` +
+        "Use o `next` que veio na resposta anterior, sem trocar o --engine entre as páginas."
+    );
+  }
+  return Number(cursor);
 }

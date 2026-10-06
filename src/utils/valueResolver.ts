@@ -181,6 +181,38 @@ export function parseLocaleNumber(raw: string): ParseOutcome<number> {
   return { ok: true, value: sign * value };
 }
 
+/**
+ * K4: número LIDO do banco (`value` de campo número/moeda/fórmula), não digitado por
+ * gente. Espelha o `parseNumber` do back (CardFieldSnapshotService), o mesmo que
+ * alimenta o `value_number` que o agregador do V2 soma. Assim a soma do V1 bate com a
+ * do V2: separador sozinho é decimal ("1.500" = 1,5; "12,345" = 12,345); com os dois,
+ * o último é o decimal ("1.234,56", "1,234.56"). Nunca "ambíguo": o banco tem um
+ * formato só. Para entrada do usuário use `parseLocaleNumber`.
+ */
+export function parseStoredNumber(raw: string | number): number | undefined {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : undefined;
+  let cleaned = raw.replace(/[R$\s]/g, "");
+  if (cleaned === "") return undefined;
+  const isPercent = /\d%$/.test(cleaned);
+  if (isPercent) cleaned = cleaned.slice(0, -1);
+  const hasComma = cleaned.includes(",");
+  const hasDot = cleaned.includes(".");
+  if (hasComma && hasDot) {
+    cleaned =
+      cleaned.lastIndexOf(",") > cleaned.lastIndexOf(".")
+        ? cleaned.replace(/\./g, "").replace(",", ".")
+        : cleaned.replace(/,/g, "");
+  } else if (hasComma) {
+    cleaned = cleaned.replace(/,/g, ".");
+  }
+  // Texto que não é número inteiro (ex.: "abc", "12abc") fica de fora, ao contrário
+  // do parseFloat do back, que aceitaria o prefixo: aqui ele vira `ignored` na soma.
+  if (!/^[+-]?(\d+\.?\d*|\.\d+)(e[+-]?\d+)?$/i.test(cleaned)) return undefined;
+  const value = Number(cleaned);
+  if (!Number.isFinite(value)) return undefined;
+  return isPercent ? value / 100 : value;
+}
+
 // ---------------------------------------------------------------------------
 // Data
 // ---------------------------------------------------------------------------

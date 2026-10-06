@@ -53,6 +53,12 @@ beforeEach(() => {
       });
     }
     const payload = handler ? handler(body, url.searchParams) : routes[key];
+    // Resposta de erro: `{ __status: 429, message }` (o resto vira o corpo).
+    const record = payload && typeof payload === "object" ? (payload as Record<string, unknown>) : undefined;
+    if (record && typeof record.__status === "number") {
+      const { __status, ...rest } = record;
+      return new Response(JSON.stringify(rest), { status: __status, headers: { "content-type": "application/json" } });
+    }
     return new Response(JSON.stringify(payload), { status: 200, headers: { "content-type": "application/json" } });
   });
 });
@@ -562,5 +568,172 @@ describe("tamanho da saída padrão (fixture grande)", () => {
     const all = await run(["card", "read", "--flow-id", "316", "--card-id", "1001"]);
     const two = await run(["card", "read", "--flow-id", "316", "--card-id", "1001", "--fields", "Campo 0 Informação,Campo 2 Informação"]);
     expect(two.length).toBeLessThan(all.length / 10);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3ª revisão da F2c (K1 a K5): continuar a página, não cair no V1 à toa, soma do banco
+// ---------------------------------------------------------------------------
+
+function v1Card(id: number, step: number, value?: string): Record<string, unknown> {
+  return {
+    id_card: id,
+    flow_id: 316,
+    flow_step_id: step,
+    title: `Cartão ${id}`,
+    form_answers:
+      value === undefined ? [] : [{ form_answer_fields: [{ field_id: 12, value, deleted: "N" }] }]
+  };
+}
+
+describe("F2c revisão 3: paginação e fallback V2→V1", () => {
+  beforeEach(() => {
+    routes["GET /flow"] = FLOW;
+    routes["GET /field/by-flow"] = FIELDS;
+  });
+
+  it("K1: --limit 700 pede 500 + 200 e devolve o cursor que continua (sem corte no meio da página)", async () => {
+    handlers["POST /flow/v2/query"] = (body) => {
+      const size = Number(body?.page_size);
+      const start = body?.cursor === undefined ? 0 : 500;
+      return {
+        items: Array.from({ length: size }, (_, i) => v2Item(start + i + 1, 485, {})),
+        page_info: { has_more: true, next_cursor: body?.cursor === undefined ? "c1" : "c2" }
+      };
+    };
+    const out = await runJson(["card", "list", "--flow-id", "316", "--engine", "v2", "--limit", "700"]);
+    const sizes = requests.filter((request) => request.path === "/flow/v2/query").map((request) => request.body?.page_size);
+    expect(sizes).toEqual([500, 200]);
+    expect(out.total).toBe(700);
+    expect(out.truncated).toBe(true);
+    expect(out.next).toBe("cange card list --flow-id 316 --limit 700 --cursor c2");
+  });
+
+  it("K2: motor auto com --cursor e V2 em falha NÃO cai no V1 (propaga o erro)", async () => {
+    routes["GET /flow/v2/query-engine-status"] = { enabled: true };
+    routes["POST /flow/v2/query"] = { __status: 500, message: "boom" };
+    routes["GET /card/by-flow/"] = [v1Card(1, 485)];
+    await run(["card", "list", "--flow-id", "316", "--cursor", "eyJpZCI6MX0="]);
+    expect(process.exitCode).toBeTruthy();
+    expect(requests.some((request) => request.path === "/card/by-flow/")).toBe(false);
+  });
+
+  it("K2: sem cursor, falha do motor cai no V1 e o next da página do V1 fixa --engine v1", async () => {
+    routes["GET /flow/v2/query-engine-status"] = { enabled: true };
+    routes["POST /flow/v2/query"] = { __status: 503, message: "fora" };
+    routes["GET /card/by-flow/"] = Array.from({ length: 25 }, (_, i) => v1Card(i + 1, 485));
+    const out = await runJson(["card", "list", "--flow-id", "316"]);
+    expect(out.engine).toBe("v1");
+    expect(out.next).toBe("cange card list --flow-id 316 --engine v1 --cursor 20");
+  });
+
+  it("K2: cursor que não é número no V1 é erro de uso (exit 2), não recomeça do zero", async () => {
+    routes["GET /card/by-flow/"] = Array.from({ length: 25 }, (_, i) => v1Card(i + 1, 485));
+    await run(["card", "list", "--flow-id", "316", "--engine", "v1", "--cursor", "eyJpZCI6MX0="]);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(stderr.join("")).toContain("não é deste motor");
+    process.exitCode = undefined;
+    await run(["card", "list", "--flow-id", "316", "--with-pre-answer", "true", "--cursor", "abc"]);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+  });
+
+  it("K2: falha de uso do V2 (403) também não cai no V1 em card list", async () => {
+    routes["GET /flow/v2/query-engine-status"] = { enabled: true };
+    routes["POST /flow/v2/query"] = { __status: 403, message: "Flow sem acesso" };
+    routes["GET /card/by-flow/"] = [v1Card(1, 485)];
+    await run(["card", "list", "--flow-id", "316"]);
+    expect(process.exitCode).toBeTruthy();
+    expect(requests.some((request) => request.path === "/card/by-flow/")).toBe(false);
+  });
+
+  it.each([401, 403, 429, 400])("K3: cards count com V2 em %i propaga, sem cair no /card/by-flow", async (status) => {
+    routes["GET /flow/v2/query-engine-status"] = { enabled: true };
+    routes["POST /flow/v2/query"] = { __status: status, message: "recusado" };
+    routes["GET /card/by-flow/"] = [v1Card(1, 485)];
+    await run(["cards", "count", "--flow-id", "316", "--where", "Prioridade=Alta"]);
+    expect(process.exitCode).toBeTruthy();
+    expect(requests.some((request) => request.path === "/card/by-flow/")).toBe(false);
+  });
+
+  it("K3: agregador em 429 propaga (não vira leitura paginada)", async () => {
+    routes["GET /flow/v2/query-engine-status"] = { enabled: true };
+    routes["POST /flow/v2/aggregations"] = { __status: 429, message: "limite" };
+    routes["POST /flow/v2/query"] = { items: V2_ITEMS, page_info: { has_more: false } };
+    await run(["cards", "count", "--flow-id", "316", "--by", "etapa"]);
+    expect(process.exitCode).toBeTruthy();
+    expect(requests.some((request) => request.path === "/flow/v2/query")).toBe(false);
+  });
+
+  it("K3: falha do motor (500) cai no V1; fluxo grande no V1 sai truncated:true", async () => {
+    routes["GET /flow/v2/query-engine-status"] = { enabled: true };
+    routes["POST /flow/v2/query"] = { __status: 500, message: "boom" };
+    routes["GET /card/by-flow/"] = {
+      mode: "largeData",
+      cursorKey: "k",
+      totalIds: 300,
+      pageSize: 150,
+      offset: 3,
+      ids: [1, 2, 3],
+      cards: [v1Card(1, 485), v1Card(2, 486), v1Card(3, 486)]
+    };
+    const out = await runJson(["cards", "count", "--flow-id", "316", "--where", "etapa=486"]);
+    expect(out).toEqual({ total: 2, truncated: true });
+  });
+});
+
+describe("F2c revisão 3: soma com o número do banco (K4)", () => {
+  beforeEach(() => {
+    routes["GET /flow"] = FLOW;
+    routes["GET /field/by-flow"] = FIELDS;
+    routes["GET /flow/v2/query-engine-status"] = { enabled: false };
+  });
+
+  it("K4: no V1, '1.500' e '12,345' do banco entram na soma (1,5 e 12,345), sem 'ambíguo'", async () => {
+    routes["GET /card/by-flow/"] = [
+      v1Card(1, 485, "1.500"),
+      v1Card(2, 485, "12,345"),
+      v1Card(3, 486, "1.234,56"),
+      v1Card(4, 486, "2500"),
+      v1Card(5, 486, "a combinar")
+    ];
+    const out = await runJson(["cards", "sum", "--flow-id", "316", "--field", "Valor do Negócio"]);
+    expect(out).toEqual({ total: 3748.405, cards: 5, ignored: 1 });
+  });
+
+  it("K4: parseStoredNumber espelha o back; parseLocaleNumber (entrada humana) segue recusando o ambíguo", async () => {
+    const { parseLocaleNumber, parseStoredNumber } = await import("../src/utils/valueResolver.js");
+    expect(parseStoredNumber("1.500")).toBe(1.5);
+    expect(parseStoredNumber("12,345")).toBe(12.345);
+    expect(parseStoredNumber("1.234,56")).toBe(1234.56);
+    expect(parseStoredNumber("1,234.56")).toBe(1234.56);
+    expect(parseStoredNumber("R$ 2.000,00")).toBe(2000);
+    expect(parseStoredNumber("-3.5")).toBe(-3.5);
+    expect(parseStoredNumber("15%")).toBe(0.15);
+    expect(parseStoredNumber(42)).toBe(42);
+    expect(parseStoredNumber("a combinar")).toBeUndefined();
+    expect(parseStoredNumber("")).toBeUndefined();
+    expect(parseLocaleNumber("1.500").ok).toBe(false);
+  });
+});
+
+describe("F2c revisão 3: truncated também no V1 (K5)", () => {
+  beforeEach(() => {
+    routes["GET /flow"] = FLOW;
+  });
+
+  it("K5: card list --engine v1 com mais de 20 traz truncated:true; com menos, false", async () => {
+    routes["GET /card/by-flow/"] = Array.from({ length: 25 }, (_, i) => v1Card(i + 1, 485));
+    const out = await runJson(["card", "list", "--flow-id", "316", "--engine", "v1"]);
+    expect(out).toMatchObject({ engine: "v1", total: 20, totalCount: 25, truncated: true });
+    const last = await runJson(["card", "list", "--flow-id", "316", "--engine", "v1", "--cursor", "20"]);
+    expect(last).toMatchObject({ total: 5, truncated: false });
+    expect(last.next).toBeUndefined();
+  });
+
+  it("K5: caminho legado (--with-pre-answer) também traz truncated e o next com os mesmos --with-*", async () => {
+    routes["GET /card/by-flow/"] = Array.from({ length: 25 }, (_, i) => v1Card(i + 1, 485));
+    const out = await runJson(["card", "list", "--flow-id", "316", "--with-pre-answer", "true"]);
+    expect(out).toMatchObject({ engine: "v1", total: 20, truncated: true });
+    expect(out.next).toBe("cange card list --flow-id 316 --engine v1 --with-pre-answer true --cursor 20");
   });
 });

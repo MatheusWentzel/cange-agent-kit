@@ -14,7 +14,7 @@ import {
 } from "../schemas/cards.js";
 import { toNumber } from "../schemas/common.js";
 
-import { extractArray, summarizeCard } from "./raw-adapters.js";
+import { extractArray, extractCardsByFlow, summarizeCard } from "./raw-adapters.js";
 import type { CardSummary } from "./types.js";
 
 export interface CardsContracts {
@@ -28,7 +28,12 @@ export interface CardsContracts {
     isArchived?: boolean;
     isWithPreAnswer?: boolean;
     isWithTimeTracking?: boolean;
-  }) => Promise<{ raw: unknown; summaries: CardSummary[] }>;
+  }) => Promise<{
+    raw: unknown;
+    summaries: CardSummary[];
+    /** Fluxo grande: o back mandou só a primeira página (há mais cartões que estes). */
+    truncated?: boolean;
+  }>;
   createCard: (input: {
     idForm: number;
     flowId: number;
@@ -219,9 +224,11 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
           isWithTimeTracking: parsed.data.isWithTimeTracking
         }
       });
+      const { cards, truncated } = extractCardsByFlow(raw);
       return {
         raw,
-        summaries: extractArray(raw).map((item) => summarizeCard(item))
+        summaries: cards.map((item) => summarizeCard(item)),
+        truncated
       };
     },
 

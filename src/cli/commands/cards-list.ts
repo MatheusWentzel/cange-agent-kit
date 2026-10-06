@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 
 import { CangeCliUsageError } from "../../client/errors.js";
-import type { FlowQueryEngineChoice } from "../../contracts/flowCards.js";
+import { parseV1Cursor, type FlowQueryEngineChoice } from "../../contracts/flowCards.js";
 import { extractFlowSteps } from "../../contracts/payload-builder.js";
 import type { CardSummary } from "../../contracts/types.js";
 import type { CangeAgentKit } from "../../index.js";
@@ -28,9 +28,16 @@ interface CardsListOptions {
 /** C4: página padrão do enxuto (antes vinham todos os cartões do fluxo). */
 export const CARD_LIST_DEFAULT_LIMIT = 20;
 
-/** Comando pronto da página seguinte (o agente copia, não monta). */
-function nextPageCommand(options: CardsListOptions, cursor: string): string {
+/**
+ * Comando pronto da página seguinte (o agente copia, não monta). Página do V1 leva
+ * `--engine v1` e os `--with-*`: o cursor dela é deslocamento e não serve ao V2 (K2).
+ */
+function nextPageCommand(options: CardsListOptions, cursor: string, engine?: string): string {
   const parts = ["cange card list", `--flow-id ${options.flowId}`];
+  if (engine === "v1") parts.push("--engine v1");
+  if (options.withPreAnswer) parts.push(`--with-pre-answer ${options.withPreAnswer}`);
+  if (options.withTimeTracking) parts.push(`--with-time-tracking ${options.withTimeTracking}`);
+  if (options.testModel) parts.push(`--test-model ${options.testModel}`);
   if (options.stepId) parts.push(`--step-id ${options.stepId}`);
   if (options.viewId) parts.push(`--view-id ${options.viewId}`);
   if (options.search) parts.push(`--search ${JSON.stringify(options.search)}`);
@@ -115,7 +122,7 @@ export function registerCardsListCommand(cardCommand: Command): void {
             );
           }
           const matched = summaries.length;
-          const offset = lean && options.cursor && /^\d+$/.test(options.cursor) ? Number(options.cursor) : 0;
+          const offset = lean ? parseV1Cursor(options.cursor) : 0;
           if (offset > 0) {
             summaries = summaries.slice(offset);
           }
@@ -132,7 +139,9 @@ export function registerCardsListCommand(cardCommand: Command): void {
                 flowId: Number(options.flowId),
                 total: summaries.length,
                 totalCount: matched,
-                next: nextCursor ? nextPageCommand(options, nextCursor) : undefined,
+                // K5: igual ao V2, o V1 diz que há mais além do `next`.
+                truncated: nextCursor !== undefined || result.truncated === true,
+                next: nextCursor ? nextPageCommand(options, nextCursor, "v1") : undefined,
                 summaries: await leanCardSummaries(kit, options.flowId, summaries)
               }),
               "summaries"
@@ -163,7 +172,7 @@ export function registerCardsListCommand(cardCommand: Command): void {
               total: result.total,
               totalCount: result.totalCount,
               truncated: result.truncated,
-              next: result.nextCursor ? nextPageCommand(options, result.nextCursor) : undefined,
+              next: result.nextCursor ? nextPageCommand(options, result.nextCursor, result.engine) : undefined,
               summaries: await leanCardSummaries(kit, options.flowId, result.summaries)
             }),
             "summaries"

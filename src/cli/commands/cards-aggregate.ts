@@ -1,14 +1,21 @@
 import type { Command } from "commander";
 
-import { CangeCliUsageError } from "../../client/errors.js";
+import { CangeCliUsageError, CangeError } from "../../client/errors.js";
+import { isQueryEngineFailure } from "../../contracts/flowCards.js";
 import type { FlowAggregationItem } from "../../contracts/flowQuery.js";
 import { extractFlowSteps } from "../../contracts/payload-builder.js";
-import { asRecord, extractArray } from "../../contracts/raw-adapters.js";
+import { asRecord, extractArray, extractCardsByFlow } from "../../contracts/raw-adapters.js";
 import type { CangeAgentKit } from "../../index.js";
 import type { NormalizedField } from "../../schemas/fields.js";
 import { dropEmpty } from "../../utils/lean.js";
 import { listOutput } from "../../utils/toon.js";
-import { listFieldTitles, matchFieldsByKey, normalizeText, parseLocaleNumber } from "../../utils/valueResolver.js";
+import {
+  listFieldTitles,
+  matchFieldsByKey,
+  normalizeText,
+  parseLocaleNumber,
+  parseStoredNumber
+} from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { envFlowId } from "../env-defaults.js";
@@ -143,7 +150,9 @@ async function aggregate(
   if (engine === "v2" && where.length === 0 && groupBy.kind !== "field") {
     try {
       return await aggregateOnServer(kit, flowId, steps, groupBy, mode, sumField);
-    } catch {
+    } catch (error) {
+      // K3: acesso negado e limite de taxa não são "agregador indisponível": propagam.
+      if (error instanceof CangeError && [401, 403, 429].includes(error.status ?? 0)) throw error;
       // Agregador indisponível ou recusou: segue pela leitura paginada (mesmo resultado, mais lento).
     }
   }
@@ -157,9 +166,14 @@ async function aggregate(
     needed.set(String(field.id), field);
   }
 
+  // K3: só cai no V1 em falha do motor (o critério do `fetchFlowCards`); 401/403/429
+  // e outros 4xx propagam em vez de virar uma contagem diferente sem aviso.
   const { rows, truncated } =
     engine === "v2"
-      ? await readRowsV2(kit, flowId, [...needed.values()]).catch(() => readRowsV1(kit, flowId))
+      ? await readRowsV2(kit, flowId, [...needed.values()]).catch((error: unknown) => {
+          if (!isQueryEngineFailure(error)) throw error;
+          return readRowsV1(kit, flowId);
+        })
       : await readRowsV1(kit, flowId);
 
   const stepById = new Map(steps.map((step) => [step.id, step]));
@@ -354,7 +368,7 @@ function rowFromV2Item(item: unknown): CardRow {
     const multi = typeof value.mvDisplayValue === "string" && mvCount > 1 ? splitMulti(value.mvDisplayValue) : undefined;
     const texts = multi ?? (text !== undefined ? [text] : []);
     if (texts.length > 0) row.texts.set(fieldId, texts);
-    const number = typeof value.valueNumber === "number" ? value.valueNumber : numberFrom(firstText(value, ["value", "valueString"]));
+    const number = typeof value.valueNumber === "number" ? value.valueNumber : storedNumber(firstText(value, ["value", "valueString"]));
     if (number !== undefined) row.numbers.set(fieldId, number);
   }
   return row;
@@ -362,8 +376,10 @@ function rowFromV2Item(item: unknown): CardRow {
 
 async function readRowsV1(kit: CangeAgentKit, flowId: string): Promise<{ rows: CardRow[]; truncated: boolean }> {
   const result = await kit.contracts.listCardsByFlow({ flowId, isArchived: false });
+  // K3: fluxo grande no /card/by-flow vem só com a 1ª página; o `truncated` sai real.
+  const { cards, truncated } = extractCardsByFlow(result.raw);
   const rows: CardRow[] = [];
-  for (const item of extractArray(result.raw)) {
+  for (const item of cards) {
     const card = asRecord(item);
     if (!card) continue;
     if (card.archived === true || card.archived === "S" || card.deleted === "S") continue;
@@ -381,13 +397,13 @@ async function readRowsV1(kit: CangeAgentKit, flowId: string): Promise<{ rows: C
         const key = String(fieldId);
         const text = firstText(answerField, ["valueString", "value_string", "value"]);
         if (text !== undefined) row.texts.set(key, [...(row.texts.get(key) ?? []), text]);
-        const number = numberFrom(firstText(answerField, ["value", "valueString"]));
+        const number = storedNumber(firstText(answerField, ["value", "valueString"]));
         if (number !== undefined && !row.numbers.has(key)) row.numbers.set(key, number);
       }
     }
     rows.push(row);
   }
-  return { rows, truncated: false };
+  return { rows, truncated };
 }
 
 function matches(row: CardRow, clause: WhereClause, stepById: Map<string, StepInfo>): boolean {
@@ -490,10 +506,16 @@ function round(value: number): number {
   return Number(value.toFixed(6));
 }
 
+/** Número digitado pelo agente (`--where`): parse humano, ambíguo = sem número. */
 function numberFrom(text: string | undefined): number | undefined {
   if (text === undefined) return undefined;
   const parsed = parseLocaleNumber(text);
   return parsed.ok ? parsed.value : undefined;
+}
+
+/** K4: número lido do cartão: formato do banco ("1.500" = 1,5), nunca ambíguo. */
+function storedNumber(text: string | undefined): number | undefined {
+  return text === undefined ? undefined : parseStoredNumber(text);
 }
 
 function splitMulti(text: string): string[] {

@@ -50,8 +50,9 @@ export interface QueryFlowV2AllResult {
   totalCount?: number;
   lastExecutionStats?: FlowQueryExecutionStats;
   /**
-   * C4: cursor da página seguinte, quando a leitura parou numa fronteira de página
-   * (o `limit` fechou a página inteira). Corte no meio da página não tem cursor.
+   * C4: cursor da página seguinte sempre que sobrou cartão. A última página é pedida
+   * só com o que falta para o `limit`, então a leitura para numa fronteira de página
+   * e o cursor do back continua exatamente dali (ex.: `--limit 700` = 500 + 200).
    */
   nextCursor?: string;
 }
@@ -148,7 +149,7 @@ export function createFlowQueryContracts(client: CangeClient): FlowQueryContract
     const pageCap = maxPages ?? 50;
     // Sem page_size explícito, dimensiona a página pelo próprio limit (teto 500)
     // para não buscar 50 quando só se quer poucos cartões.
-    const effectivePageSize =
+    const basePageSize =
       pageInput.pageSize ?? (limit !== undefined ? Math.min(limit, 500) : undefined);
     const summaries: CardSummary[] = [];
     let cursor: string | undefined = startCursor;
@@ -159,7 +160,13 @@ export function createFlowQueryContracts(client: CangeClient): FlowQueryContract
     let totalCount: number | undefined;
 
     do {
-      const page = await queryFlowV2({ ...pageInput, pageSize: effectivePageSize, cursor });
+      // K1: a página pede só o que falta para o limit. Assim o limit nunca corta no
+      // meio de uma página e o `next_cursor` do back continua de onde a leitura parou
+      // (o cursor do back é por chave de ordenação, não por deslocamento).
+      const remaining = limit !== undefined ? limit - summaries.length : undefined;
+      const pageSize =
+        basePageSize !== undefined && remaining !== undefined ? Math.min(basePageSize, remaining) : basePageSize;
+      const page = await queryFlowV2({ ...pageInput, pageSize, cursor });
       summaries.push(...page.summaries);
       lastExecutionStats = page.executionStats;
       if (typeof page.executionStats?.totalCount === "number") {
@@ -169,6 +176,8 @@ export function createFlowQueryContracts(client: CangeClient): FlowQueryContract
       cursor = page.pageInfo.hasMore ? page.pageInfo.nextCursor : undefined;
 
       if (limit !== undefined && summaries.length >= limit) {
+        // Só acontece se o back devolver mais que o page_size pedido: aí não há
+        // cursor que continue do meio da página, e a saída avisa com `truncated`.
         const cutMidPage = summaries.length > limit;
         summaries.length = limit;
         truncated = Boolean(cursor) || cutMidPage;

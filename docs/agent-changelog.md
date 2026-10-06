@@ -4,6 +4,19 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-06
 
+### Listas e contas: página de 20 vale para todo agente; `truncated` também no V1 (3ª revisão da F2c)
+
+- **`card list` no enxuto devolve 20 cartões por página para QUALQUER agente** (antes da F2c vinham todos). Playbook que
+  lia a lista inteira de uma vez precisa seguir o `next` (ou usar `--full`). Agora o V1 também diz que há mais:
+  `truncated: true` junto do `next`, igual ao V2. Página do V1 traz `next` com `--engine v1` (o cursor dela é número).
+- **`--limit` acima de 500** (ex.: 700) devolve `next` com o cursor que continua de onde parou (antes saía
+  `truncated` sem cursor).
+- **Cursor do V2 não cai mais no V1:** com `--cursor`, falha do V2 vira erro (antes recomeçava do zero e o agente relia
+  em laço). Cursor que não é número no V1 é erro de uso (exit 2).
+- **`cards count/sum`:** só caem no `/card/by-flow` em falha do motor (rede, 5xx); 401/403/429/4xx propagam. Fluxo
+  grande no V1 sai com `truncated: true`. Valor lido do banco com 3 casas (`1.500`, `12,345`) entra na soma no formato
+  do back (1,5 e 12,345), não sai mais como "ambíguo".
+
 ### Leitura menor (card #1367459, C4): `cards count/sum`, `card read --fields`, listas paginadas, `map` resumido, TOON
 
 - **Novos:** `cange cards count --flow-id N [--by etapa|campo:"<título>"] [--where "<campo>=<valor>"]` e
