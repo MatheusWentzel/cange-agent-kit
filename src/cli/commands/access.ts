@@ -25,6 +25,7 @@ import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { envChatSessionId } from "../env-defaults.js";
 import { addSearchSynonyms } from "../helpers.js";
+import { NO_ACCESS_LINK_HINT, setUnresolvedHashHint } from "../resource-ref.js";
 
 /**
  * Rodada 6 (02/10, decisão 9 do Matheus): o agente acha e PEDE acesso a fluxos e
@@ -197,8 +198,8 @@ export function registerAccessCommands(program: Command): void {
     .description(
       "PEDIDO DE ACESSO: pede acesso a um fluxo ou cadastro (não pausa a execução); quem pode convidar pessoas para ele decide"
     )
-    .option("--flow <id>", "Id do fluxo (veja em `cange catalog`); aceita também o link do Cange ou o hash")
-    .option("--register <id>", "Id do cadastro (veja em `cange catalog --type register`); aceita também o link do Cange ou o hash")
+    .option("--flow <id>", "Id numérico do fluxo (veja em `cange catalog --q <nome>`)")
+    .option("--register <id>", "Id numérico do cadastro (veja em `cange catalog --type register --q <nome>`)")
     .option("--role <papel>", "M (membro, padrão e único). Administrador só pelo bloco Ferramentas > Cange")
     .requiredOption("--reason <texto>", "Para que você precisa do acesso (vai para quem decide ler)")
     .option(
@@ -271,6 +272,9 @@ export function registerAccessCommands(program: Command): void {
         });
       })
     );
+
+  // K1: sem acesso, hash ou link não resolve (404); a mensagem manda ao catálogo.
+  setUnresolvedHashHint(request, NO_ACCESS_LINK_HINT);
 
   annotateCommand(request, {
     mutates: true,

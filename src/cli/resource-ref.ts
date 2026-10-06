@@ -175,19 +175,22 @@ export async function resolveResourceId(
   raw: string,
   kind: ResourceKind,
   resolveHash: HashResolver | undefined,
-  flag?: string
+  flag?: string,
+  unresolvedHint?: string
 ): Promise<string> {
   const ref = parseResourceRef(raw, kind, flag);
   if (ref.kind === "id") return ref.id;
-  return resolveHashToId(kind as "flow" | "register", ref.hash, resolveHash);
+  return resolveHashToId(kind as "flow" | "register", ref.hash, resolveHash, unresolvedHint);
 }
 
 async function resolveHashToId(
   kind: "flow" | "register",
   hash: string,
-  resolveHash: HashResolver | undefined
+  resolveHash: HashResolver | undefined,
+  unresolvedHint?: string
 ): Promise<string> {
-  if (!resolveHash) throw new CangeCliUsageError(hashHint(kind, hash));
+  const hint = unresolvedHint ?? hashHint(kind, hash);
+  if (!resolveHash) throw new CangeCliUsageError(hint);
   let id: string | number | undefined;
   try {
     id = await resolveHash(kind, hash);
@@ -196,11 +199,27 @@ async function resolveHashToId(
     // 4xx = sem acesso ou hash que não existe: o agente precisa do id numérico.
     // 5xx/rede: o erro real segue (não é o agente que errou).
     if (error instanceof CangeApiError && (error.status === undefined || error.status >= 500)) throw error;
-    throw new CangeCliUsageError(hashHint(kind, hash));
+    throw new CangeCliUsageError(hint);
   }
   const text = id === undefined || id === null ? "" : String(id);
-  if (!POSITIVE_INT_RE.test(text)) throw new CangeCliUsageError(hashHint(kind, hash));
+  if (!POSITIVE_INT_RE.test(text)) throw new CangeCliUsageError(hint);
   return text;
+}
+
+/**
+ * K1 (review kit#22): no `access request` o recurso é, por definição, um que o agente
+ * NÃO acessa, e `GET /flow?hash=` / `GET /register?hash=` dão 404 justamente por
+ * falta de acesso. Hash ou link ali quase nunca resolve: o caminho é o catálogo.
+ */
+export const NO_ACCESS_LINK_HINT =
+  "Não consigo ler esse link sem acesso. Procure pelo nome com cange catalog --q <nome> e peça com o id que aparecer.";
+
+const UNRESOLVED_HINTS = new WeakMap<Command, string>();
+
+/** Troca a mensagem de hash/link que não resolve, só neste comando. */
+export function setUnresolvedHashHint(command: Command, hint: string): Command {
+  UNRESOLVED_HINTS.set(command, hint);
+  return command;
 }
 
 /** Opção (atributo do commander) → recurso. Nomes reais do kit, incluindo aliases legados. */
@@ -235,6 +254,7 @@ export async function normalizeIdOptions(
   command?: Command
 ): Promise<void> {
   const linkFlows: string[] = [];
+  const unresolvedHint = command ? UNRESOLVED_HINTS.get(command) : undefined;
 
   for (const [attribute, kind] of Object.entries(ID_OPTION_KINDS)) {
     const value = options[attribute];
@@ -245,7 +265,7 @@ export async function normalizeIdOptions(
       if (link?.flow?.kind === "id") linkFlows.push(link.flow.id);
       else if (link?.flow?.kind === "hash") linkFlows.push(link.flow.hash);
     }
-    options[attribute] = await resolveResourceId(value, kind, resolveHash, flag);
+    options[attribute] = await resolveResourceId(value, kind, resolveHash, flag, unresolvedHint);
   }
 
   for (const [attribute, kind] of Object.entries(ID_LIST_OPTION_KINDS)) {
@@ -255,7 +275,7 @@ export async function normalizeIdOptions(
     const items = value.split(",").map((item) => item.trim()).filter(Boolean);
     const ids: string[] = [];
     for (const item of items) {
-      ids.push(await resolveResourceId(item, kind, resolveHash, flag));
+      ids.push(await resolveResourceId(item, kind, resolveHash, flag, unresolvedHint));
     }
     options[attribute] = ids.join(",");
   }
@@ -263,6 +283,6 @@ export async function normalizeIdOptions(
   // Link do cartão traz o fluxo: preenche --flow-id ausente (só se o comando tem a opção).
   const declaresFlowId = command ? command.options.some((option) => option.attributeName() === "flowId") : false;
   if (declaresFlowId && options.flowId === undefined && linkFlows.length > 0) {
-    options.flowId = await resolveResourceId(linkFlows[0]!, "flow", resolveHash, "--flow-id");
+    options.flowId = await resolveResourceId(linkFlows[0]!, "flow", resolveHash, "--flow-id", unresolvedHint);
   }
 }

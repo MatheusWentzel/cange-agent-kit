@@ -60,6 +60,8 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
   aceitam o número, o link do Cange (`https://app.cange.me/register/<hash>`, `.../flow/<hash>/card/<id>`,
   `cange://card/<id>`) ou o hash do link (fluxo e cadastro). O kit troca pelo id; o link do cartão também preenche o
   `--flow-id` ausente. Hash sem acesso: erro de uso com o caminho (`cange my-registers` / `cange catalog`).
+  No `access request` o recurso é um que você NÃO acessa, então link e hash não resolvem: ache o id pelo nome
+  (`cange catalog --q <nome>`) e peça com ele.
 - `register entries` e `register get` aceitam `--register` (como o `access request`). `card update` aceita
   `--validate-fields` sem efeito (ele não grava `values`; para campos use `card update-values`).
 - Comando inexistente responde com a sugestão: `cange search` aponta `register entries --search` e `catalog --q`;
