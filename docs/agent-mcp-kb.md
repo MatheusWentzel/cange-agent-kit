@@ -381,8 +381,9 @@ Compatibilidade: também aceita `id_notification`.
 - Se houver `values`, preencher obrigatórios (`required = 1`) do formulário alvo.
 - Mover exige os obrigatórios da etapa atual; peça os valores ao usuário se não estiverem no pedido. O kit cobra
   sempre, em todo caminho de mover (`card move`, `card move-step-with-values` com ou sem `--payload`,
-  `card move-step`), e o erro traz o comando `card move ... --set` pronto. Exceção única, igual à tela: voltar etapa
-  em fluxo com "pular obrigatórios ao voltar".
+  `card move-step`), e o erro traz o comando `card move ... --set` pronto. Igual à tela, não cobra ao voltar etapa
+  em fluxo com "pular obrigatórios ao voltar" nem campo oculto no formulário (`show_on_form = "S"`). Obrigatório com
+  condicional vazio não bloqueia (o kit não avalia condicionais) e volta em `warning`.
 - Validar antes de mutar:
   - `card update-values --validate-fields --dry-run`
   - `card move-step-with-values --validate-fields --dry-run`

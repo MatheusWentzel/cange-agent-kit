@@ -21,8 +21,12 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
   (`card move`, `card move-step-with-values` com ou sem `--payload`, `card move-step`), com ou sem `--validate-fields`
   e `--dry-run`. Faltou: exit `2`, nada gravado, e a mensagem traz o comando pronto para gravar e mover no mesmo passo
   (`card move ... --set "Campo=valor"`: o campo da etapa atual vai dentro do próprio mover). Não invente valor para
-  passar da validação. Exceção única, igual à tela: VOLTAR etapa num fluxo com "pular obrigatórios ao voltar" ligado.
+  passar da validação. Exceção, igual à tela: VOLTAR etapa num fluxo com "pular obrigatórios ao voltar" ligado.
   Os obrigatórios da etapa de destino não são cobrados ao entrar (valem quando o cartão sair de lá).
+  Também igual à tela: campo oculto no formulário (`show_on_form = "S"`) não é cobrado. Obrigatório com condicional
+  ("Exibir/Esconder campo") não bloqueia, porque a tela só o exige quando a condicional exibe o campo e o kit não avalia
+  condicionais: vazio, ele volta em `warning` no resultado (e na dica, quando outro obrigatório bloqueia). Se o campo
+  aparece para o cartão, mande o valor com `--set` no mesmo mover.
 - Ao mover etapa, **preservar os campos já preenchidos** (read-before-move): o move grava um form_answer NOVO contendo só o que vier em `values` — campos do `form_id` da etapa não reenviados ficam vazios (perda de dados). Ler o card antes (`card get`) e incluir no `values` os campos já preenchidos, além dos obrigatórios. O kit detecta e avisa campos preenchidos ausentes do `values`; use `--allow-data-loss` para confirmar perda intencional ou `--fail-on-data-loss` para bloquear.
 - **Nunca fazer self-move** (`fromStepId === toStepId`) para "criar"/preencher um form_answer: duplica o form_answer e o snapshot vazio mais recente sobrepõe o preenchido. Para apenas atualizar values sem mover, usar `card update-values`. O kit bloqueia self-move por padrão (`--allow-self-move` força).
 - Usar `step-form --flow-id <id> --step-id <id>` para descobrir obrigatórios da etapa antes de montar payload.

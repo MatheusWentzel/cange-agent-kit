@@ -12,7 +12,9 @@ Convenção importante:
   `card move-step-with-values --payload` segue como opção avançada, `values` pode ser `{}`).
 - **Mover exige os obrigatórios da etapa atual; peça os valores ao usuário se não estiverem no pedido.** É regra base
   da plataforma (decisão de 06/10/2026, igual à tela): o kit cobra em todo caminho de mover, sempre, e devolve o
-  comando pronto com os `--set` que faltam. Exceção única: voltar etapa em fluxo com "pular obrigatórios ao voltar".
+  comando pronto com os `--set` que faltam. Igual à tela, não cobra ao voltar etapa em fluxo com "pular obrigatórios
+  ao voltar" nem campo oculto no formulário. Obrigatório com condicional vazio não bloqueia (o kit não avalia
+  condicionais) e volta em `warning`: se o campo aparece para o cartão, mande o valor com `--set` no mesmo mover.
 
 ## Fluxo recomendado
 

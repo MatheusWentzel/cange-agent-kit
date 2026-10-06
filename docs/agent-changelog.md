@@ -21,11 +21,23 @@ estiverem no pedido.** É a regra base da plataforma (a tela só move depois de 
   dica de incluir ou usar `card move`. Payload com `idForm` de outro formulário não toca a etapa atual.
 - No `--payload`, a etapa cobrada é a REAL do cartão (o kit lê o cartão); `fromStepId` diferente dela é erro.
 - Obrigatórios da etapa de DESTINO não são cobrados ao entrar (a tela também não pede): valem quando o cartão sair.
-- Exceção única, igual à tela: voltar etapa num fluxo com "pular obrigatórios ao voltar" (`skipRequiredOnBackwardMove`).
+- Exceção, igual à tela: voltar etapa num fluxo com "pular obrigatórios ao voltar" (`skipRequiredOnBackwardMove`).
 - `--validate-fields` segue aceito: no `card move` não muda nada; no `--payload`, continua recusando chave
   desconhecida e cobrando também os obrigatórios do `idForm` quando ele é de outro formulário.
 - `CANGE_FORCE_DRY_RUN` (conferência do gate do runner): a mesma cobrança aparece em `validation` (exit `2`), sem gravar.
 - O caminho por `--payload` agora lê o fluxo e o cartão também em `--dry-run` (antes podia sair sem ler nada).
+- Igual à tela (revisão K-D1): campo oculto no formulário (`show_on_form = "S"`) não é cobrado, em nenhum caminho
+  (mover e `card create --validate-fields`). A tela zera o obrigatório dele antes de validar; costuma ser preenchido por
+  automação. No `cange_local` eram 68 campos em 49 fluxos que travavam o mover.
+- Obrigatório com condicional ("Exibir/Esconder campo") vazio não bloqueia: a tela só o exige quando a condicional
+  exibe o campo, e o kit ainda não avalia condicionais. Ele volta em `warning` no resultado (e no `--dry-run`); quando
+  outro obrigatório bloqueia, a dica cita os com condicional sem pedir `--set` deles. As condicionais vêm do
+  `GET /flow` (`flow_steps[].form.fields[].conditionals`), sem chamada a mais.
+- `--payload` com `isTestMode: true` (cartão de modo teste) lê o cartão com `isTestMode` e não falha mais com 404.
+- No `--payload`, a dica do `card move` manda repetir como `--set` o que já ia no payload (values e `--set`): o
+  `card move` só grava o que vier nele.
+- A dica do comando troca para hash/id o campo ou a etapa com `$`, crase, `\` ou aspas no nome, e escapa o
+  placeholder: o comando segue seguro para colar no Bash.
 
 ### Sem o fluxo, o kit descobre pelo número do cartão (F6, runs 357 e 362)
 
