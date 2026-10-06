@@ -234,3 +234,85 @@ describe("back antigo ou sem acesso: mantém o erro, com a dica do link", () => 
     await expect(normalizeIdOptions({ cardId: "55" }, undefined, command, throttled)).resolves.toEqual({});
   });
 });
+
+describe("fluxo no ambiente do run x cartão pedido", () => {
+  function commentFlows() {
+    return writes().filter((write) => write.path === "/card-comment").map((write) => write.body?.flow_id);
+  }
+
+  it("--card-id diferente do cartão do run: não presume o fluxo do ambiente, usa o locate", async () => {
+    process.env.RUNNER_FLOW_ID = "999";
+    process.env.RUNNER_CARD_ID = "777";
+    const out = await run(["comment", "create", "--card-id", "55", "--text", "x"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(locateCalls()).toHaveLength(1);
+    expect(commentFlows()).toEqual([316]);
+    expect(out?.resolved).toEqual({ flow_id: 316, flow_name: "CNG CRM", via: "card-locate" });
+  });
+
+  it("vale também para CANGE_CARD_ID/CANGE_CARD_FLOW_ID e para update-values", async () => {
+    process.env.CANGE_CARD_FLOW_ID = "999";
+    process.env.CANGE_CARD_ID = "777";
+    const out = await run(["card", "update-values", "--card-id", "55", "--set", "Horas=1"]);
+
+    expect(locateCalls()).toHaveLength(1);
+    expect(requests.find((request) => request.path === "/card/")?.query.get("flow_id")).toBe("316");
+    expect(out?.resolved).toMatchObject({ flow_id: 316, via: "card-locate" });
+  });
+
+  it("locate 404 (back antigo ou sem acesso): cai no fluxo do ambiente, como antes", async () => {
+    process.env.RUNNER_FLOW_ID = "999";
+    process.env.RUNNER_CARD_ID = "777";
+    locateResponse = { status: 404, body: "Cannot GET /card/locate" };
+    const out = await run(["comment", "create", "--card-id", "55", "--text", "x"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(locateCalls()).toHaveLength(1);
+    expect(commentFlows()).toEqual([999]);
+    expect(out?.resolved).toBeUndefined();
+  });
+
+  it("mesmo cartão do run, ou fluxo no ambiente sem cartão do run: usa o ambiente sem locate", async () => {
+    process.env.RUNNER_FLOW_ID = "999";
+    process.env.RUNNER_CARD_ID = "55";
+    await run(["comment", "create", "--card-id", "55", "--text", "a"]);
+
+    delete process.env.RUNNER_CARD_ID;
+    stdout.length = 0;
+    await run(["comment", "create", "--card-id", "55", "--text", "b"]);
+
+    expect(locateCalls()).toEqual([]);
+    expect(commentFlows()).toEqual([999, 999]);
+  });
+
+  it("--flow-id explícito sempre vence, mesmo com cartão diferente do run", async () => {
+    process.env.RUNNER_FLOW_ID = "999";
+    process.env.RUNNER_CARD_ID = "777";
+    const out = await run(["comment", "create", "--card-id", "55", "--flow-id", "316", "--text", "x"]);
+
+    expect(locateCalls()).toEqual([]);
+    expect(commentFlows()).toEqual([316]);
+    expect(out?.resolved).toBeUndefined();
+  });
+});
+
+describe("comment create no caminho central", () => {
+  it("lê RUNNER_FLOW_ID (antes só CANGE_CARD_FLOW_ID)", async () => {
+    process.env.RUNNER_FLOW_ID = "316";
+    await run(["comment", "create", "--card-id", "55", "--text", "x"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(locateCalls()).toEqual([]);
+    expect(writes()[0]?.body).toMatchObject({ card_id: 55, flow_id: 316 });
+  });
+
+  it("sem fluxo nenhum: cai no locate (inclusive em --dry-run, que não grava)", async () => {
+    const out = await run(["comment", "create", "--card-id", "55", "--text", "x", "--dry-run"]);
+
+    expect(locateCalls()).toHaveLength(1);
+    expect(writes()).toEqual([]);
+    expect(out).toMatchObject({ resolved: { flow_id: 316, via: "card-locate" } });
+    expect(JSON.stringify(out)).toContain("316");
+  });
+});

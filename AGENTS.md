@@ -134,7 +134,8 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
 - **Sem o fluxo, o kit descobre pelo número do cartão** (desde 06/10/2026): comando de cartão (`card read`, `card get`,
   `card move`, `card update-values`, `comment create`, `comment list`, `attachment download`) com `--card-id` numérico,
   sem `--flow-id` e sem fluxo no ambiente do run, pergunta ao back (`GET /card/locate`, mesmo acesso da leitura) e usa
-  o fluxo dele. A saída traz `resolved: { flow_id, flow_name, via: "card-locate" }`. Não liste fluxos para achar o
+  o fluxo dele. Com fluxo no ambiente, mas `--card-id` diferente do cartão do run, também consulta (se der 404, usa
+  o fluxo do ambiente); `--flow-id` explícito sempre vence. A saída traz `resolved: { flow_id, flow_name, via: "card-locate" }`. Não liste fluxos para achar o
   cartão. Se não achar (número errado, sem acesso ou back antigo), o erro pede o link do cartão ou `--flow-id`.
   No `access request` o recurso é um que você NÃO acessa, então link e hash não resolvem: ache o id pelo nome
   (`cange catalog --q <nome>`) e peça com ele.

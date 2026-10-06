@@ -2,7 +2,7 @@ import type { Command } from "commander";
 
 import { CangeApiError, CangeAuthError, CangeCliUsageError } from "../client/errors.js";
 
-import { envFlowId } from "./env-defaults.js";
+import { envCardId, envFlowId } from "./env-defaults.js";
 
 /**
  * P7 (05/10, card #1367450): ids flexíveis nas opções de fluxo, cadastro e cartão.
@@ -312,17 +312,15 @@ export async function normalizeIdOptions(
   }
 
   // F6 (runs 357 e 362): o pedido traz só o número do cartão ("comente no cartão
-  // 1121343"). Sem --flow-id, sem fluxo no ambiente do run e sem --payload (que traz
-  // o próprio flowId), o kit pergunta ao back de qual fluxo é o cartão.
-  if (
-    declaresFlowId &&
-    options.flowId === undefined &&
-    options.payload === undefined &&
-    locateCard !== undefined &&
-    envFlowId() === undefined
-  ) {
+  // 1121343"). Sem --flow-id e sem --payload (que traz o próprio flowId), o kit
+  // pergunta ao back de qual fluxo é o cartão quando o ambiente não responde:
+  //  - não há fluxo no ambiente do run; ou
+  //  - há, mas o --card-id é OUTRO cartão (não o do run): o fluxo do ambiente é do
+  //    cartão do run e pode não ser o deste. Se o locate não achar (404), o comando
+  //    segue com o fluxo do ambiente, como antes.
+  if (declaresFlowId && options.flowId === undefined && options.payload === undefined && locateCard !== undefined) {
     const cardId = singleCardId(options);
-    if (cardId !== undefined) {
+    if (cardId !== undefined && shouldLocate(cardId)) {
       const located = await locateFlowOfCard(cardId, locateCard);
       if (located) {
         options.flowId = String(located.flow_id);
@@ -331,6 +329,12 @@ export async function normalizeIdOptions(
     }
   }
   return {};
+}
+
+function shouldLocate(cardId: string): boolean {
+  if (envFlowId() === undefined) return true;
+  const runCard = envCardId();
+  return runCard !== undefined && runCard !== cardId;
 }
 
 function singleCardId(options: Record<string, unknown>): string | undefined {

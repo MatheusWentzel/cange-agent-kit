@@ -7,6 +7,7 @@ import { createDryRunResult } from "../../utils/dryRun.js";
 import { normalizeText, type CompanyUser } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
+import { envFlowId } from "../env-defaults.js";
 import { readPayloadFile } from "../helpers.js";
 import { authOnce } from "../write-support.js";
 
@@ -64,11 +65,14 @@ export function registerCardCommentCreateCommand(commentCommand: Command): void 
           });
         }
 
-        // --flow-id explícito vence o flowId do payload; se nenhum vier, o contrato resolve
-        // de CANGE_CARD_FLOW_ID (injetado pelo runner). Não precisa saber o fluxo no payload.
+        // Precedência: --flow-id (explícito, link do cartão ou o descoberto pelo
+        // GET /card/locate no parser central) > flowId do payload > ambiente do run
+        // (RUNNER_FLOW_ID, CANGE_CARD_FLOW_ID, CANGE_FLOW_ID, igual aos outros comandos).
+        const envFlow = envFlowId();
+        const flowId = options.flowId ?? (parsed.data.flowId === undefined ? envFlow : undefined);
         const input = {
           ...parsed.data,
-          ...(options.flowId ? { flowId: Number(options.flowId) } : {})
+          ...(flowId ? { flowId: Number(flowId) } : {})
         };
 
         let mentioned: CompanyUser[] = [];

@@ -10,6 +10,9 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   chama `GET /card/locate?id_card=N` (back: mesmo acesso da leitura, 404 genérico) e usa o fluxo devolvido. A saída
   ganha `resolved: { flow_id, flow_name, via: "card-locate" }`. É leitura: vale também com `CANGE_FORCE_DRY_RUN`.
 - Back sem a rota (404) ou cartão sem acesso: o comando dá o erro de sempre, agora com a dica do link do cartão.
+- Fluxo no ambiente, mas `--card-id` diferente de `RUNNER_CARD_ID`/`CANGE_CARD_ID`: o kit consulta o locate em vez de
+  presumir o fluxo do run; 404 cai no fluxo do ambiente (como antes). `--flow-id` explícito sempre vence.
+- `comment create` lê `RUNNER_FLOW_ID` (antes só `CANGE_CARD_FLOW_ID`), como os outros comandos de cartão.
 - `--payload` continua com o `flowId` do arquivo (o kit não consulta o cartão nesse modo).
 
 ### Listas e contas: página de 20 vale para todo agente; `truncated` também no V1 (3ª revisão da F2c)
