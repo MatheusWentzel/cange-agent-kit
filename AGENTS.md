@@ -50,7 +50,20 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
   - `map`: campos sem o hash `name` (o `values` aceita o id numérico do campo como chave em card create,
     update-values, move, add-child (também no `linkField`) e register create/update; o kit traduz para o hash
     antes de gravar e id inexistente falha sem gravar nada; `map --full` mostra o hash).
-- Receitas sob demanda: `cange recipe <anexo|comentar|criar-card|mover-card|publicar-artefato>` (texto cru).
+- Receitas sob demanda: `cange recipe <anexo|comentar|criar-card|mover-card|publicar-artefato|cadastro-por-nome>` (texto cru).
+
+## Sinônimos e ids flexíveis (desde 05/10/2026)
+
+- Busca: `--q` e `--search` são sinônimos em toda listagem com busca (`catalog`, `register entries`, `flow query`,
+  `card list`, `my-flows`, `my-registers`; nos dois últimos, `--name` também).
+- Ids: `--flow-id`/`--id-flow`/`--flow`, `--register-id`/`--id-register`/`--register` e `--card-id`/`--card`/`--card-ids`
+  aceitam o número, o link do Cange (`https://app.cange.me/register/<hash>`, `.../flow/<hash>/card/<id>`,
+  `cange://card/<id>`) ou o hash do link (fluxo e cadastro). O kit troca pelo id; o link do cartão também preenche o
+  `--flow-id` ausente. Hash sem acesso: erro de uso com o caminho (`cange my-registers` / `cange catalog`).
+- `register entries` e `register get` aceitam `--register` (como o `access request`). `card update` aceita
+  `--validate-fields` sem efeito (ele não grava `values`; para campos use `card update-values`).
+- Comando inexistente responde com a sugestão: `cange search` aponta `register entries --search` e `catalog --q`;
+  `register-entries` vira `register entries`. Exit `2` como todo erro de uso.
 
 ## Acesso do agente a fluxos e cadastros (desde 02/10/2026, só com token de run)
 

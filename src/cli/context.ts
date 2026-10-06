@@ -8,6 +8,7 @@ import { createCliPrinter, type CliPrinter, type OutputMode } from "../utils/out
 
 import { EXIT_CODES, exitCodeForError, type ExitCode } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
+import { normalizeIdOptions, type HashResolver } from "./resource-ref.js";
 
 export interface CliCommandContext {
   kit: CangeAgentKit;
@@ -53,6 +54,16 @@ export function createCommandAction<TArgs extends unknown[]>(
       const requiresAuth = (options.requiresAuth ?? true) && !isDryRunInvocation(args);
       if (requiresAuth) {
         await ctx.ensureAuth();
+      }
+
+      // P7: ids de fluxo, cadastro e cartão aceitam número, link do Cange ou hash.
+      const commandOptions = args.at(-2);
+      if (commandOptions && typeof commandOptions === "object") {
+        await normalizeIdOptions(
+          commandOptions as Record<string, unknown>,
+          createHashResolver(ctx, requiresAuth),
+          command
+        );
       }
 
       const output = await handler(ctx, ...args);
@@ -117,6 +128,23 @@ async function createContext(command: Command): Promise<CliCommandContext> {
     outputMode,
     profile,
     ensureAuth: () => authenticateKit(kit)
+  };
+}
+
+/**
+ * Hash de fluxo/cadastro → id pelas rotas da tela (`GET /flow?hash=`, `GET /register?hash=`).
+ * Em dry-run a autenticação foi pulada: autentica aqui, só quando há hash.
+ */
+function createHashResolver(ctx: CliCommandContext, alreadyAuthenticated: boolean): HashResolver {
+  let authenticated = alreadyAuthenticated;
+  return async (kind, hash) => {
+    if (!authenticated) {
+      await ctx.ensureAuth();
+      authenticated = true;
+    }
+    const result =
+      kind === "flow" ? await ctx.kit.contracts.getFlow({ hash }) : await ctx.kit.contracts.getRegister({ hash });
+    return result.summary.id;
   };
 }
 

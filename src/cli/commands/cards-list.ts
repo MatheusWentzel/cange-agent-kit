@@ -8,7 +8,7 @@ import type { CangeAgentKit } from "../../index.js";
 import { dropEmpty } from "../../utils/lean.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
-import { parseOptionalBoolean } from "../helpers.js";
+import { addSearchSynonyms, parseOptionalBoolean } from "../helpers.js";
 
 interface CardsListOptions {
   flowId: string;
@@ -20,6 +20,7 @@ interface CardsListOptions {
   limit?: string;
   engine?: string;
   viewId?: string;
+  search?: string;
 }
 
 function parseEngine(value: string | undefined): FlowQueryEngineChoice {
@@ -58,6 +59,7 @@ export function registerCardsListCommand(cardCommand: Command): void {
     .option("--view-id <id>", "ID de uma visualização salva (aplica filtros/colunas/ordenação dela)")
     .option("--engine <engine>", "Motor de query: auto (default) | v1 | v2", "auto")
     .option("--limit <n>", "Limita quantidade de cartões retornados")
+    .option("--search <texto>", "Busca textual em todos os campos do fluxo (motor V2; --q é sinônimo)")
     .action(
       createCommandAction(async ({ kit, profile }, options: CardsListOptions) => {
         const lean = profile === "lean";
@@ -73,7 +75,8 @@ export function registerCardsListCommand(cardCommand: Command): void {
         // usuário forçou V2 ou pediu uma view (que só o V2 resolve).
         const usesV1Enrichment =
           withPreAnswer === true || withTimeTracking === true || testModel === true;
-        const forceLegacyV1 = usesV1Enrichment && engine !== "v2" && !options.viewId;
+        const search = options.search?.trim() || undefined;
+        const forceLegacyV1 = usesV1Enrichment && engine !== "v2" && !options.viewId && !search;
 
         if (forceLegacyV1) {
           const result = await kit.contracts.listCardsByFlow({
@@ -110,6 +113,8 @@ export function registerCardsListCommand(cardCommand: Command): void {
           engine,
           flowViewId: options.viewId,
           flowStepId: options.stepId,
+          // P7: busca sem view varre todos os campos do fluxo (igual ao flow query).
+          ...(search ? { search, searchFieldScope: options.viewId ? undefined : ("flow" as const) } : {}),
           isArchived,
           limit,
           // Rodada 5: título real (sem view o V2 devolvia "(Sem título)").
@@ -138,6 +143,7 @@ export function registerCardsListCommand(cardCommand: Command): void {
         };
       })
     );
+  addSearchSynonyms(command, "search");
 
   annotateCommand(command, {
     envelope:

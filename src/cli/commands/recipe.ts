@@ -80,6 +80,19 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
       "3) Republicar o mesmo `--type` no mesmo dono vira NOVA VERSÃO do mesmo artefato. Antes, confira com o MESMO",
       "   comando e `--dry-run`: aviso em `warnings` = aquele trecho NÃO entrou."
     ]
+  },
+  "cadastro-por-nome": {
+    title: "Achar uma entrada de cadastro pelo nome (ex.: o cliente ACME no cadastro Clientes)",
+    lines: [
+      "1) Id do cadastro: use o da sua cabeça ou do pedido. Link do Cange ou hash servem direto em `--register-id`",
+      "   (o kit troca pelo id). Sem nada: `cange my-registers --q <nome do cadastro>`.",
+      "2) `cange register entries --register-id <id> --search <parte do nome>` (`--q` é sinônimo de `--search`).",
+      "   Busque por uma parte curta do nome; veio muita coisa: refine o texto ou use `--page-size 50`.",
+      "3) O `id` de cada item em `entries` é o id da entrada. Para gravar num campo de cadastro do cartão, o valor é",
+      "   a lista de ids: `[<id>]` (número, não texto).",
+      "4) 404 ou \"sem acesso\": `cange catalog --type register --q <nome do cadastro>` e, com access \"não\",",
+      "   `cange access request --register <id> --reason \"<para que precisa>\"`. Não existe `cange search`."
+    ]
   }
 });
 
@@ -108,7 +121,7 @@ export function renderRecipe(name: string, env: Record<string, string | undefine
 export function registerRecipeCommand(program: Command): void {
   const command = program
     .command("recipe")
-    .description("Receita pronta de uma ação sob demanda (anexo, comentar, criar-card, mover-card, publicar-artefato)")
+    .description(`Receita pronta de uma ação sob demanda (${recipeNames().join(", ")})`)
     .argument("[nome]", `Nome da receita: ${recipeNames().join(" | ")}`)
     .action(
       createCommandAction(

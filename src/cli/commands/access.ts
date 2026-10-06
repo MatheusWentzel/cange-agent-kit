@@ -24,6 +24,7 @@ import { dropEmpty } from "../../utils/lean.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { envChatSessionId } from "../env-defaults.js";
+import { addSearchSynonyms } from "../helpers.js";
 
 /**
  * Rodada 6 (02/10, decisão 9 do Matheus): o agente acha e PEDE acesso a fluxos e
@@ -179,6 +180,7 @@ export function registerCatalogCommand(program: Command): void {
         });
       })
     );
+  addSearchSynonyms(catalog, "q");
 
   annotateCommand(catalog, {
     envelope: "{ items[{id,name,type:'flow'|'register',access:'sim'|'não',role}], total, truncated?, anchor?, note }",
@@ -195,8 +197,8 @@ export function registerAccessCommands(program: Command): void {
     .description(
       "PEDIDO DE ACESSO: pede acesso a um fluxo ou cadastro (não pausa a execução); quem pode convidar pessoas para ele decide"
     )
-    .option("--flow <id>", "Id do fluxo (veja em `cange catalog`)")
-    .option("--register <id>", "Id do cadastro (veja em `cange catalog --type register`)")
+    .option("--flow <id>", "Id do fluxo (veja em `cange catalog`); aceita também o link do Cange ou o hash")
+    .option("--register <id>", "Id do cadastro (veja em `cange catalog --type register`); aceita também o link do Cange ou o hash")
     .option("--role <papel>", "M (membro, padrão e único). Administrador só pelo bloco Ferramentas > Cange")
     .requiredOption("--reason <texto>", "Para que você precisa do acesso (vai para quem decide ler)")
     .option(

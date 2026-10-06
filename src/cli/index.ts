@@ -6,6 +6,7 @@ import { Command } from "commander";
 
 import { CangeCliUsageError } from "../client/errors.js";
 import { createCliPrinter } from "../utils/output.js";
+import { DISCOVERY_HINT, suggestForUnknownCommand } from "./command-suggest.js";
 import { exitCodeForError } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
 import { registerArtifactPublishCommand } from "./commands/artifact-publish.js";
@@ -186,9 +187,6 @@ export function createProgram(): Command {
   return program;
 }
 
-const DISCOVERY_HINT =
-  "Descubra os comandos disponíveis: `cange manifest --output json` (fonte de verdade) " +
-  "ou `cange <grupo> --help`.";
 
 export async function runCli(argv = process.argv): Promise<void> {
   // EPIPE = o consumidor do pipe fechou/morreu (`cange … | head`, ou um
@@ -221,7 +219,7 @@ export async function runCli(argv = process.argv): Promise<void> {
 
     // Item 2/3: erro vai para stderr; stdout permanece limpo. Printer TTY-aware.
     const printer = createCliPrinter(resolveOutputMode(undefined));
-    const normalized = normalizeCliError(error);
+    const normalized = normalizeCliError(error, program, argv);
     printer.printError(normalized);
     process.exitCode = exitCodeForError(normalized);
   }
@@ -267,12 +265,17 @@ const DISCOVERY_ERROR_CODES = new Set([
   "commander.optionMissingArgument"
 ]);
 
-function normalizeCliError(error: unknown): Error {
+export function normalizeCliError(error: unknown, program?: Command, argv?: readonly string[]): Error {
   if (isCommanderError(error)) {
+    // P7: comando desconhecido responde com a sugestão mais provável (1 a 2 linhas).
+    const suggestion =
+      error.code === "commander.unknownCommand" && program && argv
+        ? suggestForUnknownCommand(program, argv)
+        : undefined;
     // Item 1: anexa a rota de discovery à mensagem de comando/flag inválidos.
-    const message = DISCOVERY_ERROR_CODES.has(error.code)
-      ? `${error.message}\n${DISCOVERY_HINT}`
-      : error.message;
+    const message =
+      suggestion ??
+      (DISCOVERY_ERROR_CODES.has(error.code) ? `${error.message}\n${DISCOVERY_HINT}` : error.message);
     return new CangeCliUsageError(message, { code: error.code });
   }
   if (error instanceof Error) {
