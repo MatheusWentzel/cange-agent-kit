@@ -2,11 +2,14 @@ import { Command } from "commander";
 
 import { CangeCliUsageError } from "../client/errors.js";
 import { authenticateKit, createCangeAgentKit, type CangeAgentKit } from "../index.js";
+import { createDryRunResult } from "../utils/dryRun.js";
 import { loadEnv } from "../utils/env.js";
+import { FORCED_WRITE_COMMANDS, isForceDryRun } from "../utils/forceDryRun.js";
 import { resolveOutputProfile, type OutputProfile } from "../utils/lean.js";
 import { createCliPrinter, type CliPrinter, type OutputMode } from "../utils/output.js";
 import { encodeToon, ListOutput, resolveOutputFormat, type OutputFormat } from "../utils/toon.js";
 
+import { getCommandMeta } from "./command-metadata.js";
 import { EXIT_CODES, exitCodeForError, type ExitCode } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
 import { normalizeIdOptions, type HashResolver } from "./resource-ref.js";
@@ -57,6 +60,13 @@ export function createCommandAction<TArgs extends unknown[]>(
     const ctx = await createContext(command);
 
     try {
+      // CANGE_FORCE_DRY_RUN: toda escrita vira dry-run, seja qual for o argv.
+      const forced = applyForcedDryRun(command, args);
+      if (forced !== undefined) {
+        printOutput(ctx, forced);
+        return;
+      }
+
       const requiresAuth = (options.requiresAuth ?? true) && !isDryRunInvocation(args);
       if (requiresAuth) {
         await ctx.ensureAuth();
@@ -178,6 +188,41 @@ function getCommandFromArgs(args: unknown[]): Command {
     throw new CangeCliUsageError("Falha interna ao resolver contexto do comando.");
   }
   return maybeCommand;
+}
+
+/**
+ * Com `CANGE_FORCE_DRY_RUN` ligado: comando com `--dry-run` recebe `dryRun = true`
+ * (o handler segue o próprio caminho de dry-run); escrita sem `--dry-run`
+ * (FORCED_WRITE_COMMANDS ou `mutates` no metadado) devolve o dry-run genérico SEM
+ * rodar o handler. Leitura segue normal. `undefined` = rodar o handler.
+ */
+function applyForcedDryRun(command: Command, args: unknown[]): unknown {
+  if (!isForceDryRun()) return undefined;
+  const options = args.at(-2);
+  if (command.options.some((option) => option.long === "--dry-run")) {
+    if (options && typeof options === "object") {
+      (options as { dryRun?: boolean }).dryRun = true;
+    }
+    return undefined;
+  }
+  const path = commandPath(command);
+  if (!FORCED_WRITE_COMMANDS.has(path) && getCommandMeta(command)?.mutates !== true) return undefined;
+  const positional = args.slice(0, -2);
+  return createDryRunResult({
+    command: `cange ${path}`,
+    ...(positional.length > 0 ? { args: positional } : {}),
+    options: options && typeof options === "object" ? { ...(options as Record<string, unknown>) } : {}
+  });
+}
+
+function commandPath(command: Command): string {
+  const names: string[] = [];
+  let cursor: Command | null = command;
+  while (cursor && cursor.parent) {
+    names.unshift(cursor.name());
+    cursor = cursor.parent;
+  }
+  return names.join(" ");
 }
 
 function isDryRunInvocation(args: unknown[]): boolean {

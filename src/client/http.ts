@@ -1,4 +1,6 @@
-import { CangeApiError, type CangeHttpMethod, sanitizeSensitive } from "./errors.js";
+import { isForceDryRun, isWriteRequest } from "../utils/forceDryRun.js";
+
+import { CangeApiError, CangeCliUsageError, type CangeHttpMethod, sanitizeSensitive } from "./errors.js";
 
 export interface CangeClientConfig {
   baseUrl: string;
@@ -45,6 +47,14 @@ export function createCangeClient(config: CangeClientConfig): CangeClient {
     path: string,
     options: CangeRequestOptions = {}
   ): Promise<T> {
+    // CANGE_FORCE_DRY_RUN: rede de segurança. Nenhuma escrita sai do processo,
+    // nem a de um comando que esqueceu de respeitar o dry-run forçado.
+    if (isForceDryRun() && isWriteRequest(method, path)) {
+      throw new CangeCliUsageError(
+        `CANGE_FORCE_DRY_RUN está ativo: escrita bloqueada (${method} ${path.split("?")[0]}). Nada foi gravado.`,
+        { code: "FORCE_DRY_RUN_BLOCKED", method, endpoint: path }
+      );
+    }
     const url = buildUrl(config.baseUrl, path, options.query);
     const finalHeaders = new Headers(options.headers);
     finalHeaders.set("Origin", config.appOrigin);
