@@ -66,29 +66,26 @@ export function isRequiredOnScreen(field: NormalizedField): boolean {
 }
 
 const RICH_TEXT_TYPES = new Set(["INPUT_RICH_TEXT_FIELD", "RICH_TEXT_FIELD", "HTML_FIELD"]);
-/** Mídia sem texto ainda é conteúdo (imagem colada, vídeo, tabela). */
-const RICH_MEDIA = /<(img|video|audio|iframe|embed|object|svg|table)\b/i;
 
 export function isRichTextType(type: string | undefined): boolean {
   return RICH_TEXT_TYPES.has(String(type ?? "").toUpperCase());
 }
 
 /**
- * EXTRA-06 D4: rich text sem conteúdo. A tela recusa `<p></p>` no obrigatório (teste
- * `rich-text-required`) e trata como vazio todo HTML sem texto na régua do
- * `isFieldAnswerEmpty` (tira as tags, `<br>` e `&nbsp;`): `<p></p>`, `<p><br></p>`,
- * `<p>&nbsp;</p>`. Imagem, vídeo e tabela contam como conteúdo.
+ * EXTRA-06 D4: rich text sem conteúdo, com a régua exata da tela. O campo Texto Formatado
+ * (`InputRichText`, função `isHtmlEmpty`) entrega "" ao formulário quando o HTML não tem
+ * texto: tira toda tag (`/<[^>]*>/g`), troca `&nbsp;` por espaço e apara. Aí o obrigatório
+ * (`rich-text-required` + `required` do createYupSchema) recusa. Então `<p></p>`,
+ * `<p><br></p>` e `<p>&nbsp;</p>` são vazios, e HTML só com imagem ou tabela sem texto
+ * também (a tela valida e grava "" nesses casos). `&#160;` a tela lê como texto.
  */
 export function isEmptyRichText(value: string): boolean {
-  if (RICH_MEDIA.test(value)) return false;
+  if (value.trim() === "") return true;
   const text = value
-    .replace(/<br\s*\/?>/gi, " ")
-    .replace(/<\/?[^>]+(>|$)/g, "")
-    .replace(/&nbsp;|&#160;|&#xa0;/gi, " ")
-    .replace(/ /g, " ")
-    .replace(/&amp;/gi, "&")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&nbsp;/g, " ")
     .trim();
-  return text.length === 0;
+  return text === "";
 }
 
 /**

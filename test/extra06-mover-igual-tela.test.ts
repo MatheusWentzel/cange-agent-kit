@@ -700,12 +700,18 @@ describe("EXTRA-06 D4: rich text sem conteúdo é vazio", () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
-  it("isEmptyRichText: tags, <br> e &nbsp; sem texto = vazio; imagem conta como conteúdo", () => {
+  it("isEmptyRichText: a régua da tela (isHtmlEmpty do InputRichText), HTML sem texto = vazio", () => {
     expect(isEmptyRichText("<p></p>")).toBe(true);
     expect(isEmptyRichText(" <p> </p> ")).toBe(true);
     expect(isEmptyRichText("<p><br></p>")).toBe(true);
     expect(isEmptyRichText("<p>&nbsp;</p>")).toBe(true);
-    expect(isEmptyRichText("<p><img src=\"x.png\"></p>")).toBe(false);
+    expect(isEmptyRichText("<p></p><p></p>")).toBe(true);
+    // A tela tira toda tag: imagem ou tabela sem texto viram "" no formulário (o obrigatório recusa).
+    expect(isEmptyRichText("<p><img src=\"x.png\"></p>")).toBe(true);
+    expect(isEmptyRichText("<table><tr><td></td></tr></table>")).toBe(true);
+    expect(isEmptyRichText("<table><tr><td>a</td></tr></table>")).toBe(false);
+    // Só `&nbsp;` vira espaço na tela; a entidade numérica conta como texto.
+    expect(isEmptyRichText("<p>&#160;</p>")).toBe(false);
     expect(isEmptyRichText("<p>a</p>")).toBe(false);
     // Texto comum com "<p></p>" literal não é rich text: segue preenchido.
     expect(isEmptyForField({ type: "TEXT_SHORT_FIELD" }, "<p></p>")).toBe(false);

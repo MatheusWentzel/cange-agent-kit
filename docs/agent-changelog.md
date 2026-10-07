@@ -35,7 +35,9 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   `required`. Switch nunca é cobrado (92 de 92 sem regra), check list sem regra também não (32 de 190), e campo com
   regra e coluna 0 passa a ser cobrado. Sem a lista `validations` (back antigo), vale a coluna. Vale no mover, no
   `card create --validate-fields` e no `--validate-fields` do `card move-step`.
-- **Rich text vazio:** `<p></p>`, `<p><br></p>` e HTML sem texto contam como vazio (imagem e tabela contam como conteúdo).
+- **Rich text vazio:** a régua exata da tela (`isHtmlEmpty` do Texto Formatado): sem tags e com `&nbsp;` como espaço,
+  sobrou só espaço = vazio. Vale para `<p></p>`, `<p><br></p>`, `<p>&nbsp;</p>` e também para HTML só com imagem ou
+  tabela sem texto (a tela entrega "" ao formulário nesses casos e o obrigatório recusa).
 - **Check list "exigir todos concluídos"** (`formula = '1'`): item sem marcar bloqueia o mover, como a tela. O check list
   e a lista de itens agora são reenviados no mover (antes ficavam vazios no snapshot novo).
 
