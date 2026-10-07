@@ -3,7 +3,7 @@ import type { FlowStepSummary } from "../contracts/payload-builder.js";
 import { asRecord } from "../contracts/raw-adapters.js";
 import type { CangeAgentKit } from "../index.js";
 import type { NormalizedField } from "../schemas/fields.js";
-import { readCarryOver, readStepCarryOver, type CarryOverResult } from "../utils/carryOver.js";
+import { readCarryOver, readStepCarryOver, type CarryOverResult, type CarrySource } from "../utils/carryOver.js";
 import { checkListProgress, isHiddenOnForm, requiresAllChecked } from "../utils/requiredFields.js";
 import {
   describeExpected,
@@ -14,7 +14,7 @@ import {
   type ValueIssue
 } from "../utils/valueResolver.js";
 
-import { loadFlowContext, stepLabel, stepScope, type FlowContext } from "./write-support.js";
+import { formScope, loadFlowContext, stepLabel, stepScope, type FlowContext } from "./write-support.js";
 
 /**
  * DECISÃO 1 do Matheus (06/10/2026): mover exige os obrigatórios da etapa ATUAL, sempre.
@@ -45,7 +45,11 @@ import { loadFlowContext, stepLabel, stepScope, type FlowContext } from "./write
  * - Autocompletar (F2, 07/10): campo sem valor que o autocompletar da tela preenche conta
  *   como preenchido e o valor vai no mover (`carry.autoFilled`). Obrigatório vazio com
  *   autocompletar que o kit não calcula (`carry.autoPending`) não bloqueia: vira aviso,
- *   como o da condicional.
+ *   como o da condicional. Com a origem do autocompletar vazia no cartão a tela não preenche,
+ *   e o kit cobra igual (A2-F1: o campo nem chega ao `autoPending`).
+ * - O mover apaga o rascunho do formulário que GRAVA (A2-F2): fora da etapa atual (o
+ *   formulário do destino, por `--payload` ou pelo `card move` de etapa sem formulário), o kit
+ *   reenvia o que a tela mostra nesse formulário, como na etapa atual (`readWrittenFormCarry`).
  */
 
 export const MOVE_REQUIRED_RULE = "Mover exige os obrigatórios da etapa atual (regra da plataforma, igual à tela).";
@@ -133,8 +137,8 @@ export function autoPendingWarning(
     .join(", ");
   return (
     `Obrigatórios vazios com autocompletar que o kit não calcula ${inLabel(origin.label)}: ${list}. ` +
-    "A tela preenche esses campos sozinha ao abrir o cartão e o mover do kit vai sem eles: " +
-    "confira o valor no cartão e mande com --set no mover (ou confirme com o usuário)."
+    "Ao abrir o cartão a tela tenta preencher esses campos pelo autocompletar (e cobra o que ficar vazio); " +
+    "o mover do kit vai sem eles: confira o valor na tela e mande com --set no mover (ou confirme com o usuário)."
   );
 }
 
@@ -189,7 +193,7 @@ export function moveRequiredHint(input: HintInput): ValueIssue {
       ? `Também vazios, com condicional (a tela só exige se o campo aparecer para este cartão): ${fieldList(input.conditional)}. `
       : "") +
     (input.autoPending && input.autoPending.length > 0
-      ? `Também vazios, com autocompletar que o kit não calcula (a tela preenche ao abrir o cartão): ${fieldList(input.autoPending)}. `
+      ? `Também vazios, com autocompletar que o kit não calcula (a tela tenta preencher ao abrir o cartão): ${fieldList(input.autoPending)}. `
       : "");
   return {
     kind: "hint",
@@ -312,10 +316,55 @@ export async function readOriginCarry(
   kit: CangeAgentKit,
   cardRaw: unknown,
   origin: FormScope,
-  cardId: number | string
+  cardId: number | string,
+  flowFields?: NormalizedField[]
 ): Promise<CarryOverResult> {
   const pre = await kit.contracts.getPreAnswer({ cardId, formId: origin.formId });
-  return readStepCarryOver({ cardRaw, preAnswerRaw: pre?.raw, formId: origin.formId, fields: origin.fields });
+  return readStepCarryOver({
+    cardRaw,
+    preAnswerRaw: pre?.raw,
+    formId: origin.formId,
+    fields: origin.fields,
+    ...(flowFields ? { flowFields } : {})
+  });
+}
+
+/**
+ * A2-F2 (revisão 07/10): o `/card/v2/move-step` apaga o rascunho do formulário que GRAVA
+ * (`MoveCardWithAnswerService`, passo 1: o form_answer do cartão com `form_id = id_form` e
+ * `flow_step_id` NULL), no fluxo com ou sem o Flow Query V2, e grava a resposta nova só com o
+ * `values`. Gravando o formulário de outra etapa (o do destino, o `idForm` omitido, que cai no
+ * destino, ou o `card move` de etapa sem formulário), o rascunho dele sumia e a tela passava a
+ * abrir esse formulário vazio (cartão 494824: 3 anexos da automação no rascunho do destino;
+ * 8.780 cartões ativos com rascunho preenchido fora da etapa atual no cange_local).
+ *
+ * Fonte = a da tela para esse formulário (`GET /form/pre-answer`: o rascunho, ou a última
+ * passagem que o back remonta). Sem o autocompletar: a tela só autocompleta quando o cartão
+ * estiver na etapa dele, e o que ficar sem linha ela ainda preenche nessa hora.
+ */
+export async function readWrittenFormCarry(
+  kit: CangeAgentKit,
+  cardRaw: unknown,
+  scope: FormScope,
+  cardId: number | string
+): Promise<CarryOverResult> {
+  const pre = await kit.contracts.getPreAnswer({ cardId, formId: scope.formId });
+  return readStepCarryOver({
+    cardRaw,
+    preAnswerRaw: pre?.raw,
+    formId: scope.formId,
+    fields: scope.fields,
+    autoComplete: false
+  });
+}
+
+/**
+ * O que reenviar no formulário que o mover grava fora da etapa atual: só o que a tela
+ * mostra nele (rascunho ou última passagem). `vazio` não tem nada; `cartao` (back sem a rota)
+ * fica com o detector de perda de sempre, sem reenvio.
+ */
+export function resendableWritten(carry: CarryOverResult | undefined): CarryOverResult | undefined {
+  return carry && (carry.source === "rascunho" || carry.source === "ultima-passagem") ? carry : undefined;
 }
 
 /** Campos do cartão reenviados sem estar no que foi mandado (o autocompletar sai à parte). */
@@ -332,9 +381,15 @@ export function autocompletedTitles(carry: CarryOverResult | undefined, sent: Re
 
 /** Aviso dos preenchidos que o mover não consegue reenviar (fórmula, ID automático, anexo fora da pré-resposta). */
 export function notKeptWarning(step: FlowStepSummary, carry: CarryOverResult | undefined): string | undefined {
+  return notKeptText(stepLabel(step), carry);
+}
+
+/** O mesmo aviso, com o rótulo do formulário ("etapa Triagem", "form 902"). */
+function notKeptText(label: string, carry: CarryOverResult | undefined): string | undefined {
   const notKept = carry?.notKept ?? [];
   if (notKept.length === 0) return undefined;
-  return `Não reenviados (ficam vazios na ${stepLabel(step)}): ${notKept.map((item) => item.title ?? item.name).join(", ")}.`;
+  const where = /^etapa\b/i.test(label) ? `na ${label}` : `no ${label}`;
+  return `Não reenviados (ficam vazios ${where}): ${notKept.map((item) => item.title ?? item.name).join(", ")}.`;
 }
 
 export interface PayloadMove {
@@ -372,12 +427,21 @@ export interface PayloadMoveCheck {
   writesOrigin: boolean;
   /** O que o cartão tem na etapa atual (fonte da tela). */
   carry?: CarryOverResult;
+  /**
+   * O que a tela mostra no formulário que o mover grava, quando o kit o reenvia (a etapa
+   * atual, ou outro formulário com rascunho ou última passagem, A2-F2). É a régua do
+   * detector de perda; undefined = sem reenvio (o detector de sempre, pelo `GET /card`).
+   */
+  writtenCarry?: CarryOverResult;
+  /** De onde veio o que foi reenviado (`kept`). */
+  keptFrom?: CarrySource;
 }
 
 export interface PayloadMoveOptions {
   /**
-   * Reenviar o que o cartão já tem na etapa atual quando o payload grava esse formulário
-   * (padrão: sim, como a tela e o `card move`). false = `--allow-data-loss`.
+   * Reenviar o que o cartão já tem no formulário que o payload grava (o da etapa atual, ou
+   * outro com rascunho ou última passagem; padrão: sim, como a tela e o `card move`).
+   * false = `--allow-data-loss`.
    */
   resend?: boolean;
   /** `--allow-data-loss`: aceita perder o rascunho da etapa atual ao gravar outro formulário. */
@@ -389,12 +453,14 @@ export interface PayloadMoveOptions {
  * cartão e confere os obrigatórios da etapa ATUAL do cartão (não a do `fromStepId`).
  *
  * O mover pelo payload grava um formulário NOVO só com o `values` e o back apaga o
- * rascunho da etapa (EXTRA-06 D1). Quando o payload grava a etapa atual, o kit reenvia o
- * que o cartão já tem nela (o rascunho que a tela mostra, com o do payload por cima) e
- * os obrigatórios contam o resultado; com `resend: false` (`--allow-data-loss`), só conta
- * o `values` e obrigatório preenchido fora dele é problema próprio. Payload que grava
+ * rascunho do formulário gravado (EXTRA-06 D1). Quando o payload grava a etapa atual, o kit
+ * reenvia o que o cartão já tem nela (o rascunho que a tela mostra, com o do payload por
+ * cima) e os obrigatórios contam o resultado; com `resend: false` (`--allow-data-loss`), só
+ * conta o `values` e obrigatório preenchido fora dele é problema próprio. Payload que grava
  * outro formulário (ex.: o do destino) não toca a etapa atual: conta o que o cartão já
- * tem, e rascunho só da etapa atual bloqueia (o back o apaga ao sair da etapa).
+ * tem, e rascunho só da etapa atual bloqueia (o back o apaga ao sair da etapa); o que a tela
+ * mostra no formulário gravado (rascunho ou última passagem) vai com o `values` por cima
+ * (A2-F2), salvo com `resend: false`.
  */
 export async function checkPayloadMove(
   kit: CangeAgentKit,
@@ -422,6 +488,7 @@ export async function checkPayloadMove(
     );
   }
   const toStep = findStepById(ctx.steps, payload.toStepId);
+  // idForm omitido: o contrato grava o form do destino (resolveMoveForm).
   const writtenFormId = String(payload.idForm ?? toStep?.formId ?? "");
   const issues: ValueIssue[] = [];
 
@@ -437,17 +504,45 @@ export async function checkPayloadMove(
   }
 
   const origin = stepScope(ctx, fromStep, 0, " (atual)");
-  if (!origin) {
-    return { ctx, card, writtenFormId, issues, values, kept: [], autocompleted: [], writesOrigin: false };
+  const writesOrigin = origin !== undefined && writtenFormId === origin.formId;
+  // A2-F2: gravando outro formulário, o back apaga o rascunho DELE; o kit reenvia o que a tela mostra nele.
+  // O form de criação o contrato recusa no mover (guard do form_init): nada a ler.
+  const writtenScope =
+    !writesOrigin && writtenFormId !== "" && writtenFormId !== String(ctx.formInitId ?? "")
+      ? formScope(ctx.fields, writtenFormId, formLabel(ctx, writtenFormId), 1)
+      : undefined;
+  const [originCarry, writtenRead] = await Promise.all([
+    origin ? readOriginCarry(kit, card.raw, origin, payload.cardId, ctx.fields) : Promise.resolve(undefined),
+    writtenScope && options.resend !== false
+      ? readWrittenFormCarry(kit, card.raw, writtenScope, payload.cardId)
+      : Promise.resolve(undefined)
+  ]);
+  const written = resendableWritten(writtenRead);
+  const writtenNotKept = written && writtenScope ? notKeptText(writtenScope.label, written) : undefined;
+
+  if (!origin || !originCarry) {
+    const sendValues = written ? { ...written.values, ...values } : values;
+    return {
+      ctx,
+      card,
+      writtenFormId,
+      issues,
+      values: sendValues,
+      kept: keptFields(written, values),
+      autocompleted: [],
+      writesOrigin: false,
+      ...(written ? { writtenCarry: written, keptFrom: written.source } : {}),
+      ...(writtenNotKept ? { warning: writtenNotKept } : {})
+    };
   }
 
-  const writesOrigin = writtenFormId === origin.formId;
-  const carry = await readOriginCarry(kit, card.raw, origin, payload.cardId);
+  const carry = originCarry;
   const resend = writesOrigin && options.resend !== false;
-  const sendValues = resend ? { ...carry.values, ...values } : values;
-  const kept = resend ? keptFields(carry, values) : [];
+  const resent = resend ? carry : written;
+  const sendValues = resent ? { ...resent.values, ...values } : values;
+  const kept = keptFields(resent, values);
   const autocompleted = resend ? autocompletedTitles(carry, values) : [];
-  const notKept = resend ? notKeptWarning(fromStep, carry) : undefined;
+  const notKept = resend ? notKeptWarning(fromStep, carry) : writtenNotKept;
   const base = {
     ctx,
     card,
@@ -457,7 +552,8 @@ export async function checkPayloadMove(
     kept,
     autocompleted,
     writesOrigin,
-    carry
+    carry,
+    ...(resent ? { writtenCarry: resent, keptFrom: resent.source } : {})
   };
 
   // Gravando outro formulário, o rascunho da etapa atual some ao sair dela: o back apaga
@@ -552,6 +648,12 @@ function draftOnlyFields(cardRaw: unknown, origin: FormScope, carry: CarryOverRe
     titles.push(field?.title ?? name);
   }
   return titles;
+}
+
+/** Rótulo do formulário gravado fora da etapa atual: "etapa Agendamento" ou "form 902". */
+function formLabel(ctx: FlowContext, formId: string): string {
+  const step = ctx.steps.find((item) => item.formId !== undefined && String(item.formId) === formId);
+  return step ? stepLabel(step) : `form ${formId}`;
 }
 
 function findStepById(steps: FlowStepSummary[], id: number | string | undefined): FlowStepSummary | undefined {

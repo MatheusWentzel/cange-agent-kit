@@ -6,7 +6,15 @@ import { valuesOf, type FormScope, type ValueIssue } from "../../utils/valueReso
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { EXIT_CODES } from "../exit-codes.js";
-import { autocompletedTitles, keptFields, notKeptWarning, originRequired, readOriginCarry } from "../move-required.js";
+import {
+  autocompletedTitles,
+  keptFields,
+  notKeptWarning,
+  originRequired,
+  readOriginCarry,
+  readWrittenFormCarry,
+  resendableWritten
+} from "../move-required.js";
 import {
   addInlineValueOptions,
   authOnce,
@@ -145,7 +153,16 @@ export async function runInlineMove(
 
   // Campos que o cartão já tem na etapa atual: reenviados no mover (a tela faz igual).
   // EXTRA-06 D1: a fonte é a da tela (rascunho da etapa ou última passagem), não o GET /card.
-  const carry = origin ? await readOriginCarry(kit, card.raw, origin, cardId) : undefined;
+  // A2-F2: etapa atual sem formulário (raro): o mover grava o do destino e o back apaga o
+  // rascunho dele; o kit reenvia o que a tela mostra nesse formulário, com o --set por cima.
+  const writesDestination = !origin && destination !== undefined && destination.formId !== ctx.formInitId;
+  const [carry, destRead] = await Promise.all([
+    origin ? readOriginCarry(kit, card.raw, origin, cardId, ctx.fields) : Promise.resolve(undefined),
+    writesDestination && destination ? readWrittenFormCarry(kit, card.raw, destination, cardId) : Promise.resolve(undefined)
+  ]);
+  const destCarry = resendableWritten(destRead);
+  /** O que vai reenviado no mover: a etapa atual ou, sem formulário nela, o destino. */
+  const resent = carry ?? destCarry;
   const originValues = origin ? valuesOf(resolved, origin.formId) : {};
   const moveValues = { ...(carry?.values ?? {}), ...originValues };
 
@@ -162,14 +179,14 @@ export async function runInlineMove(
     ...(options.flowId !== undefined ? { flowId: options.flowId } : {}),
     repeatSent: inline !== undefined && Object.keys(inline).length > 0
   });
-  const notKept = carry?.notKept ?? [];
+  const notKept = resent?.notKept ?? [];
   const dataLossIssues: ValueIssue[] =
     options.failOnDataLoss && notKept.length > 0
       ? [
           {
             kind: "invalid_value",
             blocking: true,
-            text: `o mover não consegue reenviar ${notKept.map((item) => item.title ?? item.name).join(", ")} (ficariam vazios na etapa atual). Tire --fail-on-data-loss para mover assim mesmo`
+            text: `o mover não consegue reenviar ${notKept.map((item) => item.title ?? item.name).join(", ")} (ficariam vazios na ${origin ? "etapa atual" : stepLabel(toStep)}). Tire --fail-on-data-loss para mover assim mesmo`
           }
         ]
       : [];
@@ -198,9 +215,9 @@ export async function runInlineMove(
       ...base,
       fromStepId: Number(fromStep.id),
       toStepId: Number(toStep.id),
-      // Sem form na etapa atual (raro): o contrato resolve o form do destino.
-      ...(origin ? { idForm: Number(origin.formId) } : {}),
-      values: origin ? moveValues : destValues,
+      // Sem form na etapa atual (raro): o form do destino (o mesmo que o contrato resolveria).
+      ...(origin ? { idForm: Number(origin.formId) } : writesDestination && destination ? { idForm: Number(destination.formId) } : {}),
+      values: origin ? moveValues : { ...(destCarry?.values ?? {}), ...destValues },
       complete: isEnd ? "S" : "N",
       isFromCurrentStep: true
     }
@@ -214,14 +231,14 @@ export async function runInlineMove(
     });
   }
 
-  const notKeptText = notKeptWarning(fromStep, carry);
+  const notKeptText = origin ? notKeptWarning(fromStep, carry) : notKeptWarning(toStep, destCarry);
   const warnings = [
     ...(notKeptText ? [notKeptText] : []),
     // Obrigatório com condicional vazio não bloqueia (o kit não avalia a condicional): avisa.
     ...(required.warning ? [required.warning] : [])
   ];
   const warning = warnings.length > 0 ? warnings.join(" ") : undefined;
-  const kept = keptFields(carry, originValues).length;
+  const kept = origin ? keptFields(carry, originValues).length : keptFields(destCarry, destValues).length;
   // F2: o que o autocompletar da tela preencheu e vai no mover (fora o que veio no --set).
   const autocompleted = autocompletedTitles(carry, originValues);
   const autoInfo = autocompleted.length > 0 ? { autocompleted } : {};
@@ -236,7 +253,7 @@ export async function runInlineMove(
         to: { stepId: Number(toStep.id), name: toStep.name },
         calls,
         kept,
-        ...(carry ? { keptFrom: carry.source } : {}),
+        ...(resent ? { keptFrom: resent.source } : {}),
         ...autoInfo,
         validation,
         ...(warning ? { warning } : {})
@@ -282,7 +299,7 @@ export async function runInlineMove(
     toStepId: Number(toStep.id),
     written,
     kept,
-    ...(carry && kept > 0 ? { keptFrom: carry.source } : {}),
+    ...(resent && kept > 0 ? { keptFrom: resent.source } : {}),
     ...autoInfo,
     summary:
       `Cartão ${cardId} movido de ${fromStep.name ?? fromStep.id} para ${toStep.name ?? toStep.id}` +

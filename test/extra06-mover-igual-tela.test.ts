@@ -28,6 +28,8 @@ import {
  *  - D5: check list com "exigir todos concluídos" (`formula = '1'`) bloqueia com item sem marcar.
  *  - Revisão (07/10): F1 rascunho x confirmada pela recência da LINHA; F2 autocompletar da
  *    tela; F3 `card move-step --allow-data-loss`.
+ *  - Revisão 2 (07/10): A2-F1 origem do autocompletar vazia bloqueia (e a opção pelo rótulo é
+ *    calculada); A2-F2 o mover apaga o rascunho do formulário que grava (o do destino também).
  * Fetch mockado (a suíte bloqueia rede real).
  */
 
@@ -64,6 +66,8 @@ let preAnswer: Record<string, any> | undefined;
 let preAnswerStatus = 200;
 /** `fields` da pré-resposta (autocompletar). Definido sem `preAnswer`: a rota responde sem rascunho. */
 let preFields: Array<Record<string, unknown>> | undefined;
+/** Rascunho de OUTRO formulário (ex.: o do destino), por id do formulário. */
+let otherDrafts: Record<number, Record<string, any>>;
 /** Relógio do back mockado: cada linha gravada pelo PUT ganha um `dt_last_update` mais novo. */
 let clock = 0;
 let nextRowId = 0;
@@ -155,6 +159,7 @@ beforeEach(() => {
   preAnswer = undefined;
   preAnswerStatus = 200;
   preFields = undefined;
+  otherDrafts = {};
   clock = Date.parse("2026-10-07T12:00:00.000Z");
   nextRowId = 1000;
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
@@ -175,9 +180,11 @@ beforeEach(() => {
     if (method === "GET" && url.pathname === "/card/") return json(cardRaw());
     if (method === "GET" && url.pathname === "/form/pre-answer") {
       if (preAnswerStatus !== 200) return json({ message: "falhou" }, preAnswerStatus);
-      if (preAnswer === undefined && preFields === undefined) return json({ message: "rota não mockada" }, 404);
       const formId = Number(url.searchParams.get("id_form"));
-      return json({ fields: preFields ?? [], formsAnswers: preAnswer && preAnswer.form_id === formId ? preAnswer : null });
+      const other = otherDrafts[formId];
+      if (preAnswer === undefined && preFields === undefined && other === undefined) return json({ message: "rota não mockada" }, 404);
+      const answer = preAnswer && preAnswer.form_id === formId ? preAnswer : (other ?? null);
+      return json({ fields: preFields ?? [], formsAnswers: answer });
     }
     if (method === "PUT" && url.pathname === "/form/answer") {
       putFormAnswer(body);
@@ -573,7 +580,8 @@ describe("F2: autocompletar da tela (campo sem valor na pré-resposta)", () => {
     const extra = [
       { id_field: 48, name: "h_atual", title: "Quem atende", type: "COMBO_BOX_USER_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: -2 },
       { id_field: 49, name: "h_cliente", title: "Cidade do cliente", type: "TEXT_SHORT_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 20, ac_child_field_id: 99 },
-      { id_field: 50, name: "h_canal", title: "Canal", type: "RADIO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 20, options: [{ value: "1", label: "Telefone" }] }
+      // Origem = usuário (o texto que a tela compara é o NOME, que o rascunho não traz).
+      { id_field: 50, name: "h_canal", title: "Canal", type: "RADIO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 33, options: [{ value: "1", label: "Telefone" }] }
     ];
     fields = [...baseFields(), ...extra];
     preFields = extra;
@@ -586,6 +594,9 @@ describe("F2: autocompletar da tela (campo sem valor na pré-resposta)", () => {
       "Obrigatórios vazios com autocompletar que o kit não calcula na etapa Triagem (atual): " +
         "Quem atende (usuário atual), Cidade do cliente (campo de vínculo), Canal (opção pelo rótulo)"
     );
+    // A2-F1: o aviso não afirma que a tela preenche (com a origem sem valor útil ela cobra).
+    expect(out?.warning).toContain("a tela tenta preencher");
+    expect(out?.warning).not.toContain("preenche esses campos sozinha");
     expect(out?.warning).not.toContain("—");
   });
 
@@ -647,6 +658,201 @@ describe("F2: autocompletar da tela (campo sem valor na pré-resposta)", () => {
     expect(process.exitCode ?? 0).toBe(0);
     expect(moveBody()?.values).toEqual({ h_resp: 76, h_prio: "2", h_horas: 3 });
     expect(out).toMatchObject({ kept: 1, keptFrom: "rascunho", autocompleted: ["Prioridade"] });
+  });
+});
+
+describe("A2-F1: origem do autocompletar vazia bloqueia, e a opção pelo rótulo é calculada", () => {
+  it("vínculo e opção com a origem sem valor no cartão (como o 233055): a tela não preenche e o obrigatório bloqueia", async () => {
+    const extra = [
+      // Origem que nem existe mais no fluxo (o 113998 do cartão 233055): nenhuma linha no cartão.
+      { id_field: 55, name: "h_det", title: "Detalhe da demanda", type: "TEXT_LONG_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 999, ac_child_field_id: 998 },
+      // Origem com linha VAZIA no cartão (o 115489 do 233055), com vínculo.
+      { id_field: 56, name: "h_urg", title: "Urgência", type: "COMBO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 57, ac_child_field_id: 997, options: [{ value: "1", label: "Alta" }] },
+      // Opção pelo rótulo sem vínculo, origem vazia.
+      { id_field: 58, name: "h_tipo", title: "Tipo", type: "RADIO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 59, options: [{ value: "1", label: "Pedido ACME" }] }
+    ];
+    fields = [
+      ...baseFields(),
+      { id_field: 57, name: "h_entrada", title: "Entrada", type: "COMBO_BOX_FLOW_FIELD", form_id: 900 },
+      { id_field: 59, name: "h_origem", title: "Origem", type: "TEXT_SHORT_FIELD", form_id: 900 },
+      ...extra
+    ];
+    confirmed[0]!.form_answer_fields.push(row(57, ""));
+    preFields = extra;
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    const message = String(dry?.validation.message);
+    expect(message).toContain("Falta para a etapa Triagem (atual): Detalhe da demanda (texto), Urgência (Alta), Tipo (Pedido ACME)");
+    expect(message).not.toContain("autocompletar que o kit não calcula");
+    expect(dry?.warning).toBeUndefined();
+
+    // Com os valores no --set, move (o que a tela pediria ao usuário).
+    process.exitCode = undefined;
+    const ok = await run([
+      "card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento",
+      "--set", "Detalhe da demanda=x", "--set", "Urgência=Alta", "--set", "Tipo=Pedido ACME"
+    ]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(ok?.validation).toMatchObject({ valid: true });
+  });
+
+  it("opção pelo rótulo: o texto da origem casa com o rótulo, sem diferenciar maiúscula, e vai no mover", async () => {
+    const canal = {
+      id_field: 50, name: "h_canal", title: "Canal", type: "RADIO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string",
+      validations: REQUIRED, ac_type: 0, ac_parent_field_id: 20, options: [{ value: "1", label: "Telefone" }, { value: "2", label: "PEDIDO acme" }]
+    };
+    fields = [...baseFields(), canal];
+    preFields = [canal];
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(moveBody()?.values).toEqual({ h_horas: 1, h_resp: 76, h_canal: "2" });
+    expect(out?.autocompleted).toEqual(["Canal"]);
+    expect(out?.warning).toBeUndefined();
+  });
+
+  it("opção pelo rótulo que não casa: a tela deixa o campo vazio e o obrigatório bloqueia", async () => {
+    const canal = {
+      id_field: 50, name: "h_canal", title: "Canal", type: "RADIO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string",
+      validations: REQUIRED, ac_type: 0, ac_parent_field_id: 20, options: [{ value: "1", label: "Telefone" }]
+    };
+    fields = [...baseFields(), canal];
+    preFields = [canal];
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(writes()).toEqual([]);
+    expect(errorMessage()).toContain("Falta para a etapa Triagem (atual): Canal (Telefone)");
+  });
+
+  it("rótulo pelo valueString do GET /card, pelo field_option_id do rascunho e lista de várias opções", () => {
+    fields = [
+      ...baseFields(),
+      { id_field: 64, name: "h_prio_ini", title: "Prioridade inicial", type: "COMBO_BOX_FIELD", form_id: 900, options: [{ id_field_option: 7, value: "3", label: "Alta" }] },
+      { id_field: 65, name: "h_nivel", title: "Nível", type: "COMBO_BOX_FIELD", form_id: 901, options: [{ id_field_option: 8, value: "1", label: "Baixa" }] },
+      { id_field: 66, name: "h_tags", title: "Tags", type: "CHECK_BOX_FIELD", form_id: 900 },
+      { id_field: 70, name: "h_urg2", title: "Urgência", type: "COMBO_BOX_FIELD", form_id: 901, ac_type: 0, ac_parent_field_id: 64, options: [{ value: "9", label: "ALTA" }] },
+      { id_field: 71, name: "h_nivel2", title: "Nível 2", type: "RADIO_BOX_FIELD", form_id: 901, ac_type: 0, ac_parent_field_id: 65, options: [{ value: "5", label: "baixa" }] },
+      { id_field: 72, name: "h_tags2", title: "Tags 2", type: "CHECK_BOX_FIELD", form_id: 901, ac_type: 0, ac_parent_field_id: 66, options: [{ value: "a", label: "Azul" }, { value: "v", label: "Verde" }, { value: "r", label: "Roxo" }] }
+    ];
+    // GET /card: a linha traz o valueString (o rótulo da opção de origem, as tags pelo texto).
+    confirmed[0]!.form_answer_fields.push(
+      row(64, "3", 0, { valueString: "Alta" }),
+      row(66, "x", 0, { valueString: "azul" }),
+      row(66, "y", 1, { valueString: "VERDE" })
+    );
+    const all = normalizeFieldsFromApiResponse(fields);
+    const scope = all.filter((field) => String(field.formId) === "901");
+    const preAnswerRaw = {
+      fields: fields.filter((field) => [70, 71, 72].includes(field.id_field as number)),
+      // Rascunho cru: sem valueString, com o field_option_id (o rótulo vem das opções do campo de origem).
+      formsAnswers: draft([row(65, "1", 0, { field_option_id: 8 })])
+    };
+    const carry = readStepCarryOver({ cardRaw: cardRaw(), preAnswerRaw, formId: "901", fields: scope, flowFields: all });
+    expect(carry.values).toMatchObject({ h_urg2: "9", h_nivel2: "5", h_tags2: ["a", "v"] });
+    expect(carry.autoFilled.map((item) => item.rule)).toEqual(["opcao-pelo-rotulo", "opcao-pelo-rotulo", "opcao-pelo-rotulo"]);
+    expect(carry.autoPending).toEqual([]);
+
+    // Sem as opções do campo de origem, o rótulo da linha do rascunho o kit não sabe: pendente.
+    const blind = readStepCarryOver({ cardRaw: cardRaw(), preAnswerRaw, formId: "901", fields: scope });
+    expect(blind.values.h_nivel2).toBeUndefined();
+    expect(blind.autoPending).toEqual([{ name: "h_nivel2", title: "Nível 2", reason: "opção pelo rótulo" }]);
+  });
+});
+
+describe("A2-F2: o mover apaga o rascunho do formulário que grava (o do destino também)", () => {
+  /** Formulário do destino (Agendamento, 902) com anexo, texto e fórmula. */
+  function withDestinationForm(): void {
+    fields = [
+      ...baseFields(),
+      { id_field: 52, name: "h_comprov", title: "Comprovante", type: "INPUT_ATTACH_FIELD", form_id: 902 },
+      { id_field: 53, name: "h_nota", title: "Nota", type: "TEXT_SHORT_FIELD", form_id: 902 },
+      { id_field: 54, name: "h_tot_dest", title: "Total do destino", type: "FORMULA_FIELD", form_id: 902 }
+    ];
+  }
+
+  /** Rascunho do 902, como o da automação no cartão 494824 (anexos) ou o da tela no 1115530. */
+  function destinationDraft(): Record<string, any> {
+    return draft([row(40, "2026-10-01T00:00:00.000Z"), row(52, "9911"), row(53, "rascunho"), row(54, "42")], { form_id: 902, id_form_answer: 801 });
+  }
+
+  it("payload com o idForm do destino (V1, como o 494824): reenvia o rascunho do destino com o values por cima", async () => {
+    withDestinationForm();
+    flow = { ...flow, use_query_v2: "N" };
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    otherDrafts[902] = destinationDraft();
+    const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 902, values: { h_nota: "do payload" } });
+
+    const dry = await run(["card", "move-step-with-values", "--payload", file, "--dry-run"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(writes()).toEqual([]);
+    expect(dry?.payload).toMatchObject({ idForm: 902, values: { h_data: "2026-10-01T00:00:00.000Z", h_comprov: [9911], h_nota: "do payload" } });
+    expect(dry).toMatchObject({ kept: 2, keptFrom: "rascunho" });
+    // A régua do detector é a mesma fonte: só a fórmula (que o kit não remonta) fica de fora.
+    expect(dry?.dataLossCheck).toMatchObject({ checked: true, orphans: [{ fieldName: "h_tot_dest", currentValue: "42" }] });
+    expect(dry?.warning).toContain("Não reenviados (ficam vazios na etapa Agendamento): Total do destino");
+
+    await run(["card", "move-step-with-values", "--payload", file]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(moveBody()).toMatchObject({ id_form: 902 });
+    expect(moveBody()?.values).toEqual({ h_data: "2026-10-01T00:00:00.000Z", h_comprov: [9911], h_nota: "do payload" });
+  });
+
+  it("idForm omitido (cai no destino) num fluxo V2 (como o 1115530): o dry-run mostra o id_form e reenvia o rascunho dele", async () => {
+    withDestinationForm();
+    flow = { ...flow, use_query_v2: "S" };
+    // Etapa atual sem rascunho: a última passagem (o back remonta), que o V2 não apaga.
+    preAnswer = { origin: "return-step-autocomplete", form_id: 901, flow_step_id: null, form_answer_fields: [row(30, "1"), row(33, "76")] };
+    otherDrafts[902] = destinationDraft();
+    const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, values: {} });
+
+    const dry = await run(["card", "move-step-with-values", "--payload", file, "--dry-run"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(dry?.payload).toMatchObject({ idForm: 902, values: { h_data: "2026-10-01T00:00:00.000Z", h_comprov: [9911], h_nota: "rascunho" } });
+    expect(dry?.dataLossCheck.checked).toBe(true);
+    expect(dry?.dataLossCheck.note).not.toContain("—");
+
+    // O alias deprecado faz igual.
+    const alias = await run(["card", "move-step", "--payload", file, "--dry-run"]);
+    expect(alias?.payload).toMatchObject({ idForm: 902, values: { h_comprov: [9911], h_nota: "rascunho" } });
+  });
+
+  it("--allow-data-loss: grava só o values do payload (perda intencional, sem ler o rascunho do destino)", async () => {
+    withDestinationForm();
+    flow = { ...flow, use_query_v2: "N" };
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    otherDrafts[902] = destinationDraft();
+    const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 902, values: { h_nota: "do payload" } });
+    await run(["card", "move-step-with-values", "--payload", file, "--allow-data-loss"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(moveBody()?.values).toEqual({ h_nota: "do payload" });
+    expect(requests.filter((request) => request.path === "/form/pre-answer" && request.query.get("id_form") === "902")).toEqual([]);
+  });
+
+  it("card move de etapa sem formulário: o mover grava o form do destino com o rascunho dele e o --set por cima", async () => {
+    withDestinationForm();
+    flow = {
+      ...flow,
+      flow_steps: [
+        { id_step: 1, name: "Triagem", form_id: null, index: 1 },
+        { id_step: 2, name: "Agendamento", form_id: 902, index: 2 }
+      ]
+    };
+    otherDrafts[902] = destinationDraft();
+    const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--set", "Nota=novo"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(writes().map((request) => request.path)).toEqual(["/card/v2/move-step"]);
+    expect(moveBody()).toMatchObject({ id_form: 902 });
+    expect(moveBody()?.values).toEqual({ h_data: "2026-10-01T00:00:00.000Z", h_comprov: [9911], h_nota: "novo" });
+    expect(out).toMatchObject({ kept: 2, keptFrom: "rascunho" });
+    expect(out?.warning).toContain("Não reenviados (ficam vazios na etapa Agendamento): Total do destino");
   });
 });
 

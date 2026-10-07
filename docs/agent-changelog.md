@@ -4,6 +4,29 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-07
 
+### Mover: autocompletar com a origem vazia cobra o obrigatório, e o rascunho do formulário gravado vai junto (revisão 2 do EXTRA-06)
+
+- **A2-F1, autocompletar com a origem vazia:** o obrigatório vazio com autocompletar de campo de vínculo
+  (`ac_child_field_id`) ou com destino lista de opções virava aviso sempre, mesmo com o campo de origem vazio no cartão.
+  A tela (`POST /form/answers/by-cards`) não preenche nada nesse caso e o obrigatório cobra: o kit deixava mover o que a
+  tela recusa (cartão 233055, "Urgência" com a origem vazia; 424 cartões ativos no `cange_local`). Agora o kit lê o
+  campo de origem antes: vazio, o campo fica vazio e bloqueia como na tela. A opção pelo rótulo passou a ser calculada
+  como a tela faz (o texto da origem, o `valueString`, casado com o rótulo da opção sem diferenciar maiúscula; linha do
+  rascunho sem `valueString`: o rótulo pelo `field_option_id` nas opções do campo de origem); rótulo que não casa deixa o
+  campo vazio, e o obrigatório cobra. Segue como aviso só o que o kit não calcula: usuário atual, vínculo com a origem
+  preenchida e rótulo de origem que o kit não sabe montar (usuário, data, cadastro). O aviso não afirma mais que a tela
+  preenche ("a tela tenta preencher ao abrir o cartão").
+- **A2-F2, rascunho do formulário gravado:** o `/card/v2/move-step` apaga o rascunho do formulário que GRAVA, em fluxo com
+  ou sem o Flow Query V2. O `--payload` com o form do destino (ou com `idForm` omitido, que cai no destino) e o
+  `card move` de etapa sem formulário apagavam o rascunho do destino sem aviso, e o `dataLossCheck` dizia "Nenhum campo
+  preenchido seria perdido" (cartões 494824, V1, 3 anexos da automação no rascunho do destino, e 1115530, V2; 8.780
+  cartões ativos com rascunho preenchido fora da etapa atual). Agora o kit lê a pré-resposta do formulário gravado (a
+  fonte da tela: rascunho ou última passagem) e a reenvia com o `values` por cima, como na etapa atual, sem o
+  autocompletar (a tela autocompleta quando o cartão chega na etapa). `kept`/`keptFrom` e o `dataLossCheck` usam essa
+  mesma fonte; fórmula e ID automático do rascunho voltam em "Não reenviados". `--allow-data-loss` desliga o reenvio.
+- `idForm` omitido no `--payload`: o kit resolve o form do destino (o mesmo do contrato) antes da checagem, e o dry-run
+  mostra o `idForm` que vai ser gravado. A nota do detector dizia "form da etapa de origem" (era o destino).
+
 ### Erro "sem acesso ou não encontrado" traz o pedido de acesso pronto (`hint`, bancada F2-F6, run 444)
 
 - O agente leu `card list` num fluxo sem acesso, tomou o 404 do back (exit 4), procurou no catálogo pelo nome, não achou

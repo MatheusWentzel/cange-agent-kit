@@ -55,7 +55,12 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
           allowDataLoss: options.allowDataLoss === true
         });
         // EXTRA-06 D1: gravando a etapa atual, reenvia o que o cartão tem nela (o rascunho da tela).
+        // A2-F2: outro formulário, idem com o que a tela mostra nele (o back apaga o rascunho dele).
         payload.values = check.values;
+        // idForm omitido: o form do destino (o mesmo do contrato), visível no dry-run e no --validate-fields.
+        if (payload.idForm === undefined && check.writtenFormId !== "" && check.writtenFormId !== check.ctx.formInitId) {
+          payload.idForm = Number(check.writtenFormId);
+        }
 
         if (options.validateFields) {
           const fieldsData = await kit.contracts.getFieldsByFlow({ flowId: payload.flowId });

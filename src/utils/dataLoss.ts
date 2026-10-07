@@ -34,7 +34,7 @@ interface DetectDataLossInput {
   payload: {
     flowId: number;
     cardId: number;
-    /** Opcional: quando omitido no move, o form da etapa de origem é resolvido no contrato. */
+    /** Opcional: quando omitido no move, o contrato grava o form da etapa de DESTINO (o comando já o resolve antes). */
     idForm?: number;
     values: Record<string, unknown>;
   };
@@ -53,13 +53,13 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
   const { kit, payload } = input;
   const idForm = payload.idForm;
 
-  // Sem idForm não há como escopar a checagem a um form. Nesse caso o form da etapa
-  // de origem é resolvido no contrato do move; aqui apenas pulamos (best-effort).
+  // Sem idForm não há como escopar a checagem a um form. O comando resolve o form do destino
+  // antes (o mesmo do contrato); só chega aqui sem ele quando a etapa de destino não tem form.
   if (idForm == null) {
     return {
       checked: false,
       orphans: [],
-      note: "idForm omitido — checagem de perda de dados pulada (form da etapa de origem resolvido no contrato)."
+      note: "idForm omitido e sem o form da etapa de destino: checagem de perda de dados pulada (o contrato resolve o form do destino)."
     };
   }
 
@@ -128,6 +128,8 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
  * EXTRA-06 D1: o mover grava a etapa atual e o kit já reenvia o que o cartão tem nela
  * (fonte da tela: rascunho ou última passagem). Órfão é o preenchido que ficou fora do
  * `values` (tipo que o kit não remonta, como fórmula, ID automático e anexo fora da pré-resposta).
+ * A2-F2: vale igual para outro formulário gravado pelo mover (o do destino), com a fonte da
+ * tela desse formulário: o back apaga o rascunho dele, e o detector pelo `GET /card` não o via.
  */
 export function dataLossFromCarry(
   carry: CarryOverResult,
