@@ -4,6 +4,28 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-07
 
+### Catálogo pelo número, link ou hash (bancada F2-F6, t06)
+
+- A t06 falhou 2 vezes (frio 5 min, 3ª repetição; quente, 1ª): depois do "sem acesso" no fluxo 316, o agente procurou
+  `cange catalog --q 316`; o back busca só pelo nome, não achou, e o agente perguntou ao usuário em vez de pedir acesso.
+- Agora `--q`/`--search` com um inteiro positivo (`316`, `#316`) procura também pelo id, e um link do Cange
+  (`.../flow/<hash>`, `.../register/<hash>`, `cange://card/<id>?flow=<id>`) ou um hash solto (hex) procura pelo id do
+  fluxo ou cadastro dele. Número também busca pelo nome (um fluxo pode ter o número no nome); link e hash, não.
+- O achado pelo id vem primeiro em `items`, com `match: "id"` e, sem acesso, `request` com o pedido pronto
+  (`cange access request --flow 316 --reason "<por que precisa>"`, a mesma frase do `hint` do erro sem acesso). A
+  nota diz para pedir com o motivo real, sem perguntar ao usuário, e com `--then` quando o acesso é um meio. Com
+  acesso: "leia direto". O `--limit` não corta o achado pelo id. `--raw` com número, link ou hash devolve
+  `{ byName, byId[] }`; `--full` marca o item com `matchedBy: "id"` e `request`.
+- **Sem vazar existência:** o back não busca por id, então o kit lê a lista do catálogo do tipo (sem filtro, até o
+  teto de 500 do back, um tipo por vez) e filtra pelo número. É a mesma visibilidade da busca pelo nome (o que o agente
+  ou quem conversa vê). Fora dela: "não está no seu catálogo; não peça por esse id e não diga que não existe", igual
+  ao `access request`, que recusa sem criar nada (404 `ACCESS_TARGET_NOT_FOUND`, ou 422 `ACCESS_NO_ANCHOR` sem conversa).
+  Lista cortada no teto sem o id: a nota manda ao nome ou ao pedido direto.
+- Hash sem acesso não vira id (`GET /flow?hash=` e `GET /register?hash=` dão 404 justamente por falta de acesso, como
+  no K1 do `access request`): o catálogo não é chamado e a nota manda procurar pelo nome. Link só de cartão: a nota diz
+  que o link não traz o fluxo.
+- Texto continua uma busca só pelo nome, como antes. 2 ou 3 leituras sequenciais com número (nome + lista por tipo).
+
 ### Mover: corte estrito da passagem, referência que a tela não resolve, documento e telefone, autocompletar pelo by-cards (revisão 4 do EXTRA-06)
 
 - **R4-F1, corte estrito:** a resposta confirmada criada pelo movimento que trouxe o cartão para a etapa (o formulário

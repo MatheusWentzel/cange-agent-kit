@@ -95,6 +95,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getAgentHeadDoc: agentHead.getAgentHeadDoc,
     // Rodada 6: catálogo de NOMES de fluxos e cadastros (sem conteúdo).
     getAgentCatalog: resourceAccess.getAgentCatalog,
+    // Bancada F2-F6 (t06): o catálogo pelo número (lista do tipo filtrada pelo id).
+    findAgentCatalogById: resourceAccess.findAgentCatalogById,
     getRegisterFormAnswer: registers.getRegisterFormAnswer,
     // P5 (05/10): usuários da empresa para campo de usuário e menção por nome/e-mail.
     listCompanyUsers: users.listCompanyUsers,

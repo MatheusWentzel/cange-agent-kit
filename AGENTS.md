@@ -174,12 +174,18 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   pode ver, com `access` "sim"/"não" e o papel (`items` [{id, name, type, access, role}]). No chat e na rotina a
   visão é a de quem conversa (ou do dono da rotina) somada à do agente; numa automação sem conversa, só o que o
   agente já vê. Nunca traz conteúdo. `--full` traz o `raw`; `--raw` devolve a resposta crua.
+  **Pelo número** (desde 07/10/2026): `--q 316` (ou `#316`, `--search`) procura também pelo id; link ou hash do Cange
+  procura pelo id do fluxo ou cadastro dele. O achado pelo id vem primeiro, com `match: "id"` e, sem acesso, `request`
+  com o `cange access request --flow 316 --reason "<por que precisa>"` pronto: siga com o motivo real, sem perguntar
+  ao usuário. A busca pelo id lê a mesma lista do catálogo (o que você ou quem conversa vê): fora dela, a nota diz
+  "não está no seu catálogo" (não peça por esse id e não diga que não existe). Hash sem acesso não vira id: procure
+  pelo nome.
 - `cange access request --flow <id> | --register <id> [--role M] --reason "..."`: cria o PEDIDO de acesso no
   servidor (não dá acesso sozinho e não pausa a execução). A aprovação concede sempre Membro (`--role A` dá erro de
   uso: Administrador só pelo bloco Ferramentas > Cange). Quem pode convidar pessoas para o recurso decide. A
   saída traz `approvalId`, `whoCanApprove` e `message` (a frase pronta para a resposta, ex.: "Pedi acesso ao
   fluxo Compras. Quem pode liberar: Ana, Bruno.").
-- Fluxo: não achou no `my-flows` ou tomou 404 de acesso → `cange catalog --q <nome>` → `cange access request`.
+- Fluxo: não achou no `my-flows` ou tomou 404 de acesso → `cange catalog --q <nome ou id>` → `cange access request`.
   Nunca diga que um fluxo não existe sem olhar o catálogo; nunca grave nomes do catálogo na cabeça.
 - Erro 403/404 de "sem acesso ou não encontrado" (exit `4`) num fluxo, cadastro ou cartão que o comando referenciou
   por id (opção, `--payload` ou ambiente do run) traz o campo `hint` no JSON do erro com o pedido pronto, tipo e id

@@ -32,7 +32,7 @@ interface ResourceRefs {
 /** Comandos que já tratam acesso do jeito deles (as dicas por código do back). */
 const SKIP_COMMANDS: ReadonlySet<string> = new Set(["access request", "catalog"]);
 
-const REASON = '--reason "<por que precisa>"';
+export const ACCESS_REASON_FLAG = '--reason "<por que precisa>"';
 
 const POSITIVE_INT_RE = /^[1-9]\d*$/;
 
@@ -127,15 +127,15 @@ async function commandRefs(command: Command, options: Record<string, unknown>): 
 }
 
 function requestHint(type: TargetType, id: string): string {
-  return `Se o recurso existe e você não tem acesso, peça: cange access request --${type} ${id} ${REASON}`;
+  return `Se o recurso existe e você não tem acesso, peça: cange access request --${type} ${id} ${ACCESS_REASON_FLAG}`;
 }
 
 function cardHint(flowId: string | undefined): string {
   if (flowId) {
-    return `Se o cartão existe e você não tem acesso, peça acesso ao fluxo dele: cange access request --flow ${flowId} ${REASON}`;
+    return `Se o cartão existe e você não tem acesso, peça acesso ao fluxo dele: cange access request --flow ${flowId} ${ACCESS_REASON_FLAG}`;
   }
   return (
-    `Se o cartão existe e você não tem acesso, peça acesso ao fluxo dele: cange access request --flow <id do fluxo> ${REASON} ` +
+    `Se o cartão existe e você não tem acesso, peça acesso ao fluxo dele: cange access request --flow <id do fluxo> ${ACCESS_REASON_FLAG} ` +
     "(ache o id em cange catalog --q <nome do fluxo>)"
   );
 }

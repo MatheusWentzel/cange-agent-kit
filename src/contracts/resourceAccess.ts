@@ -72,8 +72,25 @@ export interface AccessRequestResult {
   continuation: ContinuationEcho | null;
 }
 
+/**
+ * Busca pelo NÚMERO no catálogo (bancada F2-F6, t06): o back só filtra pelo nome,
+ * então o kit lê a lista do tipo (até o teto do back, sem filtro) e procura o id.
+ * Mesma visibilidade do catálogo por nome (o que o agente ou quem conversa vê):
+ * nada que a busca pelo nome não mostraria.
+ */
+export interface CatalogIdLookup {
+  anchor: AgentCatalog["anchor"];
+  scope: string | null;
+  /** O recurso com esse id, por tipo (no máximo um fluxo e um cadastro). */
+  items: CatalogItem[];
+  /** Tipos em que o id não apareceu e a lista veio cortada no teto: o id pode estar fora dela. */
+  incompleteTypes: ResourceType[];
+  raw: unknown[];
+}
+
 export interface ResourceAccessContracts {
   getAgentCatalog: (input?: { type?: CatalogType; q?: string; limit?: number }) => Promise<AgentCatalog & { raw: unknown }>;
+  findAgentCatalogById: (input: { type?: CatalogType; id: number }) => Promise<CatalogIdLookup>;
   requestResourceAccess: (input: {
     type: ResourceType;
     resourceId: number;
@@ -112,6 +129,35 @@ export function createResourceAccessContracts(client: CangeClient): ResourceAcce
         items,
         truncated: normalized.truncated || normalized.total > items.length
       };
+    },
+
+    async findAgentCatalogById(input) {
+      const type = input.type ?? "all";
+      if (!(CATALOG_TYPES as readonly string[]).includes(type)) {
+        throw new CangeValidationError(`--type precisa ser flow, register ou all (recebido: ${String(type)}).`);
+      }
+      if (!Number.isSafeInteger(input.id) || input.id <= 0) {
+        throw new CangeValidationError("O id do fluxo ou do cadastro deve ser um inteiro positivo.");
+      }
+      const types: ResourceType[] = type === "all" ? [...RESOURCE_TYPES] : [type as ResourceType];
+      const lookup: CatalogIdLookup = { anchor: null, scope: null, items: [], incompleteTypes: [], raw: [] };
+      // Um tipo por vez e com o teto do back: com 'all' o back divide o limite entre os tipos.
+      for (const current of types) {
+        const raw = await client.get<unknown>("/agent-run/catalog", {
+          query: { type: current, limit: CATALOG_MAX_LIMIT }
+        });
+        lookup.raw.push(raw);
+        const normalized = normalizeCatalog(raw);
+        lookup.anchor ??= normalized.anchor;
+        lookup.scope ??= normalized.scope;
+        const hit = normalized.items.find((item) => item.type === current && item.id === input.id);
+        if (hit) {
+          lookup.items.push(hit);
+        } else if (normalized.truncated || normalized.total > normalized.items.length) {
+          lookup.incompleteTypes.push(current);
+        }
+      }
+      return lookup;
     },
 
     async requestResourceAccess(input) {
