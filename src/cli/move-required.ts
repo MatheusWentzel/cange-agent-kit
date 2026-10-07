@@ -460,8 +460,11 @@ export async function checkPayloadMove(
     carry
   };
 
-  // Gravando outro formulário, o rascunho da etapa atual some ao sair dela (o back apaga).
-  if (!writesOrigin && carry.source === "rascunho" && !options.allowDataLoss) {
+  // Gravando outro formulário, o rascunho da etapa atual some ao sair dela: o back apaga
+  // (MoveCardService, clearPreAnswerAndSnapshotForCardLeavingStep) só no fluxo com o Flow
+  // Query V2 ligado. No fluxo sem ele o rascunho fica e volta a aparecer na tela quando o
+  // cartão voltar à etapa: não há perda e o kit não bloqueia.
+  if (!writesOrigin && carry.source === "rascunho" && !options.allowDataLoss && clearsDraftOnLeave(ctx.flowRecord)) {
     const draftOnly = draftOnlyFields(card.raw, origin, carry);
     if (draftOnly.length > 0) {
       issues.push({
@@ -527,6 +530,16 @@ export async function checkPayloadMove(
     checklist.warning
   );
   return { ...base, issues, ...(warning ? { warning } : {}) };
+}
+
+/**
+ * O back apaga o rascunho da etapa que o cartão deixa (`use_query_v2 = 'S'`). Sem o campo
+ * no fluxo (back antigo, fluxo montado à mão), conta como apaga: o bloqueio é o lado seguro.
+ */
+export function clearsDraftOnLeave(flow: Record<string, unknown>): boolean {
+  const flag = flow.use_query_v2 ?? flow.useQueryV2;
+  if (flag === undefined || flag === null || String(flag).trim() === "") return true;
+  return String(flag).trim().toUpperCase() === "S";
 }
 
 /** Campos preenchidos no rascunho da etapa com valor que as respostas confirmadas não têm. */

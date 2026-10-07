@@ -31,7 +31,9 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   flag e o comando a recusava.
 - `card move-step-with-values --payload` (e `card move-step`) que grava a etapa atual reenvia o que o cartão tem nela,
   com o `values` por cima (antes bloqueava pedindo para o agente incluir). `--allow-data-loss` desliga o reenvio.
-  Payload que grava OUTRO formulário com rascunho só na etapa atual: bloqueia (use `card move` ou `--allow-data-loss`).
+  Payload que grava OUTRO formulário com rascunho só na etapa atual: bloqueia (use `card move` ou `--allow-data-loss`),
+  só em fluxo com o Flow Query V2 ligado (`use_query_v2 = 'S'`), o único em que o back apaga o rascunho da etapa que o
+  cartão deixa; no fluxo sem ele o rascunho fica e o kit não bloqueia.
 - Saída do mover: `kept` e `keptFrom` (`rascunho` | `ultima-passagem` | `vazio` | `cartao`). `vazio`: a pré-resposta
   voltou sem nada (sem rascunho com linha e sem última passagem que o back remonte, como a que só tinha anexo) e a
   tela abre o formulário vazio, só com o autocompletar: o kit também, sem olhar o `GET /card`. `cartao` só quando o

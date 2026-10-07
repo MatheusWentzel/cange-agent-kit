@@ -698,6 +698,19 @@ describe("EXTRA-06 D1: mover por --payload", () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
+  it("fluxo sem o Flow Query V2 (use_query_v2 = 'N'): o back não apaga o rascunho ao sair da etapa, então o payload de outro formulário não bloqueia", async () => {
+    preAnswer = draft([row(30, "2"), row(33, "76"), row(31, "rascunho")]);
+    const body = { flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 902, values: { h_data: "2026-10-06T00:00:00.000Z" } };
+
+    flow = { ...flow, use_query_v2: "N" };
+    await run(["card", "move-step-with-values", "--payload", await payloadFile(body), "--dry-run"]);
+    expect(process.exitCode ?? 0).toBe(0);
+
+    flow = { ...flow, use_query_v2: "S" };
+    await run(["card", "move-step-with-values", "--payload", await payloadFile(body), "--dry-run"]);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+  });
+
   it("F3: card move-step (deprecado) aceita o --allow-data-loss que a mensagem de bloqueio sugere", async () => {
     preAnswer = draft([row(30, "2"), row(33, "76")]);
     const file = await payloadFile({
