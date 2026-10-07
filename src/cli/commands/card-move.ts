@@ -89,7 +89,7 @@ export function registerCardMoveCommand(cardCommand: Command): void {
   annotateCommand(command, {
     mutates: true,
     envelope:
-      "{ ok, cardId, flowId, fromStepId, toStepId, written[], kept, keptFrom?, autocompleted?, summary, warning? }. --dry-run: { dryRun, executed:false, calls[{call, action, form, payload}], kept, keptFrom, autocompleted?, validation }. keptFrom: rascunho (pré-resposta da etapa, o que a tela mostra) | ultima-passagem | cartao. autocompleted: campos vazios que o autocompletar da tela preenche (o mover leva o valor)",
+      "{ ok, cardId, flowId, fromStepId, toStepId, written[], kept, keptFrom?, autocompleted?, summary, warning? }. --dry-run: { dryRun, executed:false, calls[{call, action, form, payload}], kept, keptFrom, autocompleted?, validation }. keptFrom: rascunho (pré-resposta da etapa, o que a tela mostra) | ultima-passagem | vazio (a tela abre o formulário vazio) | cartao (back sem a rota). autocompleted: campos vazios que o autocompletar da tela preenche (o mover leva o valor)",
     fieldsLocation:
       "Origem = etapa atual do cartão. Mover exige os obrigatórios da etapa atual (faltou = exit 2 com o comando pronto); peça ao usuário o que não estiver no pedido. Campo pelo título, id ou hash, de qualquer um dos 3 formulários (etapa atual, destino, inicial). Mesma etapa = use card update-values.",
     example: 'card move --card-id 1234 --to "Agendamento" --set "Data da ligação=06/10/2026" --set "Valor do Negócio=2.500,00"'

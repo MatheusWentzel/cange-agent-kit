@@ -30,7 +30,10 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 - `card move-step-with-values --payload` (e `card move-step`) que grava a etapa atual reenvia o que o cartão tem nela,
   com o `values` por cima (antes bloqueava pedindo para o agente incluir). `--allow-data-loss` desliga o reenvio.
   Payload que grava OUTRO formulário com rascunho só na etapa atual: bloqueia (use `card move` ou `--allow-data-loss`).
-- Saída do mover: `kept` e `keptFrom` (`rascunho` | `ultima-passagem` | `cartao`).
+- Saída do mover: `kept` e `keptFrom` (`rascunho` | `ultima-passagem` | `vazio` | `cartao`). `vazio`: a pré-resposta
+  voltou sem nada (sem rascunho com linha e sem última passagem que o back remonte, como a que só tinha anexo) e a
+  tela abre o formulário vazio, só com o autocompletar: o kit também, sem olhar o `GET /card`. `cartao` só quando o
+  back não tem a rota.
 - **Obrigatório = o que a tela cobra:** regra `required` do campo (`validations` do `GET /field/by-flow`), não a coluna
   `required`. Switch nunca é cobrado (92 de 92 sem regra), check list sem regra também não (32 de 190), e campo com
   regra e coluna 0 passa a ser cobrado. Sem a lista `validations` (back antigo), vale a coluna. Vale no mover, no

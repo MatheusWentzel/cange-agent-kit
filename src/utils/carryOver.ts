@@ -40,11 +40,17 @@ import { isEmptyForField, isRichTextType } from "./requiredFields.js";
  * O kit faz igual (`applyAutoComplete`): estático, data atual, criador do cartão e o valor
  * de outro campo do cartão. O que o kit não calcula (usuário atual, campo de vínculo,
  * opção pelo rótulo) vai para `autoPending` e o obrigatório vazio vira aviso.
- * Sem a rota (404) ou sem nada nela, vale o `GET /card` como antes.
+ *
+ * A rota respondeu SEM nada (nem rascunho com linha, nem última passagem elegível): a tela
+ * abre o formulário vazio, só com o autocompletar (`usePreAnswer`, ramo "No existing
+ * answers"), e o kit também (`vazio`). Antes o kit caía no `GET /card` e contava o que a
+ * tela não mostra: anexo da passagem anterior (o back não reaproveita anexo entre
+ * passagens) e valor de passagem mais antiga quando a última veio sem linha (184 cartões
+ * ativos no cange_local, 07/10). Só sem a rota (404, back antigo) vale o `GET /card`.
  */
 
 /** De onde veio o que o cartão tem na etapa atual. */
-export type CarrySource = "rascunho" | "ultima-passagem" | "cartao";
+export type CarrySource = "rascunho" | "ultima-passagem" | "vazio" | "cartao";
 
 /** Regra do autocompletar que deu o valor (o que a tela faria no campo sem valor). */
 export type AutoFillRule = "estatico" | "data-atual" | "criador-do-cartao" | "campo-do-cartao";
@@ -56,7 +62,10 @@ export interface CarryOverResult {
   filled: Set<string>;
   /** Preenchidos que não dá para reenviar (o mover deixa vazios no snapshot novo). */
   notKept: Array<{ name: string; title?: string }>;
-  /** `rascunho` = pré-resposta da etapa (o mover apaga), `ultima-passagem` = o que o back remonta, `cartao` = GET /card. */
+  /**
+   * `rascunho` = pré-resposta da etapa (o mover apaga), `ultima-passagem` = o que o back remonta,
+   * `vazio` = a rota respondeu sem nada (a tela abre o formulário vazio), `cartao` = GET /card (back sem a rota).
+   */
   source: CarrySource;
   /** Valor gravado em texto por campo (detector de perda de dados). */
   stored: Map<string, string>;
@@ -138,7 +147,11 @@ export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
   let result: CarryOverResult;
   let draft: Record<string, unknown> | undefined;
   if (!pre) {
-    result = readCarryOver(input.cardRaw, input.formId, input.fields);
+    // Sem a rota (404): o GET /card, como antes. A rota respondeu sem nada: vazio, como a tela.
+    result =
+      input.preAnswerRaw === undefined
+        ? readCarryOver(input.cardRaw, input.formId, input.fields)
+        : build([], input.fields, "vazio");
   } else if (String(pre.origin ?? "") === SYNTHETIC_ORIGIN || firstDefined(pre.id_form_answer, pre.id) === undefined) {
     result = build([pre], input.fields, "ultima-passagem");
   } else {

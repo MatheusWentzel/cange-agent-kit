@@ -262,6 +262,29 @@ describe("EXTRA-06 D1: card move lê a pré-resposta da etapa atual e reenvia", 
     expect(errorMessage()).toContain("Falta para a etapa Triagem (atual): Horas (número), Responsável pelo Atendimento");
   });
 
+  it("rota sem nada (passagem anterior só com anexo ou sem linha): a tela abre vazio e o kit cobra igual", async () => {
+    // O GET /card tem Horas e Responsável de uma passagem antiga; a pré-resposta volta sem
+    // formsAnswers (o back não remonta a última passagem sem linha elegível).
+    confirmed[1]!.form_answer_fields = [row(30, "4"), row(33, "76"), row(36, "9001")];
+    preFields = [];
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(writes()).toEqual([]);
+    expect(errorMessage()).toContain("Falta para a etapa Triagem (atual): Horas (número), Responsável pelo Atendimento");
+
+    process.exitCode = undefined;
+    stderr.length = 0;
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run([
+      "card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento",
+      "--set", "Horas=4", "--set", "Responsável pelo Atendimento=76"
+    ]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(dry).toMatchObject({ validation: { valid: true }, kept: 0, keptFrom: "vazio" });
+    expect(dry?.calls[0]?.payload.values).toEqual({ h_horas: 4, h_resp: 76 });
+  });
+
   it("back sem a rota (404): vale o GET /card como antes", async () => {
     confirmed[1]!.form_answer_fields = [row(30, "4"), row(33, "76")];
     const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
@@ -781,7 +804,7 @@ describe("EXTRA-06 D5: check list com formula '1' exige todos os itens marcados"
 });
 
 describe("readStepCarryOver: escolhe a fonte como a tela", () => {
-  it("rascunho com campo gravado vence; sem campo no rascunho, cai no GET /card", () => {
+  it("rascunho com campo gravado vence; rota sem nada abre vazio (não cai no GET /card)", () => {
     const list = normalizeFieldsFromApiResponse(baseFields());
     const scope = list.filter((field) => String(field.formId) === "901");
     const withDraft = readStepCarryOver({
@@ -799,7 +822,19 @@ describe("readStepCarryOver: escolhe a fonte como a tela", () => {
       formId: "901",
       fields: scope
     });
-    expect(emptyDraft.source).toBe("cartao");
-    expect(emptyDraft.values).toEqual({ h_obs: "antigo" });
+    // A rota devolveu o rascunho sem linha (e nenhuma última passagem elegível): a tela abre o
+    // formulário vazio, então o "antigo" da resposta confirmada não conta.
+    expect(emptyDraft.source).toBe("vazio");
+    expect(emptyDraft.values).toEqual({});
+    expect(emptyDraft.filled.size).toBe(0);
+
+    const noAnswer = readStepCarryOver({ cardRaw: cardRaw(), preAnswerRaw: { fields: [] }, formId: "901", fields: scope });
+    expect(noAnswer.source).toBe("vazio");
+    expect(noAnswer.values).toEqual({});
+
+    // Só sem a rota (back antigo) vale o GET /card.
+    const noRoute = readStepCarryOver({ cardRaw: cardRaw(), preAnswerRaw: undefined, formId: "901", fields: scope });
+    expect(noRoute.source).toBe("cartao");
+    expect(noRoute.values).toEqual({ h_obs: "antigo" });
   });
 });
