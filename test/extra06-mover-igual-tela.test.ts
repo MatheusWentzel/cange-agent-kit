@@ -525,6 +525,38 @@ describe("F2: autocompletar da tela (campo sem valor na pré-resposta)", () => {
     expect(out?.warning).not.toContain("—");
   });
 
+  it("autocompletar pendente MANDADO vazio (como o anexo do card 1121209): é campo limpo e bloqueia, como a tela", async () => {
+    // Anexo obrigatório com autocompletar estático: o kit não remonta anexo (fica pendente),
+    // mas o agente mandou o campo vazio. Na tela o autocompletar só roda ao abrir o cartão:
+    // quem limpa o campo fica com ele vazio e o obrigatório cobra.
+    const extra = [
+      {
+        id_field: 51, name: "h_contrato", title: "Contrato", type: "INPUT_ATTACH_FIELD", form_id: 901, required: "1",
+        validation_type: "mixed", validations: REQUIRED, ac_type: 1, ac_parent_field_id: null,
+        auto_complete: { id_form_answer: 9, form_answer_fields: [{ id_form_answer_field: 1, field_id: 51, index: 0, value: "1166868", deleted: null }] }
+      }
+    ];
+    fields = [...baseFields(), ...extra];
+    preFields = extra;
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    for (const sent of ["", []] as const) {
+      process.exitCode = undefined;
+      stderr.length = 0;
+      requests.length = 0;
+      await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--values-json", JSON.stringify({ Contrato: sent })]);
+      expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+      expect(writes()).toEqual([]);
+      expect(errorMessage()).toContain("Falta para a etapa Triagem (atual): Contrato");
+    }
+
+    // Sem mandar o campo: segue aviso (a tela poria o anexo do autocompletar).
+    process.exitCode = undefined;
+    stderr.length = 0;
+    const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(out?.warning).toContain("Contrato (tipo que o kit não remonta)");
+  });
+
   it("outro obrigatório bloqueia: a dica cita os pendentes de autocompletar sem cobrá-los", async () => {
     const extra = [
       { id_field: 48, name: "h_atual", title: "Quem atende", type: "COMBO_BOX_USER_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: -2 }

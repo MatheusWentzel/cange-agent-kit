@@ -24,7 +24,9 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   "Falta" em cerca de 10,8 mil cartões (ex.: Prioridade "Média" no cartão 1120391). Saída nova: `autocompleted` (títulos).
   **Pendência:** o kit NÃO calcula o autocompletar de usuário atual (`-2`), de campo de vínculo (`ac_child_field_id`) e
   com destino lista de opções (a tela casa pelo rótulo). Obrigatório vazio com um desses não bloqueia: volta em `warning`
-  (como o da condicional); mande o valor com `--set` no mover.
+  (como o da condicional); mande o valor com `--set` no mover. Campo com esse autocompletar MANDADO vazio no mover
+  (`--set`/`--values-json`/`values` do payload) é campo limpo e bloqueia, como na tela (o autocompletar só roda ao
+  abrir o cartão).
 - `card move-step` (deprecado) aceita `--allow-data-loss` (revisão F3): a mensagem de bloqueio do rascunho sugeria a
   flag e o comando a recusava.
 - `card move-step-with-values --payload` (e `card move-step`) que grava a etapa atual reenvia o que o cartão tem nela,

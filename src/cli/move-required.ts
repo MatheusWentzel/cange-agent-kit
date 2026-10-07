@@ -88,13 +88,19 @@ interface RequiredSplit {
   autoPending: NormalizedField[];
 }
 
+/**
+ * `values` = o que vai no mover. Campo com autocompletar pendente que veio nele foi mandado
+ * pelo agente (o kit não calculou o autocompletar, então não o pôs ali): mandado vazio é
+ * campo limpo e bloqueia, como na tela (o autocompletar só roda ao abrir o cartão).
+ */
 function splitByConditional(
   missing: NormalizedField[],
   step: FlowStepSummary,
-  carry?: Pick<CarryOverResult, "autoPending">
+  carry?: Pick<CarryOverResult, "autoPending">,
+  values: Record<string, unknown> = {}
 ): RequiredSplit {
   const names = conditionalFieldNames(step);
-  const pending = new Set((carry?.autoPending ?? []).map((item) => item.name));
+  const pending = new Set((carry?.autoPending ?? []).map((item) => item.name).filter((name) => !(name in values)));
   return {
     blocking: missing.filter((field) => !names.has(field.name) && !pending.has(field.name)),
     conditional: missing.filter((field) => names.has(field.name)),
@@ -224,7 +230,7 @@ export function originRequired(input: OriginRequiredInput): OriginRequiredResult
   if (!origin) return { issues: [] };
   if (skipsRequiredOnBackwardMove(input.ctx.flowRecord, input.fromStep, input.toStep)) return { issues: [] };
   const missing = missingRequiredFields(origin, input.values, input.filled);
-  const { blocking, conditional, autoPending } = splitByConditional(missing, input.fromStep, input.carry);
+  const { blocking, conditional, autoPending } = splitByConditional(missing, input.fromStep, input.carry, input.values);
   const checklist = pendingChecklists(origin, input.fromStep, input.values);
   if (blocking.length === 0) {
     const warning = joinWarnings(
@@ -479,7 +485,7 @@ export async function checkPayloadMove(
   const missing = missingRequiredFields(origin, counted, filled);
   // O autocompletar só vai quando o mover grava a etapa atual com o reenvio; sem ele, o
   // obrigatório com autocompletar pendente segue bloqueando (nada o preencheria).
-  const { blocking, conditional, autoPending } = splitByConditional(missing, fromStep, resend ? carry : undefined);
+  const { blocking, conditional, autoPending } = splitByConditional(missing, fromStep, resend ? carry : undefined, counted);
   // Preenchido no cartão e fora do values (só com --allow-data-loss): motivo próprio. Mandado vazio = falta.
   const notResent = blocking.filter((field) => carry.filled.has(field.name) && !(field.name in counted));
   const empty = blocking.filter((field) => !notResent.includes(field));
