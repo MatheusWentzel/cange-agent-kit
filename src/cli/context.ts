@@ -11,6 +11,7 @@ import { encodeToon, ListOutput, listOutput, resolveOutputFormat, type OutputFor
 
 import { getCommandMeta } from "./command-metadata.js";
 import { EXIT_CODES, exitCodeForError, type ExitCode } from "./exit-codes.js";
+import { withNoAccessHint } from "./no-access-hint.js";
 import { resolveOutputMode } from "./output-mode.js";
 import { normalizeIdOptions, type CardLocator, type FlowResolution, type HashResolver } from "./resource-ref.js";
 
@@ -100,8 +101,11 @@ export function createCommandAction<TArgs extends unknown[]>(
         printOutput(ctx, output);
       }
     } catch (error) {
-      ctx.printer.printError(error);
-      process.exitCode = exitCodeForError(error);
+      // Bancada F2-F6 (run 444): 403/404 de "sem acesso ou não encontrado" de um
+      // fluxo, cadastro ou cartão do comando ganha o `hint` com o `access request`.
+      const reported = await withNoAccessHint(error, command, args.at(-2));
+      ctx.printer.printError(reported);
+      process.exitCode = exitCodeForError(reported);
     }
   };
 }

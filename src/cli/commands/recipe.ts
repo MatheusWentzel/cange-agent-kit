@@ -110,7 +110,8 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
       "   Busque por uma parte curta do nome; veio muita coisa: refine o texto ou use `--page-size 50`.",
       "3) O `id` de cada item em `entries` é o id da entrada. Para gravar num campo de cadastro do cartão, o `--set`",
       "   aceita o nome da entrada (`--set \"Cliente=ACME\"`, o kit busca e recusa se casar com 0 ou 2+) ou o id.",
-      "4) 404 ou \"sem acesso\": `cange catalog --type register --q <nome do cadastro>` e, com access \"não\",",
+      "4) 404 ou \"sem acesso\": o erro traz `hint` com o `cange access request` pronto (tipo e id do comando); siga-o.",
+      "   Sem o id: `cange catalog --type register --q <nome do cadastro>` e, com access \"não\",",
       "   `cange access request --register <id> --reason \"<para que precisa>\"`. Não existe `cange search`."
     ]
   },

@@ -9,6 +9,12 @@ export interface CangeErrorContext {
   code?: string;
   /** `Retry-After` da resposta (em segundos) — presente tipicamente em 429. */
   retryAfterSeconds?: number;
+  /**
+   * Próximo passo em uma linha, para o agente (ex.: o `cange access request` certo
+   * quando o back responde "sem acesso ou não encontrado"). Sai como campo `hint`
+   * no JSON do erro, depois dos outros; a mensagem do back fica intacta.
+   */
+  hint?: string;
 }
 
 interface CangeErrorSerialized {
@@ -20,6 +26,7 @@ interface CangeErrorSerialized {
   code?: string;
   retryAfterSeconds?: number;
   details?: unknown;
+  hint?: string;
 }
 
 export class CangeError extends Error {
@@ -29,6 +36,7 @@ export class CangeError extends Error {
   public readonly details?: unknown;
   public readonly code?: string;
   public readonly retryAfterSeconds?: number;
+  public readonly hint?: string;
 
   public constructor(message: string, context: CangeErrorContext = {}) {
     super(message, context.cause ? { cause: context.cause } : undefined);
@@ -39,6 +47,7 @@ export class CangeError extends Error {
     this.details = sanitizeSensitive(context.details);
     this.code = context.code;
     this.retryAfterSeconds = context.retryAfterSeconds;
+    this.hint = context.hint;
   }
 
   public toJSON(): CangeErrorSerialized {
@@ -49,6 +58,7 @@ export class CangeError extends Error {
     if (this.code !== undefined) out.code = this.code;
     if (this.retryAfterSeconds !== undefined) out.retryAfterSeconds = this.retryAfterSeconds;
     if (this.details !== undefined) out.details = this.details;
+    if (this.hint !== undefined) out.hint = this.hint;
     return out;
   }
 }

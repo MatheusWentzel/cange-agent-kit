@@ -179,6 +179,11 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   fluxo Compras. Quem pode liberar: Ana, Bruno.").
 - Fluxo: não achou no `my-flows` ou tomou 404 de acesso → `cange catalog --q <nome>` → `cange access request`.
   Nunca diga que um fluxo não existe sem olhar o catálogo; nunca grave nomes do catálogo na cabeça.
+- Erro 403/404 de "sem acesso ou não encontrado" (exit `4`) num fluxo, cadastro ou cartão que o comando referenciou
+  por id (opção, `--payload` ou ambiente do run) traz o campo `hint` no JSON do erro com o pedido pronto, tipo e id
+  certos: `Se o recurso existe e você não tem acesso, peça: cange access request --flow 316 --reason "<por que precisa>"`.
+  Cartão vira o pedido do fluxo dele (`access request` só pede fluxo ou cadastro). Siga o `hint` com o motivo real; não
+  pergunte ao usuário se deve pedir. O back não separa "não existe" de "sem acesso"; se o id foi inventado, confira antes.
 - Tarefa seguinte (desde 03/10/2026): quando o acesso (ou a mudança na cabeça, `cange agent head propose`) é um
   MEIO para o que pediram numa conversa, passe `--then "<o que falta fazer>"`. O kit manda `then` no corpo; o
   Cange guarda (uma linha, até 1.000 caracteres) só se o run é de conversa e, aprovado o pedido, retoma a conversa

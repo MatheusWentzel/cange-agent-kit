@@ -4,6 +4,22 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-07
 
+### Erro "sem acesso ou não encontrado" traz o pedido de acesso pronto (`hint`, bancada F2-F6, run 444)
+
+- O agente leu `card list` num fluxo sem acesso, tomou o 404 do back (exit 4), procurou no catálogo pelo nome, não achou
+  e perguntou ao usuário em vez de pedir acesso. Agora o erro de API 403/404 cuja frase é de acesso ("sem acesso",
+  "não possuí/tem acesso", "acesso negado") ou de "não foi possível encontrar" um fluxo, cadastro ou cartão, num
+  recurso que o comando referenciou por id, ganha o campo `hint` no JSON do erro (stderr), depois dos outros:
+  `Se o recurso existe e você não tem acesso, peça: cange access request --flow 316 --reason "<por que precisa>"`
+  (`--register <id>` para cadastro). Cartão: `peça acesso ao fluxo dele` com o `--flow` do comando; sem o fluxo, o
+  comando com `<id do fluxo>` e o caminho do catálogo.
+- Ids: opção do comando (já normalizada de link ou hash), `--payload` e, por fim, o ambiente do run (o fluxo do run só
+  vale sem cartão ou para o próprio cartão do run). Sem `hint`: frase que nomeia outro recurso (etapa, formulário,
+  campo, anexo, vínculo "relacionado" etc.), frase que exige administrador (Flow Build: o pedido só dá Membro) e o
+  `CARD_NOT_FOUND`/`CARD_DELETED` do `GET /card` (o fluxo passou na checagem de acesso; o cartão é que não está nele).
+  `access request` e `catalog` ficam com as dicas próprias.
+- Sem mudança na mensagem do back, no código de saída (4) nem nos outros campos do JSON.
+
 ### Mover igual à tela: rascunho da etapa, obrigatório da tela e check list (E2E do lote, EXTRA-06)
 
 - **P0, perda de dado:** o kit decidia o que o cartão tem pelo `GET /card`, que não traz o rascunho da etapa
