@@ -48,6 +48,13 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   tabela sem texto (a tela entrega "" ao formulário nesses casos e o obrigatório recusa).
 - **Check list "exigir todos concluídos"** (`formula = '1'`): item sem marcar bloqueia o mover, como a tela. O check list
   e a lista de itens agora são reenviados no mover (antes ficavam vazios no snapshot novo).
+- **Anexo e botão do rascunho vão no mover** (revalidação do EXTRA-06): a tela manda o anexo como a lista de ids
+  (`id_attachment`) e o botão como o JSON do último clique, e o back grava as mesmas linhas na resposta nova. O kit
+  deixava os dois em "Não reenviados" e o anexo que a pessoa subiu na etapa, que só existe no rascunho, sumia no mover
+  (1.549 cartões ativos no `cange_local` com anexo no rascunho da etapa atual; 358 com botão). Agora vão, da
+  pré-resposta (rascunho ou última passagem; a última passagem do back já vem sem anexo). Da confirmada mais nova que o
+  rascunho e do `GET /card` (back sem a rota) seguem fora, e o autocompletar de anexo segue pendente. Fórmula e ID
+  automático continuam em "Não reenviados" (o kit não calcula).
 
 ### `cards count/sum` e `card list` no V1 com fluxo grande seguem o cursor (EXE-K1, EXE-K3)
 

@@ -330,7 +330,7 @@ export function autocompletedTitles(carry: CarryOverResult | undefined, sent: Re
   return (carry?.autoFilled ?? []).filter((item) => !(item.name in sent)).map((item) => item.title ?? item.name);
 }
 
-/** Aviso dos preenchidos que o mover não consegue reenviar (anexo, fórmula, ID automático). */
+/** Aviso dos preenchidos que o mover não consegue reenviar (fórmula, ID automático, anexo fora da pré-resposta). */
 export function notKeptWarning(step: FlowStepSummary, carry: CarryOverResult | undefined): string | undefined {
   const notKept = carry?.notKept ?? [];
   if (notKept.length === 0) return undefined;

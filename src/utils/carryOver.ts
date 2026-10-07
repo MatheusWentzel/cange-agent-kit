@@ -12,9 +12,9 @@ import { isEmptyForField, isRichTextType } from "./requiredFields.js";
  * `values` (a tela manda o formulário inteiro da etapa, já carregado com o que o
  * cartão tem). Mandar só o campo novo esvaziaria os outros no snapshot. Aqui o
  * kit remonta o valor gravado de cada campo do formulário, no formato que o back
- * aceita de volta. Tipo que não dá para remontar com segurança (anexo, ID
- * automático, fórmula) vai para `notKept`: o comando avisa e `--fail-on-data-loss`
- * bloqueia.
+ * aceita de volta. Tipo que não dá para remontar com segurança (ID automático,
+ * fórmula, e anexo fora da pré-resposta) vai para `notKept`: o comando avisa e
+ * `--fail-on-data-loss` bloqueia.
  *
  * EXTRA-06 D1 (07/10/2026, P0): a FONTE do que o cartão tem na etapa é a mesma da tela,
  * o `GET /form/pre-answer?card_id=&id_form=<form da etapa atual>`:
@@ -47,6 +47,15 @@ import { isEmptyForField, isRichTextType } from "./requiredFields.js";
  * tela não mostra: anexo da passagem anterior (o back não reaproveita anexo entre
  * passagens) e valor de passagem mais antiga quando a última veio sem linha (184 cartões
  * ativos no cange_local, 07/10). Só sem a rota (404, back antigo) vale o `GET /card`.
+ *
+ * Anexo e botão da pré-resposta (07/10, revalidação do EXTRA-06): a tela também os manda
+ * no mover (o InputAttach devolve a lista de `id_attachment`, o botão o JSON do último
+ * clique) e o back grava as mesmas linhas na resposta nova. O kit faz igual com o que veio
+ * da pré-resposta (`PRE_ANSWER_ONLY_TYPES`). Antes ficavam em `notKept`: o anexo que a
+ * pessoa subiu na etapa, que só existe no rascunho, sumia no mover (1.549 cartões ativos
+ * no cange_local com anexo no rascunho da etapa atual). Da confirmada mais nova que o
+ * rascunho e do `GET /card` eles seguem fora (a tela não os mostra; o back não reaproveita
+ * anexo entre passagens), e o autocompletar de anexo segue pendente.
  */
 
 /** De onde veio o que o cartão tem na etapa atual. */
@@ -86,6 +95,12 @@ const MULTI_TEXT_TYPES = new Set(["CHECK_BOX_FIELD", "CHECKBOX_FIELD"]);
  * `label` é o item em JSON, com o `checked`.
  */
 const ITEM_LIST_TYPES = new Set(["CHECK_LIST_FIELD", "INPUT_LIST_FIELD"]);
+/**
+ * Reenviados só quando vêm da pré-resposta (rascunho ou última passagem), igual à tela:
+ * anexo como a lista de ids (`id_attachment`, o que o InputAttach manda) e botão como o
+ * texto gravado (o JSON do último clique, o que o ButtonField manda).
+ */
+const PRE_ANSWER_ONLY_TYPES = new Set(["INPUT_ATTACH_FIELD", "BUTTON_FIELD"]);
 const NUMBER_TYPES = new Set(["NUMBER_FIELD", "NUMERIC_FIELD", "CURRENCY_FIELD", "MONEY_FIELD"]);
 const USER_TYPES = new Set(["COMBO_BOX_USER_FIELD", "USER_FIELD", "REQUESTER_FIELD"]);
 const BOOLEAN_TYPES = new Set(["SWITCH_FIELD", "TOGGLE_FIELD"]);
@@ -153,7 +168,7 @@ export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
         ? readCarryOver(input.cardRaw, input.formId, input.fields)
         : build([], input.fields, "vazio");
   } else if (String(pre.origin ?? "") === SYNTHETIC_ORIGIN || firstDefined(pre.id_form_answer, pre.id) === undefined) {
-    result = build([pre], input.fields, "ultima-passagem");
+    result = build([pre], input.fields, "ultima-passagem", "resposta", true);
   } else {
     draft = pre;
     // Só a confirmada mais nova que o rascunho disputa com ele (é nela que o PUT /form/answer
@@ -162,10 +177,12 @@ export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
     // no mover. Anexo, fórmula e ID automático o mover não leva e a tela não mostra (ela só lê
     // o rascunho): ficam como na tela. Cartão 896192 (07/10): anexos da resposta do formulário
     // público da etapa, mais nova que o rascunho, contavam como preenchidos; a tela os cobra.
+    // Anexo e botão do rascunho vão no mover (como a tela); os da confirmada mais nova não
+    // entram aqui (`onlyResendableRows` os tira), então só o rascunho os fornece.
     const newer = confirmedAnswers(input.cardRaw, input.formId)
       .filter((answer) => isNewer(answer, pre))
       .map((answer) => onlyResendableRows(answer, input.fields));
-    result = build([pre, ...newer], input.fields, "rascunho", "linha");
+    result = build([pre, ...newer], input.fields, "rascunho", "linha", true);
   }
   // A rota respondeu: os `fields` dela trazem o autocompletar de cada campo, como a tela usa.
   if (input.preAnswerRaw !== undefined) {
@@ -248,7 +265,8 @@ function build(
   answers: Array<Record<string, unknown>>,
   fields: NormalizedField[],
   source: CarrySource,
-  mode: MergeMode = "resposta"
+  mode: MergeMode = "resposta",
+  fromPreAnswer = false
 ): CarryOverResult {
   const result: CarryOverResult = {
     values: {},
@@ -307,7 +325,7 @@ function build(
       result.filled.add(name);
       result.stored.set(name, texts.join(", "));
     }
-    const rebuilt = rebuild(field, items);
+    const rebuilt = rebuild(field, items, fromPreAnswer);
     if (rebuilt === undefined) {
       if (!empty) result.notKept.push({ name, ...(field.title ? { title: field.title } : {}) });
     } else {
@@ -497,9 +515,16 @@ function toInteger(value: unknown): number | undefined {
   return Number.isInteger(n) ? n : undefined;
 }
 
-function rebuild(field: NormalizedField, items: Array<{ index: number; value: string }>): unknown {
+function rebuild(field: NormalizedField, items: Array<{ index: number; value: string }>, fromPreAnswer = false): unknown {
   const type = normalizeFieldType(field.type);
   const values = items.map((item) => item.value);
+  if (PRE_ANSWER_ONLY_TYPES.has(type)) {
+    if (!fromPreAnswer) return undefined;
+    if (type === "BUTTON_FIELD") return values.length === 1 ? values[0] : undefined;
+    // Anexo: 1 linha por arquivo, o valor é o id do anexo (como a tela manda de volta).
+    const ids = values.map((value) => Number(value.trim())).filter((value) => Number.isInteger(value) && value > 0);
+    return ids.length > 0 && ids.length === values.length ? ids : undefined;
+  }
   if (MULTI_ID_TYPES.has(type)) {
     const ids = values.map((value) => Number(value)).filter((value) => Number.isInteger(value) && value > 0);
     return ids.length === values.length ? ids : undefined;

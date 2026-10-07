@@ -403,12 +403,47 @@ describe("EXTRA-06 D1: card move lê a pré-resposta da etapa atual e reenvia", 
     expect(carry.values.h_tags).toEqual(["x", "y"]);
   });
 
-  it("anexo no rascunho que o kit não remonta: avisa que não vai (Não reenviados)", async () => {
-    preAnswer = draft([row(30, "1"), row(33, "76"), row(36, "9911")]);
+  it("anexo e botão no rascunho vão no mover como a tela manda (lista de ids e o JSON do clique)", async () => {
+    fields = [
+      ...baseFields(),
+      { id_field: 37, name: "h_botao", title: "IA - Resumo", type: "BUTTON_FIELD", form_id: 901, required: "0", validation_type: null, validations: [] }
+    ];
+    const click = '{"user_id":76,"name_user":"Ana","last_click":"2026-10-06T13:50:29.000Z"}';
+    // Dois arquivos no rascunho (1 linha por anexo, fora de ordem no index) + o último clique do botão.
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(36, "9912", 1), row(36, "9911", 0), row(37, click)]);
     const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
 
     expect(process.exitCode ?? 0).toBe(0);
-    expect(out?.warning).toContain("Não reenviados (ficam vazios na etapa Triagem): Proposta.");
+    // O back apaga o rascunho no mover: sem reenviar, o anexo que a pessoa subiu na etapa sumia.
+    expect(moveBody()?.values).toEqual({ h_horas: 1, h_resp: 76, h_anexo: [9911, 9912], h_botao: click });
+    expect(out).toMatchObject({ ok: true, kept: 4, keptFrom: "rascunho" });
+    expect(out?.warning ?? "").not.toContain("Não reenviados");
+  });
+
+  it("fórmula no rascunho o kit não calcula: segue no aviso (Não reenviados) e --fail-on-data-loss bloqueia", async () => {
+    fields = [
+      ...baseFields(),
+      { id_field: 38, name: "h_total", title: "Total", type: "FORMULA_FIELD", form_id: 901, required: "0", validation_type: null, validations: [] }
+    ];
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(36, "9911"), row(38, "42")]);
+    const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--dry-run"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(out?.warning).toContain("Não reenviados (ficam vazios na etapa Triagem): Total.");
+    expect(out?.calls[0].payload.values).toEqual({ h_horas: 1, h_resp: 76, h_anexo: [9911] });
+
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--dry-run", "--fail-on-data-loss"]);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+  });
+
+  it("anexo da última passagem confirmada (GET /card, back sem a rota) segue fora: o back não reaproveita anexo entre passagens", () => {
+    const list = normalizeFieldsFromApiResponse(fields).filter((field) => String(field.formId) === "901");
+    const raw = { ...cardRaw(), form_answers: [{ id_form_answer: 701, form_id: 901, flow_step_id: 1, form_answer_fields: [row(30, "4"), row(36, "9911")] }] };
+    const carry = readStepCarryOver({ cardRaw: raw, preAnswerRaw: undefined, formId: "901", fields: list });
+
+    expect(carry.source).toBe("cartao");
+    expect(carry.values).toEqual({ h_horas: 4 });
+    expect(carry.notKept).toEqual([{ name: "h_anexo", title: "Proposta" }]);
   });
 });
 
@@ -626,16 +661,20 @@ describe("EXTRA-06 D1: mover por --payload", () => {
     expect(out).toMatchObject({ kept: 1, keptFrom: "rascunho" });
   });
 
-  it("--dry-run do payload mostra o values já com o rascunho e o dataLossCheck pela mesma fonte", async () => {
-    preAnswer = draft([row(33, "76"), row(36, "9911")]);
+  it("--dry-run do payload mostra o values já com o rascunho (anexo incluído) e o dataLossCheck pela mesma fonte", async () => {
+    fields = [
+      ...baseFields(),
+      { id_field: 38, name: "h_total", title: "Total", type: "FORMULA_FIELD", form_id: 901, required: "0", validation_type: null, validations: [] }
+    ];
+    preAnswer = draft([row(33, "76"), row(36, "9911"), row(38, "42")]);
     const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: { h_horas: 3 } });
     const out = await run(["card", "move-step-with-values", "--payload", file, "--dry-run"]);
 
     expect(process.exitCode ?? 0).toBe(0);
     expect(writes()).toEqual([]);
-    expect(out?.payload.values).toEqual({ h_resp: 76, h_horas: 3 });
-    // Só o anexo (que o kit não remonta) fica de fora.
-    expect(out?.dataLossCheck.orphans).toEqual([{ fieldName: "h_anexo", fieldTitle: "Proposta", currentValue: "9911" }]);
+    expect(out?.payload.values).toEqual({ h_resp: 76, h_anexo: [9911], h_horas: 3 });
+    // Só a fórmula (que o kit não calcula) fica de fora.
+    expect(out?.dataLossCheck.orphans).toEqual([{ fieldName: "h_total", fieldTitle: "Total", currentValue: "42" }]);
     expect(out?.warning).toContain("Não reenviados");
   });
 

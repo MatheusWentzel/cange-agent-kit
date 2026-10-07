@@ -127,7 +127,7 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
 /**
  * EXTRA-06 D1: o mover grava a etapa atual e o kit já reenvia o que o cartão tem nela
  * (fonte da tela: rascunho ou última passagem). Órfão é o preenchido que ficou fora do
- * `values` (tipo que o kit não remonta, como anexo, fórmula e ID automático).
+ * `values` (tipo que o kit não remonta, como fórmula, ID automático e anexo fora da pré-resposta).
  */
 export function dataLossFromCarry(
   carry: CarryOverResult,
