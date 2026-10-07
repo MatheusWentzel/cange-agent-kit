@@ -78,6 +78,19 @@ export interface CardsContracts {
    * não tem a rota (404); outro erro propaga (sem ler o rascunho, o mover não grava).
    */
   getPreAnswer: (input: { cardId: number | string; formId: number | string }) => Promise<{ raw: unknown } | undefined>;
+  /**
+   * Revisão 3 do EXTRA-06 (R3-F1): os movimentos do cartão (`GET /card/moviment`), com o
+   * `dt_entry` de cada etapa. O mover usa a entrada na etapa atual para separar a passagem
+   * atual das anteriores. `undefined` = o back não tem a rota (404).
+   */
+  getCardMovements: (input: { cardId: number | string; flowId: number | string }) => Promise<{ raw: unknown } | undefined>;
+  /**
+   * R3-F4: o autocompletar de vínculo pela origem escolhida no formulário, o mesmo
+   * `POST /form/answers/by-register` que a tela faz no blur. Leitura (não grava nada).
+   */
+  getAutoCompleteByRegister: (input: {
+    items: Array<{ flowId: number | string; fieldId: number; childFieldId?: number; currValue: unknown }>;
+  }) => Promise<unknown>;
   listCardsByFlow: (input: {
     flowId: number | string;
     isTestModel?: boolean;
@@ -300,6 +313,31 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         if (error instanceof CangeApiError && error.status === 404) return undefined;
         throw error;
       }
+    },
+
+    async getCardMovements(input) {
+      const cardId = Number(String(input.cardId).trim());
+      const flowId = Number(String(input.flowId).trim());
+      if (!Number.isInteger(cardId) || cardId <= 0 || !Number.isInteger(flowId) || flowId <= 0) {
+        throw new CangeValidationError("Parâmetros inválidos para getCardMovements.", { details: input });
+      }
+      try {
+        const raw = await client.get<unknown>("/card/moviment", { query: { card_id: cardId, flow_id: flowId } });
+        return { raw };
+      } catch (error) {
+        if (error instanceof CangeApiError && error.status === 404) return undefined;
+        throw error;
+      }
+    },
+
+    async getAutoCompleteByRegister(input) {
+      const fieldItems = input.items.map((item) => ({
+        flow_id: Number(item.flowId),
+        field_id: Number(item.fieldId),
+        ...(item.childFieldId !== undefined ? { child_field_id: Number(item.childFieldId) } : {}),
+        currValue: item.currValue
+      }));
+      return client.post<unknown>("/form/answers/by-register", { body: { field_items: fieldItems } });
     },
 
     async listAllCardsByFlow(input) {

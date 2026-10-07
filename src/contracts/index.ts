@@ -72,6 +72,9 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     listCardsByFlow: cards.listCardsByFlow,
     listAllCardsByFlow: cards.listAllCardsByFlow,
     getPreAnswer: cards.getPreAnswer,
+    getCardMovements: cards.getCardMovements,
+    // R3-F4: POST, mas LEITURA (o autocompletar de vínculo da tela; liberado no dry-run forçado).
+    getAutoCompleteByRegister: cards.getAutoCompleteByRegister,
     fetchFlowCards: flowCards.fetchFlowCards,
     resolveQueryEngine: flowCards.resolveQueryEngine,
     queryFlowV2: flowQuery.queryFlowV2,

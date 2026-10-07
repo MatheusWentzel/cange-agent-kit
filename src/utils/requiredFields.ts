@@ -115,7 +115,9 @@ export function isEmptyForField(field: Pick<NormalizedField, "type">, value: unk
  * O item chega em três formatos: a linha gravada (texto JSON do item, com `checked`), o
  * que a tela manda (`{ value, label: <JSON do item>, checked }`) e o item solto
  * (`{ description, checked }`). Item que não dá para ler fica de fora (a tela também
- * descarta o que não consegue ler).
+ * descarta o que não consegue ler), e item sem descrição também: o CheckListField lê a
+ * descrição como `description || ''` e o `getValue` tira o item de descrição vazia antes
+ * de o FormBuilder conferir (R3-F5).
  */
 export function requiresAllChecked(field: NormalizedField): boolean {
   if (String(field.type ?? "").toUpperCase() !== "CHECK_LIST_FIELD") return false;
@@ -134,11 +136,25 @@ export function checkListProgress(value: unknown): CheckListProgress | undefined
   let pending = 0;
   for (const item of value) {
     const checked = checkedOf(item);
-    if (checked === undefined) continue;
+    if (checked === undefined || !hasDescription(item)) continue;
     total += 1;
     if (checked !== "S") pending += 1;
   }
   return total > 0 ? { total, pending } : undefined;
+}
+
+/** O item tem descrição (a tela descarta o de descrição vazia ou ausente). */
+function hasDescription(item: unknown): boolean {
+  let record: Record<string, unknown> | undefined;
+  if (typeof item === "string") {
+    record = parseJsonRecord(item);
+  } else if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+    const raw = item as Record<string, unknown>;
+    record = (typeof raw.label === "string" ? parseJsonRecord(raw.label) : undefined) ?? raw;
+  }
+  if (!record) return true;
+  const description = record.description;
+  return description !== undefined && description !== null && description !== "" && description !== false && description !== 0;
 }
 
 /** `checked` do item ("N" quando o item não diz: o default da tela). undefined = ilegível. */

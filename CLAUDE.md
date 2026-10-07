@@ -35,7 +35,7 @@ Use este repositório como camada segura para operar o Cange via CLI.
   comando `card move ... --set` pronto. Igual à tela: não cobra ao voltar etapa em fluxo com "pular obrigatórios ao
   voltar" nem campo oculto no formulário; obrigatório com condicional vazio não bloqueia e volta em `warning`.
   Obrigatório = regra `required` do campo (como a tela; switch nunca), rich text `<p></p>` é vazio e check list
-  "exigir todos concluídos" com item sem marcar bloqueia. O que o cartão tem na etapa vem do rascunho da etapa
+  "exigir todos concluídos" com item sem marcar bloqueia (oculto e com condicional também). O que o cartão tem na etapa vem do rascunho da etapa
   (`GET /form/pre-answer`, a fonte da tela) e o mover reenvia (o back apaga o rascunho do formulário que grava, o do
   destino também); campo vazio com autocompletar recebe o valor que a tela poria (`autocompleted`); origem do
   autocompletar vazia no cartão = obrigatório cobrado, como na tela.

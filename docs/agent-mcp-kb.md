@@ -383,7 +383,8 @@ Compatibilidade: também aceita `id_notification`.
   sempre, em todo caminho de mover (`card move`, `card move-step-with-values` com ou sem `--payload`,
   `card move-step`), e o erro traz o comando `card move ... --set` pronto. Igual à tela, não cobra ao voltar etapa
   em fluxo com "pular obrigatórios ao voltar" nem campo oculto no formulário (`show_on_form = "S"`). Obrigatório com
-  condicional vazio não bloqueia (o kit não avalia condicionais) e volta em `warning`.
+  condicional vazio não bloqueia (o kit não avalia condicionais) e volta em `warning`. Check list "exigir todos
+  concluídos" com item sem marcar bloqueia sempre, mesmo oculto ou com condicional (a tela confere todos).
 - Validar antes de mutar:
   - `card update-values --validate-fields --dry-run`
   - `card move-step-with-values --validate-fields --dry-run`

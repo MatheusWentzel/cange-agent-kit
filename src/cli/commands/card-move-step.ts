@@ -25,7 +25,7 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
     .option("--validate-fields", "Valida values contra fields do idForm (os obrigatórios da etapa atual são sempre exigidos)")
     .option(
       "--allow-data-loss",
-      "Perda de dados intencional: não reenvia o que o cartão já tem na etapa atual e aceita perder o rascunho dela"
+      "Perda de dados intencional NA ETAPA ATUAL: não reenvia o que o cartão já tem nela e aceita perder o rascunho dela (o rascunho do formulário gravado segue reenviado)"
     )
     .option("--dry-run", "Exibe payload sem executar a mutação")
     .action(

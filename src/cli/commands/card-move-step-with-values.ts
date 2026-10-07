@@ -67,7 +67,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
     )
     .option(
       "--allow-data-loss",
-      "Perda de dados intencional: não reenvia o que o cartão já tem na etapa atual e não confere campos preenchidos ausentes do values."
+      "Perda de dados intencional NA ETAPA ATUAL: com o idForm dela, não reenvia o que o cartão já tem nela nem confere o que falta no values; com outro idForm, aceita perder o rascunho da etapa atual. O rascunho do formulário gravado (outro idForm) segue reenviado."
     )
     .option(
       "--fail-on-data-loss",
@@ -222,7 +222,9 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         // Com o reenvio (a etapa atual, ou outro formulário com rascunho ou última passagem), a
         // régua é a fonte da tela: sobra só o que o kit não consegue reenviar. Sem ele, o
         // detector de sempre (GET /card).
-        const dataLossCheck: DataLossCheck = options.allowDataLoss
+        // R3-F3: a flag só desliga a checagem quando o payload grava a etapa atual (a perda
+        // aceita é a dela); gravando outro formulário, o reenvio dele segue conferido.
+        const dataLossCheck: DataLossCheck = options.allowDataLoss && check.writesOrigin
           ? {
               checked: false,
               orphans: [],
@@ -269,7 +271,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
     mutates: true,
     envelope: "Com --payload: resposta do move (+ dataLossCheck). Sem --payload: igual a `card move`.",
     fieldsLocation:
-      "Prefira `card move --card-id N --to <etapa> --set ...` (1 passo). Mover exige os obrigatórios da etapa atual (sempre). Com --payload, o idForm é o form da etapa ATUAL e os values são só desse form; o kit reenvia o que o cartão já tem no formulário gravado (o rascunho que a tela mostra; vale também para o form do destino, que o back apaga ao gravar), salvo com --allow-data-loss.",
+      "Prefira `card move --card-id N --to <etapa> --set ...` (1 passo). Mover exige os obrigatórios da etapa atual (sempre). Com --payload, o idForm é o form da etapa ATUAL e os values são só desse form; o kit reenvia o que o cartão já tem no formulário gravado (o rascunho que a tela mostra; vale também para o form do destino, que o back apaga ao gravar). --allow-data-loss só aceita perder a etapa atual.",
     example: 'card move-step-with-values --card-id 1234 --to "Agendamento" --set "Data da ligação=06/10/2026"'
   });
 }

@@ -44,7 +44,9 @@ const READ_VIA_POST_PATHS: ReadonlySet<string> = new Set([
   "/flow/v2/query",
   "/flow/v2/aggregations",
   "/register/v2/query",
-  "/artifact/validate"
+  "/artifact/validate",
+  // Autocompletar de vínculo da tela (só lê o cadastro/cartão apontado; R3-F4 do EXTRA-06).
+  "/form/answers/by-register"
 ]);
 
 /** True quando a chamada HTTP grava (com o env ligado ela é recusada). */

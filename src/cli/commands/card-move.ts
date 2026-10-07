@@ -156,14 +156,19 @@ export async function runInlineMove(
   // A2-F2: etapa atual sem formulário (raro): o mover grava o do destino e o back apaga o
   // rascunho dele; o kit reenvia o que a tela mostra nesse formulário, com o --set por cima.
   const writesDestination = !origin && destination !== undefined && destination.formId !== ctx.formInitId;
+  const originValues = origin ? valuesOf(resolved, origin.formId) : {};
+  // R3-F1: a entrada na etapa (movimentos) pede o fluxo; R3-F4: o --set da etapa atual é o que a
+  // tela teria no formulário (a origem do vínculo escolhida preenche o destino no blur).
+  const readOptions = { flowId };
   const [carry, destRead] = await Promise.all([
-    origin ? readOriginCarry(kit, card.raw, origin, cardId, ctx.fields) : Promise.resolve(undefined),
-    writesDestination && destination ? readWrittenFormCarry(kit, card.raw, destination, cardId) : Promise.resolve(undefined)
+    origin ? readOriginCarry(kit, card.raw, origin, cardId, ctx.fields, { ...readOptions, sent: originValues }) : Promise.resolve(undefined),
+    writesDestination && destination
+      ? readWrittenFormCarry(kit, card.raw, destination, cardId, readOptions)
+      : Promise.resolve(undefined)
   ]);
   const destCarry = resendableWritten(destRead);
   /** O que vai reenviado no mover: a etapa atual ou, sem formulário nela, o destino. */
   const resent = carry ?? destCarry;
-  const originValues = origin ? valuesOf(resolved, origin.formId) : {};
   const moveValues = { ...(carry?.values ?? {}), ...originValues };
 
   // Decisão 1 (06/10): SEMPRE, com ou sem --validate-fields/--dry-run. O que o cartão já

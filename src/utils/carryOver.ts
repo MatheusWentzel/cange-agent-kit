@@ -59,13 +59,32 @@ import { isEmptyForField, isRichTextType } from "./requiredFields.js";
  * no cange_local com anexo no rascunho da etapa atual). Da confirmada mais nova que o
  * rascunho e do `GET /card` eles seguem fora (a tela não os mostra; o back não reaproveita
  * anexo entre passagens), e o autocompletar de anexo segue pendente.
+ *
+ * Revisão 3 do EXTRA-06 (07/10):
+ *  - R3-F1 (passagem atual): na disputa rascunho x confirmada mais nova, só conta a LINHA da
+ *    confirmada escrita desde que o cartão entrou na etapa em que está (`stepEntry`, do
+ *    `GET /card/moviment`). O rascunho dura várias passagens (no V1 o back não o apaga ao sair),
+ *    e a resposta do formulário público que tirou o cartão da etapa é "mais nova" que ele: o
+ *    valor dela voltava no mover por cima do campo que a pessoa limpou no rascunho (cartão
+ *    799470: "Você aprova a arte abaixo?" = NÃO de uma rodada anterior). Linha anterior à
+ *    entrada fica fora, como na tela (ela só lê o rascunho). Sem a entrada (rota ausente ou
+ *    sem movimento), nenhuma confirmada disputa.
+ *  - R3-F2 (linha repetida): o rascunho pode ter duas linhas do mesmo campo no mesmo `index`
+ *    (corrida do autosave). A tela (`formAnswerToObjectFormInit`) fica com a primeira pela chave
+ *    resposta-campo-index; o kit juntava as duas, não conseguia remontar o campo de valor único
+ *    e o mover o deixava vazio (cartão 55241: 3 obrigatórios). Agora o kit descarta a repetida
+ *    igual (rascunho, última passagem e confirmadas).
+ *  - R3-F4 (vínculo com a origem no mover): origem vazia no cartão, mas mandada no mover (o
+ *    `sent`), do mesmo formulário e de cadastro ou cartão: a tela preenche o destino no blur
+ *    (`POST /form/answers/by-register` com o valor escolhido). O kit pede o mesmo
+ *    (`byRegister`, resolvido pelo `resolveByRegister`) e leva o valor (`autoFilled`).
  */
 
 /** De onde veio o que o cartão tem na etapa atual. */
 export type CarrySource = "rascunho" | "ultima-passagem" | "vazio" | "cartao";
 
 /** Regra do autocompletar que deu o valor (o que a tela faria no campo sem valor). */
-export type AutoFillRule = "estatico" | "data-atual" | "criador-do-cartao" | "campo-do-cartao" | "opcao-pelo-rotulo";
+export type AutoFillRule = "estatico" | "data-atual" | "criador-do-cartao" | "campo-do-cartao" | "opcao-pelo-rotulo" | "vinculo";
 
 export interface CarryOverResult {
   /** hash → valor remontado, pronto para o `values` do mover (autocompletar incluído). */
@@ -87,6 +106,27 @@ export interface CarryOverResult {
   autoFilled: Array<{ name: string; title?: string; rule: AutoFillRule }>;
   /** Campos sem valor com autocompletar que o kit não calcula: obrigatório vazio vira aviso. */
   autoPending: Array<{ name: string; title?: string; reason: string }>;
+  /**
+   * R3-F4: destinos de vínculo cuja origem vazia no cartão vem no mover. A tela preenche no
+   * blur pelo `POST /form/answers/by-register`; quem lê a pré-resposta pede e aplica com
+   * `resolveByRegister`. Até lá o campo fica em `autoPending` (aviso, não bloqueio).
+   */
+  byRegister: RegisterAutoFill[];
+}
+
+/** Pedido do autocompletar de vínculo com a origem mandada no mover (R3-F4). */
+export interface RegisterAutoFill {
+  /** Campo destino (hash). */
+  name: string;
+  title?: string;
+  /** Campo de origem (o combo de cadastro ou de cartão do mesmo formulário). */
+  parentFieldId: number;
+  /** Campo do cadastro/cartão apontado que dá o valor (`ac_child_field_id`). */
+  childFieldId: number;
+  /** O que vai no mover para a origem (os ids escolhidos), como o `currValue` da tela. */
+  currValue: unknown;
+  /** Opções do destino (lista de opções: casa o `valueString` com o rótulo). */
+  options?: unknown;
 }
 
 const MULTI_ID_TYPES = new Set(["COMBO_BOX_REGISTER_FIELD", "REGISTER_FIELD", "COMBO_BOX_FLOW_FIELD", "FLOW_FIELD"]);
@@ -167,6 +207,14 @@ export interface StepCarryOverInput {
    * da etapa atual: a tela só autocompleta quando o cartão estiver na etapa dele.
    */
   autoComplete?: boolean;
+  /**
+   * R3-F1: quando o cartão entrou na etapa em que está (ms; o `dt_entry` mais novo do
+   * `GET /card/moviment`). Só a linha de confirmada escrita desde então disputa com o
+   * rascunho. undefined = não se sabe: nenhuma confirmada disputa (a tela só lê o rascunho).
+   */
+  stepEntry?: number;
+  /** R3-F4: o que vai no mover para este formulário (hash → valor), para o autocompletar de vínculo. */
+  sent?: Record<string, unknown>;
 }
 
 /** O que o cartão tem no formulário da etapa atual, pela mesma fonte da tela (ver o topo). */
@@ -192,9 +240,12 @@ export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
     // público da etapa, mais nova que o rascunho, contavam como preenchidos; a tela os cobra.
     // Anexo e botão do rascunho vão no mover (como a tela); os da confirmada mais nova não
     // entram aqui (`onlyResendableRows` os tira), então só o rascunho os fornece.
-    const newer = confirmedAnswers(input.cardRaw, input.formId)
-      .filter((answer) => isNewer(answer, pre))
-      .map((answer) => onlyResendableRows(answer, input.fields));
+    // R3-F1: e só a linha escrita nesta passagem (desde a entrada na etapa). A resposta de uma
+    // passagem anterior (a que tirou o cartão da etapa, o formulário público da rodada passada)
+    // não volta por cima do que a pessoa limpou no rascunho.
+    const newer = newerConfirmed(input.cardRaw, input.formId, pre)
+      .map((answer) => onlyResendableRows(answer, input.fields))
+      .map((answer) => onlyRowsSince(answer, input.stepEntry));
     result = build([pre, ...newer], input.fields, "rascunho", "linha", true);
   }
   // A rota respondeu: os `fields` dela trazem o autocompletar de cada campo, como a tela usa.
@@ -204,10 +255,56 @@ export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
       cardRaw: input.cardRaw,
       fields: input.fields,
       ...(input.flowFields ? { flowFields: input.flowFields } : {}),
-      ...(draft ? { draft } : {})
+      ...(draft ? { draft } : {}),
+      ...(input.sent ? { sent: input.sent } : {})
     });
   }
   return result;
+}
+
+/** Confirmadas do formulário mais novas que o rascunho (as únicas que podem disputar com ele). */
+function newerConfirmed(cardRaw: unknown, formId: string, draft: Record<string, unknown>): Array<Record<string, unknown>> {
+  return confirmedAnswers(cardRaw, formId).filter((answer) => isNewer(answer, draft));
+}
+
+/**
+ * R3-F1: o kit precisa da entrada do cartão na etapa (`stepEntry`) só quando há rascunho e uma
+ * confirmada mais nova que ele com linha de campo que o mover reenvia. Sem isso, não consulta.
+ */
+export function needsStepEntry(input: Pick<StepCarryOverInput, "cardRaw" | "preAnswerRaw" | "formId" | "fields">): boolean {
+  const pre = preAnswerRecord(input.preAnswerRaw, input.formId);
+  if (!pre || String(pre.origin ?? "") === SYNTHETIC_ORIGIN || firstDefined(pre.id_form_answer, pre.id) === undefined) return false;
+  return newerConfirmed(input.cardRaw, input.formId, pre).some(
+    (answer) => toArray(onlyResendableRows(answer, input.fields).form_answer_fields).length > 0
+  );
+}
+
+/**
+ * A entrada na etapa atual pelos movimentos do cartão (`GET /card/moviment`): o `dt_entry` mais
+ * novo. O cartão está na etapa desde o último movimento registrado (se o último fosse de outra
+ * etapa, ele voltou depois, então é um limite por baixo). Sem movimento legível: undefined.
+ */
+export function stepEntryFromMovements(raw: unknown): number | undefined {
+  const root = asRecord(raw);
+  const list = Array.isArray(raw) ? raw : toArray(root?.data ?? root?.items ?? root?.movements);
+  let latest: number | undefined;
+  for (const item of list) {
+    const time = parseTime(asRecord(item)?.dt_entry);
+    if (time !== undefined && (latest === undefined || time > latest)) latest = time;
+  }
+  return latest;
+}
+
+/** A resposta só com as linhas escritas desde `since` (sem `since`, nenhuma). */
+function onlyRowsSince(answer: Record<string, unknown>, since: number | undefined): Record<string, unknown> {
+  if (since === undefined) return { ...answer, form_answer_fields: [] };
+  const rows = toArray(answer.form_answer_fields).filter((item) => {
+    const record = asRecord(item);
+    if (!record) return false;
+    const time = parseTime(record.dt_last_update) ?? parseTime(record.dt_created) ?? parseTime(answer.dt_created);
+    return time !== undefined && time >= since;
+  });
+  return { ...answer, form_answer_fields: rows };
 }
 
 /** Campo que o mover consegue reenviar (o kit remonta o valor gravado; ver `rebuild`). */
@@ -290,7 +387,8 @@ function build(
     stored: new Map(),
     answered: new Set(),
     autoFilled: [],
-    autoPending: []
+    autoPending: [],
+    byRegister: []
   };
 
   const byId = new Map<string, NormalizedField>();
@@ -303,11 +401,19 @@ function build(
   const stored = new Map<string, StoredField>();
   answers.forEach((answer, order) => {
     const perAnswer = new Map<string, StoredField>();
+    // R3-F2: linha repetida (mesmo campo e mesmo index na resposta) fica de fora, a primeira
+    // vale, como a chave resposta-campo-index do `formAnswerToObjectFormInit` da tela.
+    const seen = new Set<string>();
     for (const item of toArray(answer.form_answer_fields)) {
       const record = asRecord(item);
       if (!record || isDeleted(record)) continue;
       const fieldRecord = asRecord(record.field);
       const fieldId = firstDefined(record.field_id, record.id_field, fieldRecord?.id_field, fieldRecord?.id);
+      if (fieldId !== undefined && "index" in record) {
+        const key = `${String(fieldId)}-${String(record.index)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+      }
       const field =
         (fieldId !== undefined ? byId.get(String(fieldId)) : undefined) ??
         (typeof fieldRecord?.name === "string" ? byName.get(fieldRecord.name) : undefined);
@@ -406,6 +512,8 @@ interface AutoCompleteInput {
   flowFields?: NormalizedField[];
   /** O rascunho da etapa (a tela também lê o campo de origem nele). */
   draft?: Record<string, unknown>;
+  /** R3-F4: o que vai no mover para este formulário. */
+  sent?: Record<string, unknown>;
 }
 
 /** Linha com valor do campo de origem, na ordem do `index`. */
@@ -486,8 +594,16 @@ function applyAutoComplete(result: CarryOverResult, input: AutoCompleteInput): v
       pending("usuário atual");
     } else if (parent > 0) {
       const rows = parentFieldRows(input.cardRaw, input.draft, parent);
-      // Origem sem valor: a tela não preenche nada e o obrigatório cobra (A2-F1).
-      if (!rows) continue;
+      // Origem sem valor: a tela não preenche nada ao abrir e o obrigatório cobra (A2-F1). Mas
+      // origem de vínculo do mesmo formulário escolhida no mover: a tela preenche no blur (R3-F4).
+      if (!rows) {
+        const request = registerRequest(field, raw, parent, input);
+        if (request) {
+          result.byRegister.push(request);
+          pending("campo de vínculo");
+        }
+        continue;
+      }
       const type = normalizeFieldType(field.type);
       if (toInteger(raw.ac_child_field_id) !== undefined) {
         pending("campo de vínculo");
@@ -514,6 +630,89 @@ function applyAutoComplete(result: CarryOverResult, input: AutoCompleteInput): v
       }
     }
   }
+}
+
+/** Origem de vínculo que a tela consulta no blur (`SelectFormAnswersByRegisterService`). */
+const REGISTER_PARENT_TYPES = new Set(["COMBO_BOX_REGISTER_FIELD", "COMBO_BOX_FLOW_FIELD"]);
+
+/**
+ * R3-F4: o blur da tela (`getAutoCompleteRule('answer', ..., currData)`) pede o vínculo pela origem
+ * escolhida no formulário: destino com `ac_child_field_id`, origem combo de cadastro ou de cartão
+ * do MESMO formulário, preenchida no que vai no mover, e destino sem valor nele.
+ */
+function registerRequest(
+  field: NormalizedField,
+  raw: Record<string, unknown>,
+  parent: number,
+  input: AutoCompleteInput
+): RegisterAutoFill | undefined {
+  const child = toInteger(raw.ac_child_field_id);
+  if (child === undefined || !input.sent) return undefined;
+  const parentField = input.fields.find((item) => item.id !== undefined && String(item.id) === String(parent));
+  if (!parentField || !REGISTER_PARENT_TYPES.has(normalizeFieldType(parentField.type))) return undefined;
+  if (field.name in input.sent || !(parentField.name in input.sent)) return undefined;
+  const currValue = input.sent[parentField.name];
+  if (isEmptyForField(parentField, currValue) || currValue === 0) return undefined;
+  return {
+    name: field.name,
+    ...(field.title ? { title: field.title } : {}),
+    parentFieldId: parent,
+    childFieldId: child,
+    currValue,
+    ...(raw.options !== undefined || field.options !== undefined ? { options: raw.options ?? field.options } : {})
+  };
+}
+
+/**
+ * R3-F4: aplica a resposta do `POST /form/answers/by-register` (a mesma que a tela pede no blur)
+ * aos pedidos de `result.byRegister`. Lista de opções: o `valueString` casado com o rótulo, sem
+ * maiúscula; data: em ISO (a que não dá para ler fica vazia); o resto, o valor como veio.
+ * Sem linha na resposta, o campo fica vazio e o obrigatório cobra, como na tela. `responseRaw`
+ * undefined = a consulta falhou: o campo segue em `autoPending` (aviso).
+ */
+export function resolveByRegister(result: CarryOverResult, fields: NormalizedField[], responseRaw: unknown): void {
+  if (result.byRegister.length === 0 || responseRaw === undefined) return;
+  const items = toArray(Array.isArray(responseRaw) ? responseRaw : asRecord(responseRaw)?.data)
+    .map(asRecord)
+    .filter((item): item is Record<string, unknown> => item !== undefined);
+  for (const request of result.byRegister) {
+    const field = fields.find((item) => item.name === request.name);
+    result.autoPending = result.autoPending.filter((item) => item.name !== request.name);
+    if (!field) continue;
+    const same = items.filter((item) => toInteger(item.field_id) === request.parentFieldId);
+    const match =
+      same.length > 1 ? same.find((item) => toInteger(item.child_field_id) === request.childFieldId) : same[0];
+    const rows = toArray(asRecord(match?.formAnswer)?.form_answer_fields)
+      .map(asRecord)
+      .filter((row): row is Record<string, unknown> => row !== undefined && !isDeleted(row));
+    const type = normalizeFieldType(field.type);
+    const filled: Array<{ index: number; value: string }> = [];
+    for (const row of rows) {
+      let value: string | undefined;
+      if (OPTION_TYPES.has(type)) {
+        const target = typeof row.valueString === "string" ? row.valueString.toLocaleLowerCase() : undefined;
+        const option = toArray(request.options ?? field.options)
+          .map(asRecord)
+          .find((item) => item !== undefined && typeof item.label === "string" && item.label.toLocaleLowerCase() === target);
+        value = option ? asString(option.value) : undefined;
+      } else if (DATE_TYPES.has(type)) {
+        const text = asString(row.value) ?? asString(row.valueString);
+        value = text !== undefined && text.trim() !== "" ? toIsoDate(text) : undefined;
+      } else {
+        value = asString(row.value);
+      }
+      if (value !== undefined && value.trim() !== "") filled.push({ index: filled.length, value });
+    }
+    if (filled.length === 0) continue;
+    const rebuilt = rebuild(field, filled);
+    if (rebuilt === undefined || isEmptyForField(field, rebuilt)) {
+      if (rebuilt === undefined) result.autoPending.push({ name: field.name, ...(field.title ? { title: field.title } : {}), reason: "tipo que o kit não remonta" });
+      continue;
+    }
+    result.values[field.name] = rebuilt;
+    result.autoFilled.push({ name: field.name, ...(field.title ? { title: field.title } : {}), rule: "vinculo" });
+  }
+  result.byRegister = [];
 }
 
 /** Linhas não excluídas com valor, na ordem do `index`. */

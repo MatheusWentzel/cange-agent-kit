@@ -4,6 +4,39 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-07
 
+### Mover: passagem atual, linha repetida, vínculo escolhido no mover e check list oculto (revisão 3 do EXTRA-06)
+
+- **R3-F1, valor de passagem anterior:** na disputa rascunho x resposta confirmada mais nova, a confirmada entrava
+  inteira se o form_answer dela fosse mais novo que o do rascunho. Só que o rascunho dura várias passagens (no V1 o back
+  não o apaga ao sair) e a resposta do formulário público que TIROU o cartão da etapa é mais nova que ele: o campo que a
+  pessoa limpou no rascunho voltava com o valor da rodada anterior (cartão 799470: "Você aprova a arte abaixo?" = NÃO e o
+  ajuste antigo num mover para "OK POSTAR"; a tela cobra o obrigatório e não move; 61 cartões ativos e 17 empresas no
+  `cange_local`). Agora só disputa a LINHA da confirmada escrita desde a entrada do cartão na etapa atual (o `dt_entry`
+  mais novo do `GET /card/moviment`, lido só quando há confirmada mais nova que o rascunho). É o caso do
+  `card update-values` gravando na resposta mais recente, que segue valendo. Linha anterior à entrada fica fora, e o
+  campo segue como a tela: vazio ou com o autocompletar. Sem a entrada (rota ausente ou sem movimento), nenhuma
+  confirmada disputa.
+- **R3-F2, linha repetida:** o rascunho pode ter duas linhas do mesmo campo no mesmo `index` (corrida do autosave). O
+  kit juntava as duas, não remontava o campo de valor único e o mover o deixava vazio, com o obrigatório contado como
+  preenchido (cartão 55241: Tamanho da empresa, Canal de contato e Lead qualificado; 50 cartões ativos com campo
+  repetido no rascunho; no check list o item ia em dobro). Agora fica a primeira linha, pela chave resposta-campo-index,
+  como o `formAnswerToObjectFormInit` da tela (rascunho, última passagem e confirmadas). E obrigatório preenchido que o
+  kit não consegue reenviar (valor gravado que não remonta, fórmula, ID automático) bloqueia o mover com o motivo
+  próprio, em vez de ir vazio no snapshot novo.
+- **R3-F3, `--allow-data-loss`:** a flag apagava em silêncio o rascunho do formulário de DESTINO (desligava o reenvio do
+  A2-F2 e o `dataLossCheck`), e a mensagem de bloqueio só falava da etapa atual. Agora a flag só aceita perder a etapa
+  atual: com o `idForm` dela, não reenvia o que o cartão tem nela; com outro `idForm`, aceita perder o rascunho da etapa
+  atual, e os campos que somem voltam no `warning`. O rascunho do formulário gravado segue reenviado e conferido.
+- **R3-F4, vínculo com a origem escolhida no mover:** com o campo de origem (combo de cadastro ou de cartão do mesmo
+  formulário) vazio no cartão e mandado no mover, o kit bloqueava o destino do autocompletar de vínculo ("Falta: Centro
+  de custo"), mas a tela o preenche no blur (`POST /form/answers/by-register` com o valor escolhido). O kit faz a mesma
+  chamada (leitura; liberada no dry-run forçado) e leva o valor (`autocompleted`). Cadastro sem o campo: fica vazio e o
+  obrigatório cobra. Consulta que falha: aviso.
+- **R3-F5, check list "exigir todos concluídos" oculto ou com condicional:** o kit pulava o oculto e só avisava no com
+  condicional ("a tela só exige se o campo aparece"). A tela (FormBuilder) checa todo check list com a regra pelo valor
+  do formulário, oculto (montado com display none) e com condicional incluídos (cartão 606564: 3 de 3 itens sem marcar,
+  o kit movia). Agora bloqueia sempre. Item sem descrição a tela descarta antes de conferir, e o kit também.
+
 ### Mover: autocompletar com a origem vazia cobra o obrigatório, e o rascunho do formulário gravado vai junto (revisão 2 do EXTRA-06)
 
 - **A2-F1, autocompletar com a origem vazia:** o obrigatório vazio com autocompletar de campo de vínculo
@@ -87,8 +120,9 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 - **Rich text vazio:** a régua exata da tela (`isHtmlEmpty` do Texto Formatado): sem tags e com `&nbsp;` como espaço,
   sobrou só espaço = vazio. Vale para `<p></p>`, `<p><br></p>`, `<p>&nbsp;</p>` e também para HTML só com imagem ou
   tabela sem texto (a tela entrega "" ao formulário nesses casos e o obrigatório recusa).
-- **Check list "exigir todos concluídos"** (`formula = '1'`): item sem marcar bloqueia o mover, como a tela. O check list
-  e a lista de itens agora são reenviados no mover (antes ficavam vazios no snapshot novo).
+- **Check list "exigir todos concluídos"** (`formula = '1'`): item sem marcar bloqueia o mover, como a tela (oculto e
+  com condicional também, desde a revisão 3). O check list e a lista de itens agora são reenviados no mover (antes
+  ficavam vazios no snapshot novo).
 - **Anexo e botão do rascunho vão no mover** (revalidação do EXTRA-06): a tela manda o anexo como a lista de ids
   (`id_attachment`) e o botão como o JSON do último clique, e o back grava as mesmas linhas na resposta nova. O kit
   deixava os dois em "Não reenviados" e o anexo que a pessoa subiu na etapa, que só existe no rascunho, sumia no mover

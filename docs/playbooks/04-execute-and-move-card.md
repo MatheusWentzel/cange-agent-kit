@@ -15,6 +15,7 @@ Convenção importante:
   comando pronto com os `--set` que faltam. Igual à tela, não cobra ao voltar etapa em fluxo com "pular obrigatórios
   ao voltar" nem campo oculto no formulário. Obrigatório com condicional vazio não bloqueia (o kit não avalia
   condicionais) e volta em `warning`: se o campo aparece para o cartão, mande o valor com `--set` no mesmo mover.
+  Check list "exigir todos concluídos" com item sem marcar bloqueia sempre, mesmo oculto ou com condicional.
 
 ## Fluxo recomendado
 
