@@ -36,6 +36,9 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   voltou sem nada (sem rascunho com linha e sem última passagem que o back remonte, como a que só tinha anexo) e a
   tela abre o formulário vazio, só com o autocompletar: o kit também, sem olhar o `GET /card`. `cartao` só quando o
   back não tem a rota.
+- Rascunho x resposta confirmada mais nova (a régua da linha mais nova, revisão F1) só vale para campo que o mover
+  reenvia. Anexo, fórmula e ID automático de uma confirmada mais nova que o rascunho (ex.: o formulário público da
+  etapa) não contam como preenchidos: a tela só lê o rascunho e cobra esses campos, e o mover não os levaria.
 - **Obrigatório = o que a tela cobra:** regra `required` do campo (`validations` do `GET /field/by-flow`), não a coluna
   `required`. Switch nunca é cobrado (92 de 92 sem regra), check list sem regra também não (32 de 190), e campo com
   regra e coluna 0 passa a ser cobrado. Sem a lista `validations` (back antigo), vale a coluna. Vale no mover, no

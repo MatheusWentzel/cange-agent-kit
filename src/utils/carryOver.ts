@@ -158,7 +158,13 @@ export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
     draft = pre;
     // Só a confirmada mais nova que o rascunho disputa com ele (é nela que o PUT /form/answer
     // grava quando o rascunho é mais antigo); a disputa é campo a campo, pela linha (F1).
-    const newer = confirmedAnswers(input.cardRaw, input.formId).filter((answer) => isNewer(answer, pre));
+    // E só no campo que o mover reenvia: a disputa existe para o valor gravado nela não sumir
+    // no mover. Anexo, fórmula e ID automático o mover não leva e a tela não mostra (ela só lê
+    // o rascunho): ficam como na tela. Cartão 896192 (07/10): anexos da resposta do formulário
+    // público da etapa, mais nova que o rascunho, contavam como preenchidos; a tela os cobra.
+    const newer = confirmedAnswers(input.cardRaw, input.formId)
+      .filter((answer) => isNewer(answer, pre))
+      .map((answer) => onlyResendableRows(answer, input.fields));
     result = build([pre, ...newer], input.fields, "rascunho", "linha");
   }
   // A rota respondeu: os `fields` dela trazem o autocompletar de cada campo, como a tela usa.
@@ -171,6 +177,41 @@ export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
     });
   }
   return result;
+}
+
+/** Campo que o mover consegue reenviar (o kit remonta o valor gravado; ver `rebuild`). */
+function isResendableType(field: NormalizedField): boolean {
+  const type = normalizeFieldType(field.type);
+  return (
+    MULTI_ID_TYPES.has(type) ||
+    MULTI_TEXT_TYPES.has(type) ||
+    ITEM_LIST_TYPES.has(type) ||
+    NUMBER_TYPES.has(type) ||
+    USER_TYPES.has(type) ||
+    BOOLEAN_TYPES.has(type) ||
+    SINGLE_TEXT_TYPES.has(type)
+  );
+}
+
+/** A resposta só com as linhas de campo que o mover reenvia (as outras não disputam com o rascunho). */
+function onlyResendableRows(answer: Record<string, unknown>, fields: NormalizedField[]): Record<string, unknown> {
+  const byId = new Map<string, NormalizedField>();
+  const byName = new Map<string, NormalizedField>();
+  for (const field of fields) {
+    if (field.id !== undefined) byId.set(String(field.id), field);
+    byName.set(field.name, field);
+  }
+  const rows = toArray(answer.form_answer_fields).filter((item) => {
+    const record = asRecord(item);
+    if (!record) return false;
+    const fieldRecord = asRecord(record.field);
+    const fieldId = firstDefined(record.field_id, record.id_field, fieldRecord?.id_field, fieldRecord?.id);
+    const field =
+      (fieldId !== undefined ? byId.get(String(fieldId)) : undefined) ??
+      (typeof fieldRecord?.name === "string" ? byName.get(fieldRecord.name) : undefined);
+    return field !== undefined && isResendableType(field);
+  });
+  return { ...answer, form_answer_fields: rows };
 }
 
 /** `formsAnswers` da pré-resposta, quando é deste formulário e tem campo gravado. */

@@ -346,6 +346,35 @@ describe("EXTRA-06 D1: card move lê a pré-resposta da etapa atual e reenvia", 
     expect(moveBody()?.values).toEqual({ h_horas: 9, h_resp: 76 });
   });
 
+  it("confirmada mais nova que o rascunho com anexo (formulário público da etapa, card 896192): o anexo não conta, como na tela", async () => {
+    fields = baseFields().map((field) => (field.id_field === 36 ? { ...field, required: "1", validation_type: "mixed", validations: REQUIRED } : field));
+    preAnswer = draft([stamped(30, "1", "2026-10-04T10:00:00.000Z"), stamped(33, "76", "2026-10-04T10:00:00.000Z")], {
+      dt_created: "2026-10-02T10:00:00.000Z"
+    });
+    // Resposta confirmada (formulário público da etapa) mais nova que o rascunho, com o anexo e Horas.
+    confirmed.push({
+      id_form_answer: 801, form_id: 901, flow_step_id: 1, origin: "/PublicForm/Step", dt_created: "2026-10-03T10:00:00.000Z",
+      form_answer_fields: [stamped(36, "1166868", "2026-10-05T10:00:00.000Z"), stamped(30, "7", "2026-10-05T10:00:00.000Z")]
+    });
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    // A tela só lê o rascunho: o anexo obrigatório está vazio nela e o kit cobra igual.
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(writes()).toEqual([]);
+    expect(errorMessage()).toContain("Falta para a etapa Triagem (atual): Proposta");
+
+    // Campo que o mover reenvia (Horas) segue a régua da linha mais nova: vai o 7 da confirmada.
+    const list = normalizeFieldsFromApiResponse(fields);
+    const carry = readStepCarryOver({
+      cardRaw: cardRaw(),
+      preAnswerRaw: { fields: [], formsAnswers: preAnswer },
+      formId: "901",
+      fields: list.filter((field) => String(field.formId) === "901")
+    });
+    expect(carry.values).toEqual({ h_horas: 7, h_resp: 76 });
+    expect(carry.filled.has("h_anexo")).toBe(false);
+  });
+
   it("F1: campo de várias linhas vale a linha mais nova entre elas", () => {
     const list = normalizeFieldsFromApiResponse([
       ...baseFields(),
