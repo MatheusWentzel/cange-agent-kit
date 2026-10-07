@@ -1,3 +1,5 @@
+import { typedFormatError } from "./screenFormat.js";
+
 export interface TypeValidationResult {
   valid: boolean;
   expected: string;
@@ -47,7 +49,8 @@ const TYPE_GUARDS: Record<string, GuardDefinition> = {
   CURRENCY_FIELD: numberGuard(),
   DUE_DATE_FIELD: isoDateGuard(),
   EMAIL_FIELD: emailGuard(),
-  PHONE_FIELD: stringGuard(),
+  // R4-P2: telefone com 10 ou 11 dígitos, a régua do `validatePhone` da tela (ver screenFormat).
+  PHONE_FIELD: { expected: "string (telefone com DDD, 10 ou 11 dígitos)", guard: (value) => typeof value === "string" },
   PHONE_NUMBER_FIELD: stringGuard(),
   SWITCH_FIELD: booleanGuard(),
   TOGGLE_FIELD: booleanGuard(),
@@ -58,7 +61,8 @@ const TYPE_GUARDS: Record<string, GuardDefinition> = {
   DOCUMENT_FIELD: stringGuard(),
   DOCUMENTS_FIELD: stringGuard(),
   // Campo de documento do Cange (CPF/CNPJ). Aceita com ou sem máscara e o CNPJ
-  // alfanumérico (12 caracteres [A-Z0-9] + 2 dígitos verificadores).
+  // alfanumérico (12 caracteres [A-Z0-9] + 2 dígitos verificadores). R4-P2: o dígito
+  // verificador e o tipo da `variation` (1 CPF, 2 CNPJ, 3 ambos) com a régua da tela.
   DOC_FIELD: documentGuard(),
   MAIL_FIELD: emailGuard(),
   RICH_TEXT_FIELD: stringGuard(),
@@ -111,7 +115,9 @@ const PT_BR_ALIASES: Record<string, string> = {
 export function validateValueByFieldType(
   fieldType: string,
   value: unknown,
-  options?: unknown
+  options?: unknown,
+  /** `variation` do campo (documento: 1 CPF, 2 CNPJ, 3 CPF ou CNPJ). */
+  variation?: unknown
 ): TypeValidationResult {
   const normalizedType = normalizeFieldType(fieldType);
   const guardDef = TYPE_GUARDS[normalizedType];
@@ -165,8 +171,14 @@ export function validateValueByFieldType(
     }
   }
 
+  const valid = guardDef.guard(value);
+  // R4-P2: documento e telefone com a régua da tela (dígito verificador, tipo e 10/11 dígitos).
+  const formatError = valid ? typedFormatError(normalizedType, variation, value) : undefined;
+  if (formatError) {
+    return { valid: false, expected: guardDef.expected, normalizedType, reason: formatError };
+  }
   return {
-    valid: guardDef.guard(value),
+    valid,
     expected: guardDef.expected,
     normalizedType
   };
@@ -251,11 +263,8 @@ function objectGuard(): GuardDefinition {
 function documentGuard(): GuardDefinition {
   return {
     expected: "string (CPF com 11 dígitos ou CNPJ com 14 caracteres, com ou sem máscara)",
-    guard: (value) => {
-      if (typeof value !== "string") return false;
-      const bare = value.replace(/[.\-/\s]/g, "");
-      return /^\d{11}$/.test(bare) || /^[A-Za-z0-9]{12}\d{2}$/.test(bare);
-    }
+    // O tipo e o dígito verificador vêm do `typedFormatError` (precisa da variation do campo).
+    guard: (value) => typeof value === "string"
   };
 }
 

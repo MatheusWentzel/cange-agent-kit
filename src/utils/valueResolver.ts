@@ -7,6 +7,7 @@ import {
   type OptionDescriptor
 } from "./fieldTypeGuards.js";
 import { isEmptyForField, isRequiredOnScreen } from "./requiredFields.js";
+import { docTypeOf } from "./screenFormat.js";
 
 export { isHiddenOnForm } from "./requiredFields.js";
 
@@ -53,7 +54,17 @@ export interface CompanyUser {
 export interface ResolverLookups {
   searchRegisterEntries?: (registerId: string, text: string) => Promise<RegisterEntryCandidate[]>;
   listUsers?: () => Promise<CompanyUser[]>;
+  /**
+   * R4-P1 (revisão 4 do EXTRA-06): os usuários que o campo de usuário da TELA lista para este
+   * campo (`ComboBoxUser`: `GET /user/by-flow?form_id` sem o leitor; variation "2" pela
+   * empresa). Usuário fora da lista a tela não seleciona e o campo vai vazio. undefined = não
+   * deu para ler a lista (o kit não confere).
+   */
+  screenUsers?: (field: NormalizedField) => Promise<ReadonlySet<number> | undefined>;
 }
+
+/** Tipos que a tela monta com o `ComboBoxUser` (a lista do campo vale para eles). */
+export const SCREEN_USER_TYPES = new Set(["COMBO_BOX_USER_FIELD", "REQUESTER_FIELD"]);
 
 export type ValueIssueKind =
   | "unknown_field"
@@ -344,7 +355,12 @@ export function describeExpected(field: NormalizedField): string {
   if (FLOW_LINK_TYPES.has(type)) return "cartão: id";
   if (BOOLEAN_TYPES.has(type)) return "sim ou não";
   if (type === "MAIL_FIELD" || type === "EMAIL_FIELD") return "e-mail";
-  if (type === "DOC_FIELD") return "CPF/CNPJ";
+  if (type === "DOC_FIELD") {
+    // R4-P2: o tipo do documento pela variation (a tela recusa CNPJ em campo de CPF).
+    const doc = docTypeOf(field.variation ?? field.raw?.variation);
+    return doc === 1 ? "CPF" : doc === 2 ? "CNPJ" : "CPF ou CNPJ";
+  }
+  if (type === "PHONE_FIELD") return "telefone com DDD";
   if (TEXT_TYPES.has(type)) return "texto";
   return type.replace(/_FIELD$/, "").toLowerCase();
 }
@@ -542,7 +558,24 @@ export async function coerceFieldValue(
   }
 
   if (USER_TYPES.has(type)) {
-    return resolveUser(raw, lookups);
+    const user = await resolveUser(raw, lookups);
+    if (!user.ok || typeof user.value !== "number" || !SCREEN_USER_TYPES.has(type) || !lookups?.screenUsers) return user;
+    // R4-P1: o id precisa estar na lista que a tela mostra para o campo (como o --set de quem usa a tela).
+    let allowed: ReadonlySet<number> | undefined;
+    try {
+      allowed = await lookups.screenUsers(field);
+    } catch {
+      allowed = undefined;
+    }
+    if (allowed && !allowed.has(user.value)) {
+      return {
+        ok: false,
+        error:
+          `o usuário ${user.value} não aparece neste campo na tela (bloqueado, leitor do fluxo ou fora do fluxo privado): ` +
+          "escolha outro usuário"
+      };
+    }
+    return user;
   }
 
   if (REGISTER_TYPES.has(type) || FLOW_LINK_TYPES.has(type)) {
@@ -775,12 +808,13 @@ function checkCoercedValue(field: NormalizedField, value: unknown): ValueIssue |
       text: `${fieldLabel(field)} (percentual): ${value} vira ${(value * 100).toLocaleString("pt-BR")}%. Para ${value}% mande "${value}%" ou ${value / 100}`
     };
   }
-  const check = validateValueByFieldType(field.type, value, field.options);
+  const check = validateValueByFieldType(field.type, value, field.options, field.variation ?? field.raw?.variation);
   if (check.expected === "unknown" || check.valid) return undefined;
   return {
     kind: "invalid_value",
     blocking: true,
-    text: `${fieldLabel(field)} (${describeExpected(field)}): ${JSON.stringify(value)} não serve`
+    // R4-P2: documento e telefone dizem o motivo da tela ("CPF inválido", "Telefone inválido ...").
+    text: `${fieldLabel(field)} (${describeExpected(field)}): ${JSON.stringify(value)} não serve${check.reason ? ` (${check.reason})` : ""}`
   };
 }
 

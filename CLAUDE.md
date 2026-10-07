@@ -37,8 +37,12 @@ Use este repositório como camada segura para operar o Cange via CLI.
   Obrigatório = regra `required` do campo (como a tela; switch nunca), rich text `<p></p>` é vazio e check list
   "exigir todos concluídos" com item sem marcar bloqueia (oculto e com condicional também). O que o cartão tem na etapa vem do rascunho da etapa
   (`GET /form/pre-answer`, a fonte da tela) e o mover reenvia (o back apaga o rascunho do formulário que grava, o do
-  destino também); campo vazio com autocompletar recebe o valor que a tela poria (`autocompleted`); origem do
-  autocompletar vazia no cartão = obrigatório cobrado, como na tela.
+  destino também); campo vazio com autocompletar recebe o valor que a tela poria (`autocompleted`, pelo mesmo
+  `POST /form/answers/by-cards` da tela); origem do autocompletar vazia no cartão = obrigatório cobrado, como na tela.
+  Valor gravado que a tela não mostra (usuário bloqueado, leitor ou fora do fluxo; cartão conectado excluído; opção
+  apagada ou "none"; anexo que não existe) conta como vazio: obrigatório bloqueia com o motivo, o resto sai do mover
+  e vai em `warning`. Documento e telefone com formato que a tela recusa (CPF/CNPJ pelo dígito e pela variation,
+  telefone com 10 ou 11 dígitos) bloqueiam o mover e o `--set`, obrigatório ou não.
 - Para marcar notificação como lida/arquivada, usar `notification read`.
 - Para construir fluxos (fluxo, etapas, campos, relacionamentos), usar `cange flow-build ...` (Flow V2 Build API):
   - bodies são **strict** — não enviar chaves extras.

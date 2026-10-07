@@ -161,9 +161,9 @@ export async function runInlineMove(
   // tela teria no formulário (a origem do vínculo escolhida preenche o destino no blur).
   const readOptions = { flowId };
   const [carry, destRead] = await Promise.all([
-    origin ? readOriginCarry(kit, card.raw, origin, cardId, ctx.fields, { ...readOptions, sent: originValues }) : Promise.resolve(undefined),
+    origin ? readOriginCarry(kit, card.raw, origin, cardId, { ...readOptions, sent: originValues }) : Promise.resolve(undefined),
     writesDestination && destination
-      ? readWrittenFormCarry(kit, card.raw, destination, cardId, readOptions)
+      ? readWrittenFormCarry(kit, card.raw, destination, cardId, { ...readOptions, ownerStepId: toStep.id })
       : Promise.resolve(undefined)
   ]);
   const destCarry = resendableWritten(destRead);
@@ -239,7 +239,8 @@ export async function runInlineMove(
   const notKeptText = origin ? notKeptWarning(fromStep, carry) : notKeptWarning(toStep, destCarry);
   const warnings = [
     ...(notKeptText ? [notKeptText] : []),
-    // Obrigatório com condicional vazio não bloqueia (o kit não avalia a condicional): avisa.
+    // Obrigatório com condicional vazio não bloqueia (o kit não avalia a condicional), autocompletar
+    // que o kit não calcula e valor gravado que a tela não mostra: avisa.
     ...(required.warning ? [required.warning] : [])
   ];
   const warning = warnings.length > 0 ? warnings.join(" ") : undefined;

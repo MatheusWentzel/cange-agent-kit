@@ -46,7 +46,11 @@ const READ_VIA_POST_PATHS: ReadonlySet<string> = new Set([
   "/register/v2/query",
   "/artifact/validate",
   // Autocompletar de vínculo da tela (só lê o cadastro/cartão apontado; R3-F4 do EXTRA-06).
-  "/form/answers/by-register"
+  "/form/answers/by-register",
+  // Autocompletar da tela ao abrir o cartão (POP-2, revisão 4 do EXTRA-06).
+  "/form/answers/by-cards",
+  // Cartões conectados que o campo de cartão da tela carrega (POP-1, revisão 4).
+  "/card/by-cards"
 ]);
 
 /** True quando a chamada HTTP grava (com o env ligado ela é recusada). */

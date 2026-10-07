@@ -138,9 +138,11 @@ export function dataLossFromCarry(
   formId: string | number
 ): DataLossCheck {
   const titles = new Map((fields ?? []).map((field) => [field.name, field.title]));
+  // POP-1/R4-P1: o valor que a tela não mostra o mover deixa de fora como ela (vai no aviso).
+  const dropped = new Set((carry.unresolved ?? []).filter((item) => item.emptied).map((item) => item.name));
   const orphans: OrphanField[] = [];
   for (const name of carry.filled) {
-    if (name in values) continue;
+    if (name in values || dropped.has(name)) continue;
     const title = titles.get(name);
     orphans.push({ fieldName: name, ...(title ? { fieldTitle: title } : {}), currentValue: carry.stored.get(name) ?? "" });
   }

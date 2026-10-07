@@ -16,6 +16,10 @@ Convenção importante:
   ao voltar" nem campo oculto no formulário. Obrigatório com condicional vazio não bloqueia (o kit não avalia
   condicionais) e volta em `warning`: se o campo aparece para o cartão, mande o valor com `--set` no mesmo mover.
   Check list "exigir todos concluídos" com item sem marcar bloqueia sempre, mesmo oculto ou com condicional.
+  Obrigatório gravado com valor que a tela não mostra (usuário bloqueado ou fora do fluxo, cartão conectado excluído,
+  opção apagada) bloqueia com "está gravado no cartão, mas a tela mostra o campo vazio": pergunte ao usuário o valor
+  novo e mande com `--set`. CPF/CNPJ ou telefone inválido gravado bloqueia mesmo fora do obrigatório: peça o valor
+  corrigido. O `warning` lista o autocompletar que o kit não calcula e o que a tela não mostra (vai sem eles).
 
 ## Fluxo recomendado
 

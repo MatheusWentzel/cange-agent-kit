@@ -334,7 +334,7 @@ export function validateValuesAgainstFields(input: ValidateValuesInput): Validat
       continue;
     }
 
-    const typeValidation = validateValueByFieldType(field.type, value, field.options);
+    const typeValidation = validateValueByFieldType(field.type, value, field.options, field.variation ?? field.raw?.variation);
     if (typeValidation.expected === "unknown") {
       // Tipo sem validação local (ex.: FORMULA_FIELD, INPUT_LIST_FIELD): é AVISO, não
       // bloqueio. O valor segue como enviado e o servidor valida. Bloquear aqui
@@ -386,7 +386,7 @@ export function validateValuesAgainstFields(input: ValidateValuesInput): Validat
         message: `Tipo inválido para ${formatFieldReference(
           key,
           field.title
-        )}. Esperado: ${typeValidation.expected}.`,
+        )}. Esperado: ${typeValidation.expected}.${typeValidation.reason ? ` ${typeValidation.reason}.` : ""}`,
         expected: typeValidation.expected,
         receivedType: describeValueType(value)
       });

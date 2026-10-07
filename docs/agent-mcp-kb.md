@@ -385,6 +385,10 @@ Compatibilidade: também aceita `id_notification`.
   em fluxo com "pular obrigatórios ao voltar" nem campo oculto no formulário (`show_on_form = "S"`). Obrigatório com
   condicional vazio não bloqueia (o kit não avalia condicionais) e volta em `warning`. Check list "exigir todos
   concluídos" com item sem marcar bloqueia sempre, mesmo oculto ou com condicional (a tela confere todos).
+  Valor gravado que a tela não mostra (usuário bloqueado, leitor ou fora do fluxo privado; cartão conectado excluído;
+  opção apagada ou "none"; anexo que não existe) conta como vazio: obrigatório bloqueia com o motivo, o resto sai do
+  mover e vai em `warning`. Documento (CPF/CNPJ pela variation e pelo dígito) e telefone (10 ou 11 dígitos) com o
+  formato que a tela recusa bloqueiam o mover, obrigatório ou não, e o `--set` recusa igual.
 - Validar antes de mutar:
   - `card update-values --validate-fields --dry-run`
   - `card move-step-with-values --validate-fields --dry-run`

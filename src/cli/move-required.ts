@@ -7,12 +7,16 @@ import {
   needsStepEntry,
   readCarryOver,
   readStepCarryOver,
+  requestRegisterAutoFill,
+  resolveByCards,
   resolveByRegister,
   stepEntryFromMovements,
+  stepExitFromMovements,
   type CarryOverResult,
   type CarrySource
 } from "../utils/carryOver.js";
 import { checkListProgress, isRequiredOnScreen, requiresAllChecked } from "../utils/requiredFields.js";
+import { screenFormatError } from "../utils/screenFormat.js";
 import {
   describeExpected,
   missingRequiredFields,
@@ -22,6 +26,7 @@ import {
   type ValueIssue
 } from "../utils/valueResolver.js";
 
+import { resolveScreenReferences } from "./screen-refs.js";
 import { formScope, loadFlowContext, stepLabel, stepScope, type FlowContext } from "./write-support.js";
 
 /**
@@ -62,6 +67,12 @@ import { formScope, loadFlowContext, stepLabel, stepScope, type FlowContext } fr
  *   condicional, como o FormBuilder (R3-F5); obrigatório preenchido que o kit não consegue
  *   reenviar bloqueia, porque o mover o deixaria vazio (R3-F2); `--allow-data-loss` aceita
  *   perder só a etapa atual, e o rascunho do formulário gravado segue reenviado (R3-F3).
+ * - Revisão 4 (07/10): referência gravada que a tela não resolve (usuário fora da lista, cartão
+ *   conectado excluído, opção que não existe, anexo que não carrega) a tela mostra vazia: o kit
+ *   tira do mover e, no obrigatório, bloqueia com o motivo (POP-1/R4-P1); documento e telefone
+ *   com o formato que a tela recusa bloqueiam, obrigatório ou não e oculto também (R4-P2);
+ *   autocompletar com origem no cartão é o by-cards da tela, e todo autocompletar que o kit não
+ *   calcula sai no aviso, obrigatório ou não (POP-2).
  */
 
 export const MOVE_REQUIRED_RULE = "Mover exige os obrigatórios da etapa atual (regra da plataforma, igual à tela).";
@@ -134,24 +145,89 @@ function inLabel(label: string): string {
 }
 
 /**
- * Aviso (não bloqueia) dos obrigatórios vazios com autocompletar que o kit não calcula (F2):
- * a tela preencheria pelo autocompletar do campo; o mover vai sem ele.
+ * Aviso (não bloqueia) dos campos vazios com autocompletar que o kit não calcula (F2; POP-2: todo
+ * campo, obrigatório ou não): a tela preencheria pelo autocompletar ao abrir; o mover vai sem ele.
+ * `values` = o que vai no mover (o campo mandado não entra no aviso).
  */
 export function autoPendingWarning(
   origin: FormScope,
-  fields: NormalizedField[],
-  carry?: Pick<CarryOverResult, "autoPending">
+  carry?: Pick<CarryOverResult, "autoPending">,
+  values: Record<string, unknown> = {}
 ): string | undefined {
-  if (fields.length === 0) return undefined;
-  const reasons = new Map((carry?.autoPending ?? []).map((item) => [item.name, item.reason]));
-  const list = fields
-    .map((field) => `${field.title ?? field.name} (${reasons.get(field.name) ?? "autocompletar"})`)
-    .join(", ");
+  const pending = (carry?.autoPending ?? []).filter((item) => !(item.name in values));
+  if (pending.length === 0) return undefined;
+  const titles = new Map(origin.fields.map((field) => [field.name, field.title ?? field.name]));
+  const list = pending.map((item) => `${titles.get(item.name) ?? item.title ?? item.name} (${item.reason})`).join(", ");
   return (
-    `Obrigatórios vazios com autocompletar que o kit não calcula ${inLabel(origin.label)}: ${list}. ` +
-    "Ao abrir o cartão a tela tenta preencher esses campos pelo autocompletar (e cobra o que ficar vazio); " +
+    `Campos com autocompletar que o kit não calcula ${inLabel(origin.label)}: ${list}. ` +
+    "Ao abrir o cartão a tela tenta preencher esses campos pelo autocompletar (e cobra o obrigatório que ficar vazio); " +
     "o mover do kit vai sem eles: confira o valor na tela e mande com --set no mover (ou confirme com o usuário)."
   );
+}
+
+/**
+ * POP-1/R4-P1: aviso dos valores gravados que a tela não mostra (e o mover leva igual: sem eles,
+ * ou só com a parte que a tela resolve). O obrigatório que ficou vazio bloqueia à parte.
+ */
+export function unresolvedWarning(
+  origin: FormScope,
+  carry: Pick<CarryOverResult, "unresolved"> | undefined,
+  values: Record<string, unknown>,
+  blocking: ReadonlySet<string> = new Set()
+): string | undefined {
+  const list = (carry?.unresolved ?? []).filter((item) => !blocking.has(item.name) && !(item.emptied && item.name in values));
+  if (list.length === 0) return undefined;
+  const titles = new Map(origin.fields.map((field) => [field.name, field.title ?? field.name]));
+  return (
+    `Gravados no cartão que a tela não mostra ${inLabel(origin.label)}: ` +
+    list.map((item) => `${titles.get(item.name) ?? item.title ?? item.name} (${item.reason})`).join(", ") +
+    ". O mover vai como a tela: sem esses valores (confira com o usuário se precisa mandar outro com --set)."
+  );
+}
+
+/** POP-1/R4-P1: obrigatórios que a tela mostra vazios porque não resolve o valor gravado. */
+function unresolvedRequired(
+  origin: FormScope,
+  carry: Pick<CarryOverResult, "unresolved"> | undefined,
+  values: Record<string, unknown>
+): NormalizedField[] {
+  const emptied = new Set((carry?.unresolved ?? []).filter((item) => item.emptied && !item.passesRequired).map((item) => item.name));
+  return origin.fields.filter((field) => emptied.has(field.name) && !(field.name in values) && isRequiredOnScreen(field));
+}
+
+function unresolvedRequiredIssue(field: NormalizedField, carry: Pick<CarryOverResult, "unresolved"> | undefined): ValueIssue {
+  const reason = carry?.unresolved.find((item) => item.name === field.name)?.reason ?? "valor que a tela não resolve";
+  return {
+    kind: "move_conflict",
+    blocking: true,
+    text:
+      `${field.title ?? field.name} está gravado no cartão, mas a tela mostra o campo vazio (${reason}) e cobra o obrigatório. ` +
+      `Mande --set com um valor válido (${describeExpected(field)}) depois de conferir com o usuário`
+  };
+}
+
+/**
+ * R4-P2: documento e telefone que a tela recusa ao mover (o `createYupSchema` valida o formato
+ * sempre: obrigatório ou não, oculto e com condicional também), sobre o que vai no mover.
+ */
+function formatInvalid(origin: FormScope, values: Record<string, unknown>): Array<{ field: NormalizedField; error: string }> {
+  const out: Array<{ field: NormalizedField; error: string }> = [];
+  for (const field of origin.fields) {
+    if (!(field.name in values)) continue;
+    const error = screenFormatError(field.type, field.variation ?? field.raw?.variation, values[field.name]);
+    if (error) out.push({ field, error });
+  }
+  return out;
+}
+
+function formatIssue(item: { field: NormalizedField; error: string }, values: Record<string, unknown>): ValueIssue {
+  return {
+    kind: "invalid_value",
+    blocking: true,
+    text:
+      `${item.field.title ?? item.field.name} (${describeExpected(item.field)}): ${JSON.stringify(values[item.field.name])} ` +
+      `não passa na tela (${item.error}). A tela recusa o mover com esse valor, mesmo fora do obrigatório: mande o valor corrigido com --set`
+  };
 }
 
 /** Aviso (não bloqueia) dos obrigatórios com condicional que ficaram vazios. */
@@ -244,39 +320,67 @@ export interface OriginRequiredResult {
 export function originRequired(input: OriginRequiredInput): OriginRequiredResult {
   const { origin } = input;
   if (!origin) return { issues: [] };
-  if (skipsRequiredOnBackwardMove(input.ctx.flowRecord, input.fromStep, input.toStep)) return { issues: [] };
+  const unresolvedNote = (blockingNames: ReadonlySet<string>): string | undefined =>
+    unresolvedWarning(origin, input.carry, input.values, blockingNames);
+  // Voltar etapa com "pular obrigatórios ao voltar": a tela pula a validação do formulário inteira.
+  if (skipsRequiredOnBackwardMove(input.ctx.flowRecord, input.fromStep, input.toStep)) {
+    const warning = unresolvedNote(new Set());
+    return { issues: [], ...(warning ? { warning } : {}) };
+  }
+  // R4-P2: o formato do documento e do telefone (obrigatório ou não, oculto também).
+  const badFormat = formatInvalid(origin, input.values);
+  const formatIssues = badFormat.map((item) => formatIssue(item, input.values));
+  const formatFields = badFormat.map((item) => item.field);
   const lost = notKeptRequired(origin, input.carry, input.values);
   const missing = missingRequiredFields(origin, input.values, withoutNames(input.filled, lost));
   const split = splitByConditional(missing, input.fromStep, input.carry, input.values);
   const { conditional, autoPending } = split;
-  const blocking = split.blocking.filter((field) => !lost.includes(field));
+  // POP-1/R4-P1: o obrigatório vazio porque a tela não resolve o valor gravado tem motivo próprio.
+  const unresolved = unresolvedRequired(origin, input.carry, input.values);
+  const blocking = split.blocking.filter((field) => !lost.includes(field) && !unresolved.includes(field));
+  const unresolvedBlocking = split.blocking.filter((field) => unresolved.includes(field));
   const checklist = pendingChecklists(origin, input.fromStep, input.values);
   const lostIssues = lost.map((field) => notKeptRequiredIssue(field));
-  if (blocking.length === 0 && lost.length === 0) {
-    const warning = joinWarnings(
-      conditionalRequiredWarning(origin, conditional),
-      autoPendingWarning(origin, autoPending, input.carry)
-    );
+  const toAsk = [...blocking, ...lost, ...unresolvedBlocking, ...formatFields.filter((field) => !blocking.includes(field))];
+  const warning = joinWarnings(
+    toAsk.length === 0 ? conditionalRequiredWarning(origin, conditional) : undefined,
+    autoPendingWarning(origin, input.carry, input.values),
+    unresolvedNote(new Set(unresolvedBlocking.map((field) => field.name)))
+  );
+  if (toAsk.length === 0) {
     return { issues: checklist.issues, ...(warning ? { warning } : {}) };
   }
   return {
     issues: [
       ...blocking.map((field) => missingRequiredIssue(origin, field)),
       ...lostIssues,
+      ...unresolvedBlocking.map((field) => unresolvedRequiredIssue(field, input.carry)),
+      ...formatIssues,
       ...checklist.issues,
-      moveRequiredHint({
-        missing: [...blocking, ...lost],
-        origin,
-        steps: input.ctx.steps,
-        toStep: input.toStep,
-        cardId: input.cardId,
-        conditional,
-        autoPending,
-        ...(input.flowId !== undefined ? { flowId: input.flowId } : {}),
-        ...(input.repeatSent ? { repeatSent: true } : {})
-      })
-    ]
+      hintFor(input, origin, toAsk, conditional, autoPending)
+    ],
+    ...(warning ? { warning } : {})
   };
+}
+
+function hintFor(
+  input: OriginRequiredInput,
+  origin: FormScope,
+  missing: NormalizedField[],
+  conditional: NormalizedField[],
+  autoPending: NormalizedField[]
+): ValueIssue {
+  return moveRequiredHint({
+    missing,
+    origin,
+    steps: input.ctx.steps,
+    toStep: input.toStep,
+    cardId: input.cardId,
+    conditional,
+    autoPending,
+    ...(input.flowId !== undefined ? { flowId: input.flowId } : {}),
+    ...(input.repeatSent ? { repeatSent: true } : {})
+  });
 }
 
 /**
@@ -352,7 +456,7 @@ export function pendingChecklists(
  * confirmada. O `GET /card` não traz o rascunho, e o mover apaga o rascunho.
  */
 export interface CarryReadOptions {
-  /** Fluxo do cartão (o `GET /card/moviment` e o by-register pedem). Sem ele: o do cartão. */
+  /** Fluxo do cartão (o `GET /card/moviment`, o by-cards e o by-register pedem). Sem ele: o do cartão. */
   flowId?: number | string;
   /** R3-F4: o que vai no mover para o formulário da etapa atual (os --set, o values do payload). */
   sent?: Record<string, unknown>;
@@ -363,23 +467,40 @@ export async function readOriginCarry(
   cardRaw: unknown,
   origin: FormScope,
   cardId: number | string,
-  flowFields?: NormalizedField[],
   options: CarryReadOptions = {}
 ): Promise<CarryOverResult> {
   const pre = await kit.contracts.getPreAnswer({ cardId, formId: origin.formId });
   const flowId = options.flowId ?? cardFlowId(cardRaw);
-  const stepEntry = await readStepEntry(kit, cardRaw, pre?.raw, origin, cardId, flowId);
+  const stepEntry = await readPassageStart(kit, cardRaw, pre?.raw, origin, cardId, flowId, stepEntryFromMovements);
   const carry = readStepCarryOver({
     cardRaw,
     preAnswerRaw: pre?.raw,
     formId: origin.formId,
     fields: origin.fields,
-    ...(flowFields ? { flowFields } : {}),
     ...(stepEntry !== undefined ? { stepEntry } : {}),
     ...(options.sent ? { sent: options.sent } : {})
   });
+  const preFields = asRecord(pre?.raw)?.fields;
+  if (carry.byCards.length > 0 && flowId !== undefined) {
+    // POP-2: o mesmo POST que a tela faz ao abrir o cartão, com a mesma lista na mesma ordem.
+    let response: unknown;
+    try {
+      response = await kit.contracts.getAutoCompleteByCards({
+        cardId,
+        items: carry.byCards.map((item) => ({
+          flowId,
+          fieldId: item.parentFieldId,
+          ...(item.childFieldId !== undefined ? { childFieldId: item.childFieldId } : {})
+        }))
+      });
+    } catch {
+      response = undefined;
+    }
+    resolveByCards(carry, origin.fields, response, { cardId, flowId });
+  }
+  // R3-F4: destino de vínculo que ficou vazio ao abrir e cuja origem vem no mover (o blur da tela).
+  if (pre !== undefined) requestRegisterAutoFill(carry, preFields, origin.fields, options.sent);
   if (carry.byRegister.length > 0 && flowId !== undefined) {
-    // R3-F4: o mesmo POST que a tela faz no blur quando a pessoa escolhe a origem do vínculo.
     let response: unknown;
     try {
       response = await kit.contracts.getAutoCompleteByRegister({
@@ -395,26 +516,35 @@ export async function readOriginCarry(
     }
     resolveByRegister(carry, origin.fields, response);
   }
+  // POP-1/R4-P1: o que o componente da tela faz com cada valor (usuário, cartão, anexo, opção...).
+  await resolveScreenReferences(kit, {
+    carry,
+    fields: origin.fields,
+    ...(preFields !== undefined ? { preFields } : {}),
+    ...(flowId !== undefined ? { flowId } : {})
+  });
   return carry;
 }
 
 /**
- * R3-F1: quando o cartão entrou na etapa em que está, só se houver confirmada mais nova que o
- * rascunho para disputar com ele. Falha da leitura = não se sabe (nenhuma confirmada disputa).
+ * R3-F1/R4-F1: o começo da passagem que conta, pelos movimentos do cartão, só se houver
+ * confirmada mais nova que o rascunho para disputar com ele. Falha da leitura = não se sabe
+ * (nenhuma confirmada disputa).
  */
-async function readStepEntry(
+async function readPassageStart(
   kit: CangeAgentKit,
   cardRaw: unknown,
   preAnswerRaw: unknown,
   scope: FormScope,
   cardId: number | string,
-  flowId: number | string | undefined
+  flowId: number | string | undefined,
+  pick: (movementsRaw: unknown) => number | undefined
 ): Promise<number | undefined> {
   if (flowId === undefined) return undefined;
   if (!needsStepEntry({ cardRaw, preAnswerRaw, formId: scope.formId, fields: scope.fields })) return undefined;
   try {
     const movements = await kit.contracts.getCardMovements({ cardId, flowId });
-    return movements ? stepEntryFromMovements(movements.raw) : undefined;
+    return movements ? pick(movements.raw) : undefined;
   } catch {
     return undefined;
   }
@@ -438,17 +568,31 @@ function cardFlowId(cardRaw: unknown): number | string | undefined {
  *
  * Fonte = a da tela para esse formulário (`GET /form/pre-answer`: o rascunho, ou a última
  * passagem que o back remonta). Sem o autocompletar: a tela só autocompleta quando o cartão
- * estiver na etapa dele, e o que ficar sem linha ela ainda preenche nessa hora.
+ * estiver na etapa dele, e o que ficar sem linha ela ainda preenche nessa hora. Sem a resolução
+ * das referências (POP-1): o mover só preserva esse formulário, a tela não o valida agora.
  */
 export async function readWrittenFormCarry(
   kit: CangeAgentKit,
   cardRaw: unknown,
   scope: FormScope,
   cardId: number | string,
-  options: CarryReadOptions = {}
+  options: CarryReadOptions & {
+    /**
+     * R4-F1: a etapa dona do formulário gravado. O corte da confirmada é a SAÍDA da última
+     * passagem do cartão por ela (a resposta dessa saída é da passagem anterior; o rascunho é o
+     * que a tela vai mostrar), não a entrada na etapa atual. Sem ela, nenhuma confirmada disputa.
+     */
+    ownerStepId?: number | string;
+  } = {}
 ): Promise<CarryOverResult> {
   const pre = await kit.contracts.getPreAnswer({ cardId, formId: scope.formId });
-  const stepEntry = await readStepEntry(kit, cardRaw, pre?.raw, scope, cardId, options.flowId ?? cardFlowId(cardRaw));
+  const owner = options.ownerStepId;
+  const stepEntry =
+    owner === undefined
+      ? undefined
+      : await readPassageStart(kit, cardRaw, pre?.raw, scope, cardId, options.flowId ?? cardFlowId(cardRaw), (raw) =>
+          stepExitFromMovements(raw, owner)
+        );
   return readStepCarryOver({
     cardRaw,
     preAnswerRaw: pre?.raw,
@@ -614,15 +758,21 @@ export async function checkPayloadMove(
       ? formScope(ctx.fields, writtenFormId, formLabel(ctx, writtenFormId), 1)
       : undefined;
   const readOptions = { flowId: payload.flowId };
+  const ownerStep = ctx.steps.find((step) => step.formId !== undefined && String(step.formId) === writtenFormId);
   const [originCarry, writtenRead] = await Promise.all([
     origin
-      ? readOriginCarry(kit, card.raw, origin, payload.cardId, ctx.fields, {
+      ? readOriginCarry(kit, card.raw, origin, payload.cardId, {
           ...readOptions,
           // R3-F4: o values só vai para a etapa atual quando o payload grava o formulário dela.
           ...(writesOrigin ? { sent: values } : {})
         })
       : Promise.resolve(undefined),
-    writtenScope ? readWrittenFormCarry(kit, card.raw, writtenScope, payload.cardId, readOptions) : Promise.resolve(undefined)
+    writtenScope
+      ? readWrittenFormCarry(kit, card.raw, writtenScope, payload.cardId, {
+          ...readOptions,
+          ...(ownerStep ? { ownerStepId: ownerStep.id } : {})
+        })
+      : Promise.resolve(undefined)
   ]);
   const written = resendableWritten(writtenRead);
   const writtenNotKept = written && writtenScope ? notKeptText(writtenScope.label, written) : undefined;
@@ -693,6 +843,8 @@ export async function checkPayloadMove(
   }
 
   const counted = writesOrigin ? sendValues : {};
+  /** O que a tela teria no formulário da etapa atual ao mover (é ele que ela valida). */
+  const screenValues = writesOrigin ? sendValues : carry.values;
   // R3-F2: obrigatório preenchido que o reenvio não consegue levar fica vazio no mover: bloqueia.
   const lost = resend ? notKeptRequired(origin, carry, counted) : [];
   const filled = writesOrigin && !resend ? new Set<string>() : withoutNames(carry.filled, lost);
@@ -701,10 +853,15 @@ export async function checkPayloadMove(
   // obrigatório com autocompletar pendente segue bloqueando (nada o preencheria).
   const split = splitByConditional(missing, fromStep, resend ? carry : undefined, counted);
   const { conditional, autoPending } = split;
-  const blocking = split.blocking.filter((field) => !lost.includes(field));
+  // POP-1/R4-P1: o obrigatório vazio porque a tela não resolve o valor gravado tem motivo próprio.
+  const unresolved = unresolvedRequired(origin, carry, counted);
+  const unresolvedBlocking = split.blocking.filter((field) => unresolved.includes(field));
+  const blocking = split.blocking.filter((field) => !lost.includes(field) && !unresolved.includes(field));
   // Preenchido no cartão e fora do values (só com --allow-data-loss): motivo próprio. Mandado vazio = falta.
   const notResent = blocking.filter((field) => carry.filled.has(field.name) && !(field.name in counted));
   const empty = blocking.filter((field) => !notResent.includes(field));
+  // R4-P2: documento e telefone que a tela recusa (obrigatório ou não, oculto também).
+  const badFormat = formatInvalid(origin, screenValues);
 
   for (const field of notResent) {
     issues.push({
@@ -716,9 +873,12 @@ export async function checkPayloadMove(
     });
   }
   issues.push(...lost.map((field) => notKeptRequiredIssue(field)));
-  const checklist = pendingChecklists(origin, fromStep, writesOrigin ? sendValues : carry.values);
+  issues.push(...unresolvedBlocking.map((field) => unresolvedRequiredIssue(field, carry)));
+  issues.push(...badFormat.map((item) => formatIssue(item, screenValues)));
+  const checklist = pendingChecklists(origin, fromStep, screenValues);
   issues.push(...checklist.issues);
-  const toAsk = [...empty, ...lost];
+  const formatFields = badFormat.map((item) => item.field).filter((field) => !empty.includes(field));
+  const toAsk = [...empty, ...lost, ...unresolvedBlocking, ...formatFields];
   if (empty.length > 0) issues.push(...empty.map((field) => missingRequiredIssue(origin, field)));
   if (toAsk.length > 0) {
     issues.push(
@@ -742,7 +902,8 @@ export async function checkPayloadMove(
     notKept,
     lostDraft,
     toAsk.length === 0 ? conditionalRequiredWarning(origin, conditional) : undefined,
-    toAsk.length === 0 ? autoPendingWarning(origin, autoPending, carry) : undefined
+    resend ? autoPendingWarning(origin, carry, counted) : undefined,
+    unresolvedWarning(origin, carry, screenValues, new Set(unresolvedBlocking.map((field) => field.name)))
   );
   return { ...base, issues, ...(warning ? { warning } : {}) };
 }

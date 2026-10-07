@@ -2,7 +2,8 @@ import { asRecord } from "../contracts/raw-adapters.js";
 import type { NormalizedField } from "../schemas/fields.js";
 
 import { normalizeFieldType } from "./fieldTypeGuards.js";
-import { isEmptyForField, isRichTextType } from "./requiredFields.js";
+import { hasDescription, isEmptyForField, isRichTextType } from "./requiredFields.js";
+import { hasScreenFormat, screenFormattedValue } from "./screenFormat.js";
 
 /**
  * P5 (05/10, card #1367456): o mover em 1 passo REENVIA os campos já preenchidos
@@ -37,12 +38,11 @@ import { isEmptyForField, isRichTextType } from "./requiredFields.js";
  *
  * Autocompletar da tela (F2 da revisão): a tela preenche o campo SEM linha na pré-resposta
  * com o autocompletar dele (`getAutoCompleteRule('answer')`) e manda esse valor no mover.
- * O kit faz igual (`applyAutoComplete`): estático, data atual, criador do cartão, o valor
- * de outro campo do cartão e a opção pelo rótulo (o texto da origem casado com o rótulo da
- * opção). Origem vazia no cartão: a tela não preenche nada e o obrigatório cobra; o kit
- * também (A2-F1, 07/10). O que o kit não calcula (usuário atual, campo de vínculo com a
- * origem preenchida, rótulo de origem que o kit não sabe montar) vai para `autoPending` e o
- * obrigatório vazio vira aviso.
+ * O kit faz igual (`applyAutoComplete`): estático, data atual, criador do cartão e, com a
+ * origem no cartão, o mesmo `POST /form/answers/by-cards` da tela (POP-2, revisão 4). Origem
+ * vazia no cartão: a tela não preenche nada e o obrigatório cobra; o kit também (A2-F1,
+ * 07/10). O que o kit não calcula (usuário atual, by-cards que falhou) vai para `autoPending`
+ * e volta no aviso, obrigatório ou não.
  *
  * A rota respondeu SEM nada (nem rascunho com linha, nem última passagem elegível): a tela
  * abre o formulário vazio, só com o autocompletar (`usePreAnswer`, ramo "No existing
@@ -78,6 +78,17 @@ import { isEmptyForField, isRichTextType } from "./requiredFields.js";
  *    `sent`), do mesmo formulário e de cadastro ou cartão: a tela preenche o destino no blur
  *    (`POST /form/answers/by-register` com o valor escolhido). O kit pede o mesmo
  *    (`byRegister`, resolvido pelo `resolveByRegister`) e leva o valor (`autoFilled`).
+ *
+ * Revisão 4 do EXTRA-06 (07/10):
+ *  - R4-F1 (corte estrito): a resposta confirmada criada pelo próprio movimento que trouxe o
+ *    cartão para a etapa (o formulário público que o tirou da etapa anterior) cai no MESMO
+ *    segundo da entrada; ela não é desta passagem. O corte agora é estrito (`>`), e no
+ *    formulário gravado fora da etapa atual o corte é a saída da última passagem do cartão pela
+ *    etapa dona dele (`stepExitFromMovements`), não a entrada na etapa atual.
+ *  - POP-2 (autocompletar): o dinâmico com origem no cartão é o `POST /form/answers/by-cards` da
+ *    tela (`byCards` + `resolveByCards`), não mais o cálculo local.
+ *  - POP-1/R4-P1 (referência que a tela não resolve): o valor reenviado passa pelo que o
+ *    componente da tela faz com ele (`applyScreenValue`; ver `screen-refs.ts` no CLI).
  */
 
 /** De onde veio o que o cartão tem na etapa atual. */
@@ -104,14 +115,38 @@ export interface CarryOverResult {
   answered: Set<string>;
   /** Campos sem valor que o autocompletar da tela preenche; o valor já está em `values`. */
   autoFilled: Array<{ name: string; title?: string; rule: AutoFillRule }>;
-  /** Campos sem valor com autocompletar que o kit não calcula: obrigatório vazio vira aviso. */
+  /** Campos sem valor com autocompletar que o kit não calcula: vira aviso (obrigatório ou não). */
   autoPending: Array<{ name: string; title?: string; reason: string }>;
+  /**
+   * POP-2: destinos do autocompletar dinâmico com origem no cartão, na ordem da tela. Quem lê a
+   * pré-resposta pede o `POST /form/answers/by-cards` e aplica com `resolveByCards`. Até lá o
+   * campo fica em `autoPending` (aviso, não bloqueio).
+   */
+  byCards: CardAutoFill[];
+  /**
+   * POP-1/R4-P1: valores gravados que o componente da tela não resolve (usuário fora da lista,
+   * cartão conectado excluído, opção que não existe, anexo que não carrega, documento sem
+   * dígito). A tela mostra vazio (ou só a parte que resolve) e o mover vai igual.
+   */
+  unresolved: UnresolvedField[];
   /**
    * R3-F4: destinos de vínculo cuja origem vazia no cartão vem no mover. A tela preenche no
    * blur pelo `POST /form/answers/by-register`; quem lê a pré-resposta pede e aplica com
    * `resolveByRegister`. Até lá o campo fica em `autoPending` (aviso, não bloqueio).
    */
   byRegister: RegisterAutoFill[];
+}
+
+/** Valor gravado que a tela não mostra como está (POP-1/R4-P1). */
+export interface UnresolvedField {
+  name: string;
+  title?: string;
+  /** O que a tela faz com o valor (ex.: "usuário 3101 bloqueado, leitor do fluxo ou fora do fluxo privado"). */
+  reason: string;
+  /** Nada sobrou: a tela mostra o campo vazio. false = só parte da lista saiu. */
+  emptied: boolean;
+  /** Vazio na tela, mas o obrigatório da tela passa assim mesmo (o `{}` do campo de usuário). */
+  passesRequired?: boolean;
 }
 
 /** Pedido do autocompletar de vínculo com a origem mandada no mover (R3-F4). */
@@ -198,19 +233,15 @@ export interface StepCarryOverInput {
   formId: string;
   fields: NormalizedField[];
   /**
-   * Campos do fluxo inteiro (`GET /field/by-flow`): as opções do campo de origem do
-   * autocompletar, para achar o rótulo da linha do rascunho (que vem sem `valueString`).
-   */
-  flowFields?: NormalizedField[];
-  /**
    * Aplicar o autocompletar da tela (padrão: sim). Não no formulário que o mover grava fora
    * da etapa atual: a tela só autocompleta quando o cartão estiver na etapa dele.
    */
   autoComplete?: boolean;
   /**
-   * R3-F1: quando o cartão entrou na etapa em que está (ms; o `dt_entry` mais novo do
-   * `GET /card/moviment`). Só a linha de confirmada escrita desde então disputa com o
-   * rascunho. undefined = não se sabe: nenhuma confirmada disputa (a tela só lê o rascunho).
+   * R3-F1/R4-F1: o começo da passagem (ms). Na etapa atual, a entrada nela (o `dt_entry` mais
+   * novo do `GET /card/moviment`); no formulário gravado fora dela, a saída da última passagem
+   * pela etapa dona do formulário. Só a linha de confirmada escrita DEPOIS (estrito) disputa com
+   * o rascunho. undefined = não se sabe: nenhuma confirmada disputa (a tela só lê o rascunho).
    */
   stepEntry?: number;
   /** R3-F4: o que vai no mover para este formulário (hash → valor), para o autocompletar de vínculo. */
@@ -221,7 +252,6 @@ export interface StepCarryOverInput {
 export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
   const pre = preAnswerRecord(input.preAnswerRaw, input.formId);
   let result: CarryOverResult;
-  let draft: Record<string, unknown> | undefined;
   if (!pre) {
     // Sem a rota (404): o GET /card, como antes. A rota respondeu sem nada: vazio, como a tela.
     result =
@@ -231,7 +261,6 @@ export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
   } else if (String(pre.origin ?? "") === SYNTHETIC_ORIGIN || firstDefined(pre.id_form_answer, pre.id) === undefined) {
     result = build([pre], input.fields, "ultima-passagem", "resposta", true);
   } else {
-    draft = pre;
     // Só a confirmada mais nova que o rascunho disputa com ele (é nela que o PUT /form/answer
     // grava quando o rascunho é mais antigo); a disputa é campo a campo, pela linha (F1).
     // E só no campo que o mover reenvia: a disputa existe para o valor gravado nela não sumir
@@ -254,8 +283,6 @@ export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
       preFields: asRecord(input.preAnswerRaw)?.fields,
       cardRaw: input.cardRaw,
       fields: input.fields,
-      ...(input.flowFields ? { flowFields: input.flowFields } : {}),
-      ...(draft ? { draft } : {}),
       ...(input.sent ? { sent: input.sent } : {})
     });
   }
@@ -295,14 +322,40 @@ export function stepEntryFromMovements(raw: unknown): number | undefined {
   return latest;
 }
 
-/** A resposta só com as linhas escritas desde `since` (sem `since`, nenhuma). */
+/**
+ * R4-F1: a saída da última passagem do cartão pela etapa `stepId` (o `dt_exit` mais novo dos
+ * movimentos dela). É o começo do que conta no formulário dessa etapa quando o mover o grava de
+ * fora (o rascunho dele é o que a tela vai mostrar; a resposta da saída é da passagem anterior).
+ * Sem passagem pela etapa (ou sem saída): undefined.
+ */
+export function stepExitFromMovements(raw: unknown, stepId: number | string): number | undefined {
+  const root = asRecord(raw);
+  const list = Array.isArray(raw) ? raw : toArray(root?.data ?? root?.items ?? root?.movements);
+  let latest: number | undefined;
+  for (const item of list) {
+    const record = asRecord(item);
+    if (!record) continue;
+    const step = firstDefined(record.flow_step_id, asRecord(record.flow_step)?.id_step);
+    if (step === undefined || String(step) !== String(stepId)) continue;
+    const time = parseTime(record.dt_exit);
+    if (time !== undefined && (latest === undefined || time > latest)) latest = time;
+  }
+  return latest;
+}
+
+/**
+ * A resposta só com as linhas escritas DEPOIS de `since` (sem `since`, nenhuma). R4-F1: o corte é
+ * estrito. A resposta criada pelo movimento que começou a passagem (o formulário público que
+ * tirou o cartão da etapa anterior) tem o mesmo segundo da entrada e não é desta passagem
+ * (cartão 1114758: o SIM da rodada anterior, gravado às 20:19:34, a entrada também).
+ */
 function onlyRowsSince(answer: Record<string, unknown>, since: number | undefined): Record<string, unknown> {
   if (since === undefined) return { ...answer, form_answer_fields: [] };
   const rows = toArray(answer.form_answer_fields).filter((item) => {
     const record = asRecord(item);
     if (!record) return false;
     const time = parseTime(record.dt_last_update) ?? parseTime(record.dt_created) ?? parseTime(answer.dt_created);
-    return time !== undefined && time >= since;
+    return time !== undefined && time > since;
   });
   return { ...answer, form_answer_fields: rows };
 }
@@ -388,7 +441,9 @@ function build(
     answered: new Set(),
     autoFilled: [],
     autoPending: [],
-    byRegister: []
+    byRegister: [],
+    byCards: [],
+    unresolved: []
   };
 
   const byId = new Map<string, NormalizedField>();
@@ -476,92 +531,74 @@ function parseTime(value: unknown): number | undefined {
 }
 
 // ---------------------------------------------------------------------------
-// Autocompletar da tela (F2)
+// Autocompletar da tela (F2; POP-2 da revisão 4)
 // ---------------------------------------------------------------------------
 
 /** Destino lista de opções: a tela casa o TEXTO da origem (`valueString`) com o rótulo da opção. */
 const OPTION_TYPES = new Set(["COMBO_BOX_FIELD", "RADIO_BOX_FIELD", "CHECK_BOX_FIELD", "CHECKBOX_FIELD"]);
-/** Lista de opções de um valor só: duas opções casadas o kit não sabe qual a tela mostra. */
-const SINGLE_OPTION_TYPES = new Set(["COMBO_BOX_FIELD", "RADIO_BOX_FIELD"]);
-const DATE_TYPES = new Set(["DATE_PICKER_FIELD", "DUE_DATE_FIELD", "DATE_FIELD"]);
-/**
- * Tipos em que o texto que o back monta (`getCardsNormalize`, o `valueString`) NÃO é o valor
- * gravado: nome do usuário, máscara de documento, data em dd/MM/yyyy, moeda, título do
- * cadastro/cartão, nome do anexo. Sem o `valueString` na linha, o kit não sabe o texto.
- */
-const FORMATTED_TEXT_TYPES = new Set([
-  "COMBO_BOX_USER_FIELD",
-  "REQUESTER_FIELD",
-  "ID_FIELD",
-  "DOC_FIELD",
-  "SWITCH_FIELD",
-  "DATE_PICKER_FIELD",
-  "DUE_DATE_FIELD",
-  "CURRENCY_FIELD",
-  "COMBO_BOX_REGISTER_FIELD",
-  "COMBO_BOX_FLOW_FIELD",
-  "INPUT_ATTACH_FIELD"
-]);
+/** Destino de data (`isDateTargetField` da tela): só recebe data que a tela consegue ler. */
+const DATE_TYPES = new Set(["DATE_PICKER_FIELD", "DUE_DATE_FIELD"]);
 
 interface AutoCompleteInput {
   /** `fields` do `GET /form/pre-answer` (com `ac_type`, `ac_parent_field_id`, `auto_complete`). */
   preFields: unknown;
   cardRaw: unknown;
   fields: NormalizedField[];
-  /** Campos do fluxo (opções do campo de origem). */
-  flowFields?: NormalizedField[];
-  /** O rascunho da etapa (a tela também lê o campo de origem nele). */
-  draft?: Record<string, unknown>;
   /** R3-F4: o que vai no mover para este formulário. */
   sent?: Record<string, unknown>;
 }
 
-/** Linha com valor do campo de origem, na ordem do `index`. */
-interface ParentRow {
-  index: number;
-  value: string;
-  row: Record<string, unknown>;
+/** Pedido do autocompletar que a tela faz ao abrir o cartão (`POST /form/answers/by-cards`). */
+export interface CardAutoFill {
+  /** Campo destino (hash). */
+  name: string;
+  title?: string;
+  /** Campo de origem (`ac_parent_field_id`). */
+  parentFieldId: number;
+  /** Campo do cadastro/cartão apontado (`ac_child_field_id`), no vínculo. */
+  childFieldId?: number;
+  /** Opções do destino (lista de opções: casa o `valueString` com o rótulo). */
+  options?: unknown;
 }
 
 /**
  * Igual ao `usePreAnswer` + `getAutoCompleteRule('answer')` da tela: campo do formulário sem
  * linha no que o cartão tem recebe o valor do autocompletar dele, e esse valor vai no mover.
- *  - `ac_type = 1` (estático): as linhas de `auto_complete.form_answer_fields`;
- *  - `ac_type = 0` e `ac_parent_field_id`: `-1` data atual, `-3` criador do cartão, `> 0` o
- *    valor desse campo no cartão (a resposta mais recente que o traz, rascunho incluído);
- *    destino lista de opções: a opção cujo rótulo é o texto da origem (sem diferenciar
- *    maiúscula), como a tela; rótulo que não casa deixa o campo vazio.
- * Origem `> 0` sem valor no cartão (A2-F1): o `POST /form/answers/by-cards` da tela volta sem
- * linha, a tela não preenche e o obrigatório cobra. O kit deixa o campo vazio e FORA do
- * `autoPending`, para bloquear igual (antes o vínculo e a opção pelo rótulo viravam aviso
- * sempre: cartão 233055, "Urgência" com o campo de origem vazio).
- * Fica em `autoPending` (o kit não calcula): `-2` usuário atual (quem abre a tela), campo de
- * vínculo (`ac_child_field_id`) com a origem preenchida (o valor vem do cadastro ou cartão
- * apontado) e opção pelo rótulo quando o kit não sabe o texto da origem.
+ *  - `ac_type = 1` (estático): as linhas de `auto_complete.form_answer_fields` (anexo também:
+ *    a tela manda os ids);
+ *  - `ac_type = 0` e `ac_parent_field_id`: `-1` data atual, `-3` criador do cartão; `> 0` vai
+ *    para `byCards`: POP-2 (revisão 4), o kit pede ao back o MESMO `POST /form/answers/by-cards`
+ *    que a tela faz ao abrir o cartão, com a mesma lista na mesma ordem (`resolveByCards`). Antes
+ *    o kit calculava a origem pelo `GET /card` e o rascunho, e o vínculo com a origem preenchida,
+ *    a cópia de anexo e a origem de texto formatado ficavam de fora: o campo não obrigatório
+ *    sumia do mover sem aviso (cartão 433142, "Estoque Atual" e "Estoque mínimo" do cadastro).
+ * Fica em `autoPending` (aviso, obrigatório ou não): `-2` usuário atual (quem abre a tela), o
+ * by-cards que falhou e o tipo que o kit não remonta.
  */
 function applyAutoComplete(result: CarryOverResult, input: AutoCompleteInput): void {
   const preFields = toArray(input.preFields)
     .map(asRecord)
     .filter((record): record is Record<string, unknown> => record !== undefined);
   if (preFields.length === 0) return;
-  const byId = new Map<string, Record<string, unknown>>();
-  const byName = new Map<string, Record<string, unknown>>();
-  for (const record of preFields) {
-    const id = firstDefined(record.id_field, record.id);
-    if (id !== undefined) byId.set(String(id), record);
-    if (typeof record.name === "string") byName.set(record.name, record);
+  const byId = new Map<string, NormalizedField>();
+  const byName = new Map<string, NormalizedField>();
+  for (const field of input.fields) {
+    if (field.id !== undefined) byId.set(String(field.id), field);
+    byName.set(field.name, field);
   }
 
-  for (const field of input.fields) {
+  // A ordem é a dos `fields` da pré-resposta, como a tela monta a lista do by-cards.
+  for (const raw of preFields) {
+    const rawId = firstDefined(raw.id_field, raw.id);
+    const field = (rawId !== undefined ? byId.get(String(rawId)) : undefined) ?? (typeof raw.name === "string" ? byName.get(raw.name) : undefined);
+    if (!field) continue;
     if (result.answered.has(field.name) || field.name in result.values) continue;
-    const raw = (field.id !== undefined ? byId.get(String(field.id)) : undefined) ?? byName.get(field.name);
-    if (!raw) continue;
     const title = field.title ? { title: field.title } : {};
     const pending = (reason: string): void => {
       result.autoPending.push({ name: field.name, ...title, reason });
     };
     const fill = (items: Array<{ index: number; value: string }>, rule: AutoFillRule): void => {
-      const rebuilt = rebuild(field, items);
+      const rebuilt = rebuild(field, items, true);
       if (rebuilt === undefined) return pending("tipo que o kit não remonta");
       if (isEmptyForField(field, rebuilt)) return;
       result.values[field.name] = rebuilt;
@@ -593,43 +630,131 @@ function applyAutoComplete(result: CarryOverResult, input: AutoCompleteInput): v
     } else if (parent === -2) {
       pending("usuário atual");
     } else if (parent > 0) {
-      const rows = parentFieldRows(input.cardRaw, input.draft, parent);
-      // Origem sem valor: a tela não preenche nada ao abrir e o obrigatório cobra (A2-F1). Mas
-      // origem de vínculo do mesmo formulário escolhida no mover: a tela preenche no blur (R3-F4).
-      if (!rows) {
-        const request = registerRequest(field, raw, parent, input);
-        if (request) {
-          result.byRegister.push(request);
-          pending("campo de vínculo");
-        }
-        continue;
-      }
-      const type = normalizeFieldType(field.type);
-      if (toInteger(raw.ac_child_field_id) !== undefined) {
-        pending("campo de vínculo");
-      } else if (OPTION_TYPES.has(type)) {
-        const parentField = input.flowFields?.find((item) => item.id !== undefined && String(item.id) === String(parent));
-        const matched = optionsByLabel(raw.options ?? field.options, rows, parentField);
-        if (matched === undefined) {
-          pending("opção pelo rótulo");
-        } else if (matched.length > 1 && SINGLE_OPTION_TYPES.has(type)) {
-          pending("opção pelo rótulo");
-        } else if (matched.length > 0) {
-          fill(matched, "opcao-pelo-rotulo");
-        }
-        // Nenhum rótulo casou: a tela deixa o campo vazio, e o obrigatório cobra.
-      } else {
-        const items = rows.map(({ index, value }) => ({ index, value }));
-        if (DATE_TYPES.has(type)) {
-          const iso = items.length === 1 ? toIsoDate(items[0]!.value) : undefined;
-          // A tela descarta a data que não consegue ler (o campo fica vazio).
-          if (iso) fill([{ index: 0, value: iso }], "campo-do-cartao");
-        } else {
-          fill(items, "campo-do-cartao");
-        }
-      }
+      const child = toInteger(raw.ac_child_field_id);
+      result.byCards.push({
+        name: field.name,
+        ...title,
+        parentFieldId: parent,
+        ...(child !== undefined ? { childFieldId: child } : {}),
+        ...(raw.options !== undefined || field.options !== undefined ? { options: raw.options ?? field.options } : {})
+      });
+      // Até a resposta do by-cards: pendente (se a consulta falhar, fica o aviso).
+      pending(child !== undefined ? "campo de vínculo" : "campo do cartão");
     }
   }
+}
+
+/** Itens do `POST /form/answers/by-cards` ou `by-register` (lista, ou `{ data }`). */
+function responseItems(responseRaw: unknown): Array<Record<string, unknown>> {
+  return toArray(Array.isArray(responseRaw) ? responseRaw : asRecord(responseRaw)?.data)
+    .map(asRecord)
+    .filter((item): item is Record<string, unknown> => item !== undefined);
+}
+
+/**
+ * A resposta escolhida pela tela para a origem: a do campo de origem; com mais de uma, a do
+ * campo filho do destino (ou a sem filho, quando o destino não tem vínculo).
+ */
+function pickAcAnswer(found: Array<Record<string, unknown>>, childFieldId: number | undefined): Record<string, unknown> | undefined {
+  if (found.length === 1) return asRecord(found[0]!.formAnswer);
+  if (found.length === 0) return undefined;
+  const selected =
+    childFieldId !== undefined
+      ? found.filter((item) => toInteger(item.child_field_id) === childFieldId)
+      : found.filter((item) => item.child_field_id === undefined || item.child_field_id === null);
+  return selected.length > 0 ? asRecord(selected[0]!.formAnswer) : undefined;
+}
+
+/**
+ * O valor que a tela põe no destino com as linhas da origem (`getAutoCompleteRule`): lista de
+ * opções pelo `valueString` casado com o rótulo, sem diferenciar maiúscula; data pelo
+ * `sanitizeAutoCompleteDateValue` (o `value`, senão o `valueString`; o que a tela não lê fica
+ * vazio); os outros tipos copiam o `value` (ids de anexo inclusive).
+ */
+function acItemsFromRows(field: NormalizedField, rowsRaw: unknown, optionsRaw: unknown): Array<{ index: number; value: string }> {
+  const type = normalizeFieldType(field.type);
+  const rows = toArray(rowsRaw)
+    .map(asRecord)
+    .filter((row): row is Record<string, unknown> => row !== undefined && !isDeleted(row));
+  const items: Array<{ index: number; value: string }> = [];
+  for (const row of rows) {
+    let value: string | undefined;
+    if (OPTION_TYPES.has(type)) {
+      // `valueString` ausente a tela compara com ""; null ela não consegue comparar (fica sem valor).
+      const target = "valueString" in row ? row.valueString : "";
+      if (typeof target !== "string") continue;
+      const option = toArray(optionsRaw ?? field.options)
+        .map(asRecord)
+        .find((item) => item !== undefined && typeof item.label === "string" && item.label.toLocaleLowerCase() === target.toLocaleLowerCase());
+      value = option ? asString(option.value) : undefined;
+    } else if (DATE_TYPES.has(type)) {
+      const rawValue = row.value !== undefined && row.value !== null && row.value !== "" ? row.value : row.valueString;
+      value = sanitizeAutoCompleteDate(rawValue);
+    } else {
+      value = asString(row.value);
+    }
+    if (value !== undefined && value.trim() !== "") items.push({ index: items.length, value });
+  }
+  return items;
+}
+
+/** Aplica as linhas da origem no destino (o que a tela faz), ou deixa vazio. */
+function fillFromAcRows(
+  result: CarryOverResult,
+  field: NormalizedField,
+  rowsRaw: unknown,
+  optionsRaw: unknown,
+  rule: AutoFillRule
+): void {
+  const items = acItemsFromRows(field, rowsRaw, optionsRaw);
+  if (items.length === 0) return;
+  const title = field.title ? { title: field.title } : {};
+  const rebuilt = rebuild(field, items, true);
+  if (rebuilt === undefined) {
+    result.autoPending.push({ name: field.name, ...title, reason: "tipo que o kit não remonta" });
+    return;
+  }
+  if (isEmptyForField(field, rebuilt)) return;
+  result.values[field.name] = rebuilt;
+  result.autoFilled.push({
+    name: field.name,
+    ...title,
+    rule: OPTION_TYPES.has(normalizeFieldType(field.type)) ? "opcao-pelo-rotulo" : rule
+  });
+}
+
+/**
+ * POP-2: aplica a resposta do `POST /form/answers/by-cards` (a mesma que a tela pede ao abrir o
+ * cartão) aos pedidos de `result.byCards`. A origem sem linha deixa o destino vazio e o
+ * obrigatório cobra, como na tela (A2-F1). `responseRaw` undefined = a consulta falhou: os
+ * campos seguem em `autoPending` (aviso).
+ */
+export function resolveByCards(
+  result: CarryOverResult,
+  fields: NormalizedField[],
+  responseRaw: unknown,
+  ids: { cardId: number | string; flowId: number | string }
+): void {
+  if (result.byCards.length === 0) return;
+  if (responseRaw === undefined) {
+    result.byCards = [];
+    return;
+  }
+  const cardId = toInteger(ids.cardId);
+  const flowId = toInteger(ids.flowId);
+  const items = responseItems(responseRaw);
+  for (const request of result.byCards) {
+    result.autoPending = result.autoPending.filter((item) => item.name !== request.name);
+    const field = fields.find((item) => item.name === request.name);
+    if (!field) continue;
+    const found = items.filter(
+      (item) =>
+        toInteger(item.card_id) === cardId && toInteger(item.flow_id) === flowId && toInteger(item.field_id) === request.parentFieldId
+    );
+    const answer = pickAcAnswer(found, request.childFieldId);
+    fillFromAcRows(result, field, answer?.form_answer_fields, request.options, request.childFieldId !== undefined ? "vinculo" : "campo-do-cartao");
+  }
+  result.byCards = [];
 }
 
 /** Origem de vínculo que a tela consulta no blur (`SelectFormAnswersByRegisterService`). */
@@ -637,44 +762,53 @@ const REGISTER_PARENT_TYPES = new Set(["COMBO_BOX_REGISTER_FIELD", "COMBO_BOX_FL
 
 /**
  * R3-F4: o blur da tela (`getAutoCompleteRule('answer', ..., currData)`) pede o vínculo pela origem
- * escolhida no formulário: destino com `ac_child_field_id`, origem combo de cadastro ou de cartão
- * do MESMO formulário, preenchida no que vai no mover, e destino sem valor nele.
+ * escolhida no formulário: destino com `ac_child_field_id` que ficou vazio ao abrir o cartão (o
+ * by-cards não trouxe nada), origem combo de cadastro ou de cartão do MESMO formulário,
+ * preenchida no que vai no mover, e destino sem valor nele. Chamado depois do `resolveByCards`.
  */
-function registerRequest(
-  field: NormalizedField,
-  raw: Record<string, unknown>,
-  parent: number,
-  input: AutoCompleteInput
-): RegisterAutoFill | undefined {
-  const child = toInteger(raw.ac_child_field_id);
-  if (child === undefined || !input.sent) return undefined;
-  const parentField = input.fields.find((item) => item.id !== undefined && String(item.id) === String(parent));
-  if (!parentField || !REGISTER_PARENT_TYPES.has(normalizeFieldType(parentField.type))) return undefined;
-  if (field.name in input.sent || !(parentField.name in input.sent)) return undefined;
-  const currValue = input.sent[parentField.name];
-  if (isEmptyForField(parentField, currValue) || currValue === 0) return undefined;
-  return {
-    name: field.name,
-    ...(field.title ? { title: field.title } : {}),
-    parentFieldId: parent,
-    childFieldId: child,
-    currValue,
-    ...(raw.options !== undefined || field.options !== undefined ? { options: raw.options ?? field.options } : {})
-  };
+export function requestRegisterAutoFill(
+  result: CarryOverResult,
+  preFieldsRaw: unknown,
+  fields: NormalizedField[],
+  sent: Record<string, unknown> | undefined
+): void {
+  if (!sent) return;
+  for (const raw of toArray(preFieldsRaw).map(asRecord)) {
+    if (!raw || toInteger(raw.ac_type) !== 0) continue;
+    const parent = toInteger(raw.ac_parent_field_id);
+    const child = toInteger(raw.ac_child_field_id);
+    if (parent === undefined || parent <= 0 || child === undefined) continue;
+    const rawId = firstDefined(raw.id_field, raw.id);
+    const field = fields.find(
+      (item) => (rawId !== undefined && item.id !== undefined && String(item.id) === String(rawId)) || (typeof raw.name === "string" && item.name === raw.name)
+    );
+    if (!field || result.answered.has(field.name) || field.name in result.values || field.name in sent) continue;
+    if (result.autoPending.some((item) => item.name === field.name)) continue;
+    const parentField = fields.find((item) => item.id !== undefined && String(item.id) === String(parent));
+    if (!parentField || !REGISTER_PARENT_TYPES.has(normalizeFieldType(parentField.type)) || !(parentField.name in sent)) continue;
+    const currValue = sent[parentField.name];
+    if (isEmptyForField(parentField, currValue) || currValue === 0) continue;
+    result.byRegister.push({
+      name: field.name,
+      ...(field.title ? { title: field.title } : {}),
+      parentFieldId: parent,
+      childFieldId: child,
+      currValue,
+      ...(raw.options !== undefined || field.options !== undefined ? { options: raw.options ?? field.options } : {})
+    });
+    result.autoPending.push({ name: field.name, ...(field.title ? { title: field.title } : {}), reason: "campo de vínculo" });
+  }
 }
 
 /**
  * R3-F4: aplica a resposta do `POST /form/answers/by-register` (a mesma que a tela pede no blur)
- * aos pedidos de `result.byRegister`. Lista de opções: o `valueString` casado com o rótulo, sem
- * maiúscula; data: em ISO (a que não dá para ler fica vazia); o resto, o valor como veio.
- * Sem linha na resposta, o campo fica vazio e o obrigatório cobra, como na tela. `responseRaw`
- * undefined = a consulta falhou: o campo segue em `autoPending` (aviso).
+ * aos pedidos de `result.byRegister`, com o mesmo mapeamento do by-cards. Sem linha na resposta,
+ * o campo fica vazio e o obrigatório cobra, como na tela. `responseRaw` undefined = a consulta
+ * falhou: o campo segue em `autoPending` (aviso).
  */
 export function resolveByRegister(result: CarryOverResult, fields: NormalizedField[], responseRaw: unknown): void {
   if (result.byRegister.length === 0 || responseRaw === undefined) return;
-  const items = toArray(Array.isArray(responseRaw) ? responseRaw : asRecord(responseRaw)?.data)
-    .map(asRecord)
-    .filter((item): item is Record<string, unknown> => item !== undefined);
+  const items = responseItems(responseRaw);
   for (const request of result.byRegister) {
     const field = fields.find((item) => item.name === request.name);
     result.autoPending = result.autoPending.filter((item) => item.name !== request.name);
@@ -682,35 +816,7 @@ export function resolveByRegister(result: CarryOverResult, fields: NormalizedFie
     const same = items.filter((item) => toInteger(item.field_id) === request.parentFieldId);
     const match =
       same.length > 1 ? same.find((item) => toInteger(item.child_field_id) === request.childFieldId) : same[0];
-    const rows = toArray(asRecord(match?.formAnswer)?.form_answer_fields)
-      .map(asRecord)
-      .filter((row): row is Record<string, unknown> => row !== undefined && !isDeleted(row));
-    const type = normalizeFieldType(field.type);
-    const filled: Array<{ index: number; value: string }> = [];
-    for (const row of rows) {
-      let value: string | undefined;
-      if (OPTION_TYPES.has(type)) {
-        const target = typeof row.valueString === "string" ? row.valueString.toLocaleLowerCase() : undefined;
-        const option = toArray(request.options ?? field.options)
-          .map(asRecord)
-          .find((item) => item !== undefined && typeof item.label === "string" && item.label.toLocaleLowerCase() === target);
-        value = option ? asString(option.value) : undefined;
-      } else if (DATE_TYPES.has(type)) {
-        const text = asString(row.value) ?? asString(row.valueString);
-        value = text !== undefined && text.trim() !== "" ? toIsoDate(text) : undefined;
-      } else {
-        value = asString(row.value);
-      }
-      if (value !== undefined && value.trim() !== "") filled.push({ index: filled.length, value });
-    }
-    if (filled.length === 0) continue;
-    const rebuilt = rebuild(field, filled);
-    if (rebuilt === undefined || isEmptyForField(field, rebuilt)) {
-      if (rebuilt === undefined) result.autoPending.push({ name: field.name, ...(field.title ? { title: field.title } : {}), reason: "tipo que o kit não remonta" });
-      continue;
-    }
-    result.values[field.name] = rebuilt;
-    result.autoFilled.push({ name: field.name, ...(field.title ? { title: field.title } : {}), rule: "vinculo" });
+    fillFromAcRows(result, field, asRecord(match?.formAnswer)?.form_answer_fields, request.options, "vinculo");
   }
   result.byRegister = [];
 }
@@ -729,108 +835,154 @@ function valueItems(rows: unknown[]): Array<{ index: number; value: string }> {
 }
 
 /**
- * Opções do campo cujo rótulo é o texto da linha de origem, sem diferenciar maiúscula
- * (`getAutoCompleteRule`: `opt.label.toLocaleLowerCase() === target.toLocaleLowerCase()`).
- * undefined = o kit não sabe o texto de alguma linha (vira pendente); [] = nada casou.
+ * `sanitizeAutoCompleteDateValue` da tela (`parseImportedDate`): ISO com fuso preserva o instante;
+ * `aaaa-mm-dd`, `aaaa/mm/dd` e `dd/mm/aaaa` (ano de 2 dígitos na janela 1970-2069, hora opcional)
+ * viram hora LOCAL; o resto (texto, 31/02) fica vazio.
  */
-function optionsByLabel(
-  optionsRaw: unknown,
-  rows: ParentRow[],
-  parentField: NormalizedField | undefined
-): Array<{ index: number; value: string }> | undefined {
-  const options = toArray(optionsRaw)
-    .map(asRecord)
-    .filter((option): option is Record<string, unknown> => option !== undefined);
-  const matched: Array<{ index: number; value: string }> = [];
-  for (const row of rows) {
-    const text = screenText(row, parentField);
-    if (text === undefined) return undefined;
-    const target = text.toLocaleLowerCase();
-    const option = options.find((item) => typeof item.label === "string" && item.label.toLocaleLowerCase() === target);
-    const value = option ? asString(option.value) : undefined;
-    if (value !== undefined && !matched.some((item) => item.value === value)) {
-      matched.push({ index: matched.length, value });
+export function sanitizeAutoCompleteDate(raw: unknown): string | undefined {
+  if (typeof raw === "number") {
+    if (!Number.isFinite(raw) || raw <= 0) return undefined;
+    const parsed = new Date(Date.UTC(1899, 11, 30) + Math.round(raw * 86400000));
+    if (Number.isNaN(parsed.getTime())) return undefined;
+    return new Date(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()).toISOString();
+  }
+  if (typeof raw !== "string") return undefined;
+  const text = raw.trim();
+  if (text === "") return undefined;
+  if (/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:?\d{2})$/.test(text)) {
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed.toISOString();
+  }
+  const [datePart = "", ...rest] = text.split(/[\sT]+/);
+  let year: number;
+  let month: number;
+  let day: number;
+  const iso = /^(\d{4})-(\d{1,2})-(\d{1,2})$/.exec(datePart) ?? /^(\d{4})[/\-.](\d{1,2})[/\-.](\d{1,2})$/.exec(datePart);
+  if (iso) {
+    year = Number(iso[1]);
+    month = Number(iso[2]);
+    day = Number(iso[3]);
+  } else {
+    const dmy = /^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})$/.exec(datePart);
+    if (!dmy) return undefined;
+    day = Number(dmy[1]);
+    month = Number(dmy[2]);
+    const shortYear = Number(dmy[3]);
+    year = shortYear >= 100 ? shortYear : shortYear < 70 ? 2000 + shortYear : 1900 + shortYear;
+  }
+  if (year < 1000 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) return undefined;
+  const probe = new Date(year, month - 1, day);
+  if (probe.getFullYear() !== year || probe.getMonth() !== month - 1 || probe.getDate() !== day) return undefined;
+  let hours = 0;
+  let minutes = 0;
+  let seconds = 0;
+  const time = /^(\d{1,2}):(\d{2})(?::(\d{2}))?/.exec(rest[0] ?? "");
+  if (time) {
+    const [h, m, sec] = [Number(time[1]), Number(time[2]), time[3] !== undefined ? Number(time[3]) : 0];
+    if (h <= 23 && m <= 59 && sec <= 59) {
+      hours = h;
+      minutes = m;
+      seconds = sec;
     }
   }
-  return matched;
+  return new Date(year, month - 1, day, hours, minutes, seconds).toISOString();
 }
 
-/**
- * O texto que a tela compara com o rótulo: o `valueString` que o back monta na linha (o
- * `GET /card` traz). Linha sem ele (a do rascunho, que a pré-resposta devolve crua): o rótulo
- * da opção pelo `field_option_id`, ou o próprio valor nos tipos em que o back copia o valor.
- */
-function screenText(row: ParentRow, parentField: NormalizedField | undefined): string | undefined {
-  if (typeof row.row.valueString === "string") return row.row.valueString;
-  const optionId = toInteger(row.row.field_option_id);
-  if (optionId !== undefined && optionId > 0) {
-    const options = parentField?.options;
-    if (!Array.isArray(options)) return undefined;
-    const option = options.map(asRecord).find((item) => item !== undefined && toInteger(item.id_field_option) === optionId);
-    // Opção que não existe mais: o back não monta o texto e a tela compara com "".
-    return option ? (asString(option.label) ?? "") : "";
-  }
-  const fieldRecord = asRecord(row.row.field);
-  const rawType = fieldRecord?.type ?? parentField?.type;
-  if (typeof rawType !== "string" || rawType.trim() === "") return undefined;
-  const type = normalizeFieldType(rawType);
-  if (type === "NUMBER_FIELD") {
-    // Percentual: o back formata ("90,00%"); o resto é o próprio valor.
-    const variation = String(fieldRecord?.variation ?? parentField?.variation ?? "");
-    return variation === "2" ? undefined : row.value;
-  }
-  return FORMATTED_TEXT_TYPES.has(type) ? undefined : row.value;
-}
+// ---------------------------------------------------------------------------
+// O que o componente da tela faz com o valor gravado (POP-1, R4-P1)
+// ---------------------------------------------------------------------------
 
 /**
- * Valor do campo de origem no cartão, como o `POST /form/answers/by-cards` da tela: a
- * resposta mais recente (`dt_created`) que traz o campo, rascunho da etapa incluído.
- * undefined = sem valor (a tela não preenche nada).
+ * POP-1/R4-P1: troca o valor que o mover reenviaria pelo que o componente da tela entrega
+ * (`next`; undefined ou vazio = a tela mostra o campo vazio) e registra o motivo. Vazio sai do
+ * `values` e do `stored` (a tela não manda) e do `filled` (o obrigatório cobra), salvo
+ * `passesRequired` (o `{}` do campo de usuário que o obrigatório da tela aceita).
  */
-function parentFieldRows(
-  cardRaw: unknown,
-  draft: Record<string, unknown> | undefined,
-  parentId: number
-): ParentRow[] | undefined {
-  const card = findCardRecord(cardRaw);
-  const answers = toArray(card?.form_answers)
+export function applyScreenValue(
+  result: CarryOverResult,
+  field: NormalizedField,
+  next: unknown,
+  reason: string,
+  passesRequired = false
+): void {
+  const title = field.title ? { title: field.title } : {};
+  const emptied = next === undefined || isEmptyForField(field, next);
+  if (emptied) {
+    delete result.values[field.name];
+    result.stored.delete(field.name);
+    if (!passesRequired) result.filled.delete(field.name);
+  } else {
+    result.values[field.name] = next;
+  }
+  result.autoFilled = emptied ? result.autoFilled.filter((item) => item.name !== field.name) : result.autoFilled;
+  result.unresolved = result.unresolved.filter((item) => item.name !== field.name);
+  result.unresolved.push({ name: field.name, ...title, reason, emptied, ...(emptied && passesRequired ? { passesRequired: true } : {}) });
+}
+
+/** Opções do campo como a tela as tem (as da pré-resposta, senão as do `GET /field/by-flow`). */
+function screenOptions(field: NormalizedField, preFields: unknown): Array<Record<string, unknown>> {
+  const raw = toArray(preFields)
     .map(asRecord)
-    .filter((answer): answer is Record<string, unknown> => answer !== undefined && !isDeleted(answer));
-  if (draft) answers.push(draft);
-  let best: { answer: Record<string, unknown>; rows: unknown[] } | undefined;
-  for (const answer of answers) {
-    const rows = toArray(answer.form_answer_fields).filter((item) => {
-      const row = asRecord(item);
-      if (!row || isDeleted(row)) return false;
-      const fieldRecord = asRecord(row.field);
-      return String(firstDefined(row.field_id, row.id_field, fieldRecord?.id_field) ?? "") === String(parentId);
-    });
-    if (rows.length === 0) continue;
-    if (!best || compareByRecencyAsc(answer, best.answer) > 0) best = { answer, rows };
-  }
-  if (!best) return undefined;
-  const rows: ParentRow[] = [];
-  for (const item of best.rows) {
-    const row = asRecord(item);
-    if (!row) continue;
-    const value = asString(row.value);
-    if (value === undefined || value.trim().length === 0) continue;
-    rows.push({ index: Number(row.index ?? rows.length) || 0, value, row });
-  }
-  rows.sort((a, b) => a.index - b.index);
-  return rows.length > 0 ? rows : undefined;
+    .find((item) => item !== undefined && field.id !== undefined && String(firstDefined(item.id_field, item.id)) === String(field.id));
+  return toArray(raw?.options ?? field.options)
+    .map(asRecord)
+    .filter((option): option is Record<string, unknown> => option !== undefined);
 }
 
-/** Data em ISO, como o `sanitizeAutoCompleteDateValue` da tela (ISO ou dd/MM/yyyy). */
-function toIsoDate(value: string): string | undefined {
-  const text = value.trim();
-  const br = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(text);
-  if (br) {
-    const date = new Date(Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1])));
-    return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+function isHiddenOption(option: Record<string, unknown>): boolean {
+  return String(option.hide ?? "").toUpperCase() === "S";
+}
+
+/**
+ * POP-1/R4-P1, a parte sem rede: o que os componentes da tela fazem com o valor gravado.
+ *  - combo (`ComboBox`): só o valor que existe nas opções (a oculta vale); "none" (o
+ *    "Selecione aqui..." gravado) e a opção apagada a tela mostra vazios;
+ *  - rádio e caixa de marcação: só a opção visível (a tela não monta a oculta);
+ *  - check list: o item sem descrição a tela descarta (também na conta do obrigatório);
+ *  - documento e telefone: a máscara que não deixa nada vira vazio.
+ */
+export function resolveLocalScreenValues(result: CarryOverResult, fields: NormalizedField[], preFields?: unknown): void {
+  for (const field of fields) {
+    if (!(field.name in result.values)) continue;
+    const value = result.values[field.name];
+    const type = normalizeFieldType(field.type);
+    if (type === "COMBO_BOX_FIELD") {
+      if (typeof value !== "string" && typeof value !== "number") continue;
+      const options = screenOptions(field, preFields);
+      if (options.length === 0 || options.some((option) => String(option.value) === String(value))) continue;
+      applyScreenValue(
+        result,
+        field,
+        undefined,
+        String(value) === "none" ? 'gravado "none", o "Selecione aqui..." do combo' : `opção "${String(value)}" que não existe mais no campo`
+      );
+    } else if (type === "RADIO_BOX_FIELD") {
+      if (typeof value !== "string" && typeof value !== "number") continue;
+      const options = screenOptions(field, preFields);
+      if (options.length === 0) continue;
+      if (options.some((option) => !isHiddenOption(option) && String(option.value) === String(value))) continue;
+      const hidden = options.some((option) => String(option.value) === String(value));
+      applyScreenValue(result, field, undefined, `opção "${String(value)}" ${hidden ? "oculta" : "que não existe mais no campo"}`);
+    } else if (type === "CHECK_BOX_FIELD" || type === "CHECKBOX_FIELD") {
+      if (!Array.isArray(value)) continue;
+      const options = screenOptions(field, preFields);
+      if (options.length === 0) continue;
+      const visible = new Set(options.filter((option) => !isHiddenOption(option)).map((option) => String(option.value)));
+      const kept = value.filter((item) => visible.has(String(item)));
+      if (kept.length === value.length) continue;
+      const dropped = value.filter((item) => !visible.has(String(item))).map(String);
+      applyScreenValue(result, field, kept, `opção ${dropped.map((item) => `"${item}"`).join(", ")} oculta ou que não existe mais`);
+    } else if (type === "CHECK_LIST_FIELD") {
+      if (!Array.isArray(value)) continue;
+      const kept = value.filter((item) => hasDescription(item));
+      if (kept.length === value.length) continue;
+      applyScreenValue(result, field, kept, `${value.length - kept.length} item(ns) sem descrição (a tela descarta)`);
+    } else if (hasScreenFormat(type)) {
+      if (typeof value !== "string") continue;
+      if (screenFormattedValue(type, field.variation ?? field.raw?.variation, value).trim() !== "") continue;
+      applyScreenValue(result, field, undefined, `"${value}" não tem os dígitos que o campo mostra`);
+    }
   }
-  const time = Date.parse(text);
-  return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
 }
 
 function toInteger(value: unknown): number | undefined {

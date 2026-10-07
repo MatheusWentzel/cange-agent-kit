@@ -91,6 +91,21 @@ export interface CardsContracts {
   getAutoCompleteByRegister: (input: {
     items: Array<{ flowId: number | string; fieldId: number; childFieldId?: number; currValue: unknown }>;
   }) => Promise<unknown>;
+  /**
+   * POP-2 (revisão 4 do EXTRA-06): o autocompletar que a tela faz ao abrir o cartão
+   * (`getAutoCompleteRule('answer')`: `POST /form/answers/by-cards` com o cartão e a lista de
+   * origens, na ordem dos campos). Leitura (não grava nada).
+   */
+  getAutoCompleteByCards: (input: {
+    cardId: number | string;
+    items: Array<{ flowId: number | string; fieldId: number; childFieldId?: number }>;
+  }) => Promise<unknown>;
+  /**
+   * POP-1 (revisão 4): os cartões conectados que o campo de cartão da tela carrega
+   * (`ComboBoxFlow`: `POST /card/by-cards` com o fluxo do campo e o fluxo do cartão como pai).
+   * Cartão excluído ou sem acesso não volta. Leitura.
+   */
+  getCardsByIds: (input: { flowId: number | string; parentFlowId?: number | string; cardIds: Array<number | string> }) => Promise<unknown>;
   listCardsByFlow: (input: {
     flowId: number | string;
     isTestModel?: boolean;
@@ -338,6 +353,25 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         currValue: item.currValue
       }));
       return client.post<unknown>("/form/answers/by-register", { body: { field_items: fieldItems } });
+    },
+
+    async getAutoCompleteByCards(input) {
+      const fieldItems = input.items.map((item) => ({
+        flow_id: Number(item.flowId),
+        field_id: Number(item.fieldId),
+        ...(item.childFieldId !== undefined ? { child_field_id: Number(item.childFieldId) } : {})
+      }));
+      return client.post<unknown>("/form/answers/by-cards", { body: { card_id: Number(input.cardId), field_items: fieldItems } });
+    },
+
+    async getCardsByIds(input) {
+      return client.post<unknown>("/card/by-cards", {
+        body: {
+          card_items: input.cardIds.map((id) => String(id)),
+          flow_id: Number(input.flowId),
+          ...(input.parentFlowId !== undefined ? { flow_parent_id: Number(input.parentFlowId) } : {})
+        }
+      });
     },
 
     async listAllCardsByFlow(input) {

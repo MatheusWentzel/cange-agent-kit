@@ -98,6 +98,14 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getRegisterFormAnswer: registers.getRegisterFormAnswer,
     // P5 (05/10): usuários da empresa para campo de usuário e menção por nome/e-mail.
     listCompanyUsers: users.listCompanyUsers,
+    // R4-P1: a lista do campo de usuário da tela (GET /user/by-flow?form_id).
+    listUsersByForm: users.listUsersByForm,
+    // POP-1 (revisão 4): os cartões conectados que o combo da tela carrega (POST, mas LEITURA).
+    getCardsByIds: cards.getCardsByIds,
+    // POP-2 (revisão 4): o autocompletar da tela ao abrir o cartão (POST, mas LEITURA).
+    getAutoCompleteByCards: cards.getAutoCompleteByCards,
+    // POP-1 (revisão 4): o anexo como o campo da tela o carrega (GET /attachment).
+    getAttachment: attachments.getAttachment,
     listCommentsByCard: comments.listCommentsByCard,
     flowBuildPing: flowV2Build.ping,
     listFlowBuildFieldTypes: flowV2Build.listFieldTypes,

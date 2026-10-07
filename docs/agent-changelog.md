@@ -4,6 +4,48 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-07
 
+### Mover: corte estrito da passagem, referência que a tela não resolve, documento e telefone, autocompletar pelo by-cards (revisão 4 do EXTRA-06)
+
+- **R4-F1, corte estrito:** a resposta confirmada criada pelo movimento que trouxe o cartão para a etapa (o formulário
+  público que o tirou da etapa anterior) cai no MESMO segundo da entrada e entrava na disputa com o rascunho
+  (`time >= since`), vencendo pela recência da linha (cartão 1114758: o SIM da rodada anterior voltava no formulário
+  gravado e apagava o rascunho; 368 cartões ativos em 38 empresas no `cange_local`). Agora o corte é estrito (`>`), e
+  no formulário gravado fora da etapa atual (o do destino) o corte é a SAÍDA da última passagem do cartão pela etapa
+  dona dele, não a entrada na etapa atual. Sem passagem pela etapa dona, nenhuma confirmada disputa.
+- **POP-1 e R4-P1, referência que a tela não resolve:** o kit contava e reenviava o valor cru da fonte da tela, mas o
+  componente da tela resolve a referência antes de mostrar e, sem achar, mostra vazio, manda vazio e o obrigatório
+  recusa. Agora o kit faz o mesmo com o que reenvia: usuário só da lista do campo (`GET /user/by-flow?form_id` sem o
+  leitor; variation "2" pela empresa; cartões 824006, 886823, 311243, 142892), cartão conectado só o que o
+  `POST /card/by-cards` devolve (675472), anexo pelo `GET /attachment` (um que não existe e a tela não mostra nenhum),
+  combo só valor que existe nas opções ("none" e opção apagada são vazios; a oculta vale; 55161), rádio e caixa de
+  marcação só opção visível, check list sem o item de descrição vazia, documento e telefone sem dígito vazios.
+  Obrigatório que fica vazio bloqueia com o motivo próprio ("está gravado no cartão, mas a tela mostra o campo vazio
+  (usuário 3101 bloqueado, ...)") e a dica pede o `--set`; não obrigatório sai do mover, como a tela, e volta em
+  `warning` ("Gravados no cartão que a tela não mostra"). O `dataLossCheck` não os conta como órfãos. O campo de
+  usuário vazio só é recusado quando a 1ª regra gravada dele é a `required` (o `matches` do `createYupSchema`); sem
+  isso a tela move com ele vazio, e o kit também. O `--set` de usuário (todas as escritas) confere o id contra a mesma
+  lista e recusa o bloqueado, o leitor e quem está fora do fluxo privado. Leitura que falha (rede, 5xx) não muda nada.
+  **Decisão pendente (Matheus):** o não obrigatório que a tela descarta sai do mover (igual à tela) em vez de ir com
+  aviso.
+- **R4-P2, documento e telefone:** a tela valida o formato sempre, obrigatório ou não, oculto também, sobre o valor
+  com a máscara do componente. O kit faz igual com o que vai no mover: CPF/CNPJ pelo dígito verificador e pelo tipo
+  da variation (sem variation = CPF; CNPJ em campo de CPF vira 11 dígitos e não passa; CNPJ alfanumérico aceito) e
+  telefone com 10 ou 11 dígitos depois da máscara (a tela corta o dígito que passa de 11, então 12 e 13 dígitos
+  gravados passam). Inválido bloqueia com a frase da tela ("CPF inválido", "CNPJ inválido", "CPF ou CNPJ inválido",
+  "Telefone inválido") e a dica pede o valor corrigido (cartões 52385, 359355, 357623, 181983, 1116619). O `--set` de
+  qualquer escrita confere igual; no telefone o `--set` exige 10 ou 11 dígitos no próprio valor (a tela truncaria
+  "+55 21 98765-4321" para outro número; o kit recusa em vez de gravar errado). Voltar etapa com "pular obrigatórios
+  ao voltar" segue sem validar (a tela pula o formulário inteiro).
+- **POP-2, autocompletar pelo by-cards da tela:** o dinâmico com origem no cartão (`ac_type 0`, origem `> 0`) agora é o
+  mesmo `POST /form/answers/by-cards` que a tela faz ao abrir o cartão (lista na ordem dos campos; leitura liberada no
+  dry-run forçado), com o mapeamento do `getAutoCompleteRule`: lista de opções pelo `valueString` casado com o rótulo,
+  data pelo `sanitizeAutoCompleteDateValue` (dd/mm/aaaa em hora local), o resto copia o valor (ids de anexo
+  inclusive). Resolve o vínculo com a origem preenchida (433142: "Estoque Atual" e "Estoque mínimo"), a cópia de anexo
+  (1044110), a origem de texto formatado e faz o obrigatório com vínculo vazio bloquear (67034). O estático de anexo
+  também vai. Todo autocompletar que o kit não calcula (usuário atual, by-cards que falhou) volta em `warning`,
+  obrigatório ou não ("Campos com autocompletar que o kit não calcula"); antes o não obrigatório sumia do mover calado.
+  **Decisão pendente (Matheus):** usuário atual (`-2`) segue como aviso; a tela usa quem abre o cartão.
+
 ### Mover: passagem atual, linha repetida, vínculo escolhido no mover e check list oculto (revisão 3 do EXTRA-06)
 
 - **R3-F1, valor de passagem anterior:** na disputa rascunho x resposta confirmada mais nova, a confirmada entrava

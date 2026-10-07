@@ -144,7 +144,7 @@ export function checkListProgress(value: unknown): CheckListProgress | undefined
 }
 
 /** O item tem descrição (a tela descarta o de descrição vazia ou ausente). */
-function hasDescription(item: unknown): boolean {
+export function hasDescription(item: unknown): boolean {
   let record: Record<string, unknown> | undefined;
   if (typeof item === "string") {
     record = parseJsonRecord(item);

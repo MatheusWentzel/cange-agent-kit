@@ -90,7 +90,11 @@ export function needsFieldResolution(values: Record<string, unknown>, force: boo
 /** Busca de entrada de cadastro e lista de usuários sob demanda, com cache. */
 export function createWriteLookups(kit: CangeAgentKit, ensureAuth: () => Promise<unknown>): ResolverLookups {
   let usersPromise: Promise<CompanyUser[]> | undefined;
+  const screenLists = new Map<string, Promise<ReadonlySet<number> | undefined>>();
   return {
+    screenUsers(field) {
+      return screenUsersFor(kit, field, screenLists, ensureAuth);
+    },
     async searchRegisterEntries(registerId, text) {
       await ensureAuth();
       const result = await kit.contracts.getRegisterEntries({ registerId, search: text, pageSize: 20 });
@@ -106,6 +110,40 @@ export function createWriteLookups(kit: CangeAgentKit, ensureAuth: () => Promise
       return usersPromise;
     }
   };
+}
+
+/**
+ * R4-P1: a lista do campo de usuário da tela (`ComboBoxUser`). Variation "2": os usuários da
+ * empresa (`GET /user/by-company`, sem bloqueado); senão `GET /user/by-flow?form_id` sem o
+ * leitor (`flow_user_type = 'V'`). Cache por formulário. Falha = undefined (não confere).
+ */
+export function screenUsersFor(
+  kit: CangeAgentKit,
+  field: NormalizedField,
+  cache: Map<string, Promise<ReadonlySet<number> | undefined>>,
+  ensureAuth?: () => Promise<unknown>
+): Promise<ReadonlySet<number> | undefined> {
+  const variation = String(field.variation ?? field.raw?.variation ?? "").trim();
+  const formId = field.formId ?? field.raw?.form_id;
+  const key = variation === "2" ? "empresa" : `form:${String(formId ?? "")}`;
+  let pending = cache.get(key);
+  if (!pending) {
+    pending = (async () => {
+      try {
+        if (ensureAuth) await ensureAuth();
+        if (variation === "2") {
+          return new Set((await kit.contracts.listCompanyUsers()).users.map((user) => user.id));
+        }
+        if (formId === undefined || formId === null || String(formId).trim() === "") return undefined;
+        const { users } = await kit.contracts.listUsersByForm({ formId: String(formId) });
+        return new Set(users.filter((user) => user.flowUserType !== "V").map((user) => user.id));
+      } catch {
+        return undefined;
+      }
+    })();
+    cache.set(key, pending);
+  }
+  return pending;
 }
 
 /** Autenticação uma vez só, sob demanda (o wrapper pula o login em --dry-run). */

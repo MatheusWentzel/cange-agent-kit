@@ -8,7 +8,7 @@ import { EXIT_CODES } from "../src/cli/exit-codes.js";
 import { createProgram } from "../src/cli/index.js";
 import { validateValuesAgainstFields } from "../src/contracts/payload-builder.js";
 import { normalizeFieldsFromApiResponse } from "../src/schemas/fields.js";
-import { readStepCarryOver } from "../src/utils/carryOver.js";
+import { readStepCarryOver, resolveByCards, sanitizeAutoCompleteDate } from "../src/utils/carryOver.js";
 import { FORCE_DRY_RUN_ENV } from "../src/utils/forceDryRun.js";
 import {
   checkListProgress,
@@ -72,6 +72,20 @@ let otherDrafts: Record<number, Record<string, any>>;
 let movements: Array<Record<string, unknown>> | undefined;
 /** Resposta do `POST /form/answers/by-register` (o autocompletar de vínculo do blur da tela). */
 let byRegister: ((body: Record<string, any>) => unknown) | undefined;
+/**
+ * `POST /form/answers/by-cards` (o autocompletar da tela ao abrir o cartão): undefined = o mock
+ * emula o back (a resposta mais nova do cartão com a origem, rascunhos incluídos); função =
+ * resposta própria; "falha" = 500.
+ */
+let byCards: ((body: Record<string, any>) => unknown) | "falha" | undefined;
+/** Vínculo do by-cards emulado: `<valor da origem>:<campo filho>` → linhas do cadastro/cartão apontado. */
+let linked: Record<string, Array<Record<string, unknown>>>;
+/** `GET /user/by-flow?form_id` (a lista do campo de usuário da tela); undefined = a rota responde 404. */
+let usersByForm: Array<Record<string, unknown>> | undefined;
+/** `POST /card/by-cards` (os cartões que o campo de cartão carrega); undefined = 404. */
+let cardsByIds: ((body: Record<string, any>) => unknown) | undefined;
+/** Anexos que não existem mais (`GET /attachment` responde 404); os outros respondem 200. */
+let missingAttachments: Set<number>;
 /** Relógio do back mockado: cada linha gravada pelo PUT ganha um `dt_last_update` mais novo. */
 let clock = 0;
 let nextRowId = 0;
@@ -103,6 +117,40 @@ function draft(rows: Array<Record<string, unknown>>, extra: Record<string, unkno
 
 function cardRaw(): Record<string, unknown> {
   return { id_card: 55, flow_id: 316, flow_step_id: 1, user_id_creator: 76, form_answers: confirmed };
+}
+
+/** O texto da linha (o `valueString` do back): o rótulo da opção, senão o próprio valor. */
+function labelOf(fieldId: unknown, value: unknown): unknown {
+  const field = fields.find((item) => item.id_field === fieldId);
+  const options = Array.isArray(field?.options) ? (field?.options as Array<Record<string, unknown>>) : [];
+  const option = options.find((item) => String(item.value) === String(value));
+  return option ? option.label : value;
+}
+
+/** O `SelectFormAnswersByCardsService` do back, sobre o cartão mockado (confirmadas e rascunhos). */
+function emulateByCards(body: Record<string, any>): unknown {
+  const answers = [...confirmed, ...(preAnswer ? [preAnswer] : []), ...Object.values(otherDrafts)].filter(
+    (answer) => answer.deleted !== "S"
+  );
+  return (body.field_items as Array<Record<string, any>>).map((item) => {
+    let best: Record<string, any> | undefined;
+    for (const answer of answers) {
+      if (!answer.form_answer_fields.some((faf: any) => faf.field_id === item.field_id)) continue;
+      if (!best || best.dt_created < answer.dt_created) best = answer;
+    }
+    let rows: Array<Record<string, any>> | undefined = best?.form_answer_fields.filter((faf: any) => faf.field_id === item.field_id);
+    if (rows && item.child_field_id !== undefined) {
+      const key = rows.map((faf) => faf.value).find((value) => value !== undefined && value !== "");
+      if (key !== undefined) rows = linked[`${key}:${item.child_field_id}`] ?? [];
+    }
+    return {
+      card_id: body.card_id,
+      flow_id: item.flow_id,
+      field_id: item.field_id,
+      child_field_id: item.child_field_id,
+      ...(rows ? { formAnswer: { form_answer_fields: rows.map((faf) => ({ ...faf, valueString: faf.valueString ?? labelOf(faf.field_id, faf.value) })) } } : {})
+    };
+  });
 }
 
 function json(body: unknown, status = 200): Response {
@@ -167,6 +215,11 @@ beforeEach(() => {
   // O cartão entrou na Triagem (etapa atual) antes de tudo o que os testes gravam.
   movements = [{ id_card_movement: 1, card_id: 55, flow_step_id: 1, dt_entry: "2026-09-30T09:00:00.000Z", dt_exit: null }];
   byRegister = undefined;
+  byCards = undefined;
+  linked = {};
+  usersByForm = undefined;
+  cardsByIds = undefined;
+  missingAttachments = new Set();
   clock = Date.parse("2026-10-07T12:00:00.000Z");
   nextRowId = 1000;
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
@@ -199,6 +252,22 @@ beforeEach(() => {
     if (method === "POST" && url.pathname === "/form/answers/by-register") {
       return byRegister === undefined ? json({ message: "rota não mockada" }, 404) : json(byRegister(body ?? {}));
     }
+    if (method === "POST" && url.pathname === "/form/answers/by-cards") {
+      if (byCards === "falha") return json({ message: "falhou" }, 500);
+      return json(byCards === undefined ? emulateByCards(body ?? {}) : byCards(body ?? {}));
+    }
+    if (method === "GET" && url.pathname === "/user/by-flow") {
+      return usersByForm === undefined ? json({ message: "rota não mockada" }, 404) : json(usersByForm);
+    }
+    if (method === "POST" && url.pathname === "/card/by-cards") {
+      return cardsByIds === undefined ? json({ message: "rota não mockada" }, 404) : json(cardsByIds(body ?? {}));
+    }
+    if (method === "GET" && url.pathname === "/attachment") {
+      const id = Number(url.searchParams.get("id_attachment"));
+      return missingAttachments.has(id)
+        ? json({ message: "Parâmetros inválidos! Não foi possivel encontrar o registro!" }, 404)
+        : json({ id_attachment: id, uploaded: true });
+    }
     if (method === "PUT" && url.pathname === "/form/answer") {
       putFormAnswer(body);
       return json({ id_card: 55 });
@@ -221,8 +290,11 @@ async function run(args: string[]): Promise<Record<string, any> | undefined> {
   return out ? (JSON.parse(out) as Record<string, any>) : undefined;
 }
 
+/** Leituras que o back faz por POST (o autocompletar e o combo de cartão da tela). */
+const READ_POSTS = new Set(["/form/answers/by-cards", "/form/answers/by-register", "/card/by-cards"]);
+
 function writes() {
-  return requests.filter((request) => request.method !== "GET");
+  return requests.filter((request) => request.method !== "GET" && !READ_POSTS.has(request.path));
 }
 
 function moveBody(): Record<string, any> | undefined {
@@ -568,12 +640,18 @@ describe("F2: autocompletar da tela (campo sem valor na pré-resposta)", () => {
     const values = moveBody()?.values;
     expect(values).toMatchObject({ h_copia: "Pedido ACME", h_dono: 76, h_horas: 1, h_resp: 76 });
     expect(Number.isFinite(Date.parse(values?.h_quando))).toBe(true);
-    expect(out?.autocompleted).toEqual(["Cópia do título", "Quando", "Dono"]);
+    // O by-cards (a origem no cartão) responde depois do que o kit calcula sozinho.
+    expect(out?.autocompleted).toEqual(["Quando", "Dono", "Cópia do título"]);
+    // A mesma chamada da tela ao abrir o cartão (POP-2), com a lista na ordem dos campos.
+    expect(requests.find((request) => request.path === "/form/answers/by-cards")?.body).toEqual({
+      card_id: 55,
+      field_items: [{ flow_id: 316, field_id: 20 }]
+    });
     // O autocompletar não entra no `kept` (é valor novo, não o que o cartão tinha).
     expect(out).toMatchObject({ kept: 2, keptFrom: "rascunho" });
   });
 
-  it("dinâmico de data copia em ISO (dd/MM/yyyy também); origem no rascunho da etapa", () => {
+  it("dinâmico de data: a tela lê ISO e dd/MM/yyyy (hora local) e deixa vazio o que não é data (POP-2)", () => {
     fields = [
       ...baseFields(),
       { id_field: 46, name: "h_ref", title: "Referência", type: "TEXT_SHORT_FIELD", form_id: 901 },
@@ -586,32 +664,102 @@ describe("F2: autocompletar da tela (campo sem valor na pré-resposta)", () => {
       formId: "901",
       fields: scope
     });
-    expect(carry.values.h_prazo).toBe("2026-10-08T00:00:00.000Z");
+    // O valor vem do by-cards da tela; até a resposta o campo fica pendente.
+    expect(carry.byCards).toEqual([{ name: "h_prazo", title: "Prazo", parentFieldId: 46 }]);
+    expect(carry.autoPending).toEqual([{ name: "h_prazo", title: "Prazo", reason: "campo do cartão" }]);
+    resolveByCards(
+      carry,
+      scope,
+      [{ card_id: 55, flow_id: 316, field_id: 46, formAnswer: { form_answer_fields: [{ field_id: 46, index: 0, value: "08/10/2026", valueString: "08/10/2026" }] } }],
+      { cardId: "55", flowId: 316 }
+    );
+    expect(carry.values.h_prazo).toBe(new Date(2026, 9, 8).toISOString());
     expect(carry.autoFilled).toEqual([{ name: "h_prazo", title: "Prazo", rule: "campo-do-cartao" }]);
+    expect(carry.autoPending).toEqual([]);
+
+    expect(sanitizeAutoCompleteDate("2026-10-08T15:30:00.000Z")).toBe("2026-10-08T15:30:00.000Z");
+    expect(sanitizeAutoCompleteDate("2026-10-08 14:05")).toBe(new Date(2026, 9, 8, 14, 5).toISOString());
+    expect(sanitizeAutoCompleteDate("01/03/26")).toBe(new Date(2026, 2, 1).toISOString());
+    expect(sanitizeAutoCompleteDate("31/02/2026")).toBeUndefined();
+    expect(sanitizeAutoCompleteDate("amanhã")).toBeUndefined();
   });
 
-  it("autocompletar que o kit não calcula (usuário atual, vínculo, opção por rótulo): obrigatório vazio vira aviso", async () => {
+  it("POP-2: usuário atual e by-cards que falhou viram aviso, obrigatório ou não", async () => {
     const extra = [
       { id_field: 48, name: "h_atual", title: "Quem atende", type: "COMBO_BOX_USER_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: -2 },
       { id_field: 49, name: "h_cliente", title: "Cidade do cliente", type: "TEXT_SHORT_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 20, ac_child_field_id: 99 },
-      // Origem = usuário (o texto que a tela compara é o NOME, que o rascunho não traz).
-      { id_field: 50, name: "h_canal", title: "Canal", type: "RADIO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 33, options: [{ value: "1", label: "Telefone" }] }
+      { id_field: 50, name: "h_estoque", title: "Estoque atual", type: "NUMBER_FIELD", form_id: 901, required: "0", validations: [], ac_type: 0, ac_parent_field_id: 20, ac_child_field_id: 98 }
     ];
     fields = [...baseFields(), ...extra];
     preFields = extra;
     preAnswer = draft([row(30, "1"), row(33, "76")]);
+    byCards = "falha";
     const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
 
     expect(process.exitCode ?? 0).toBe(0);
     expect(moveBody()?.values).toEqual({ h_horas: 1, h_resp: 76 });
     expect(out?.warning).toContain(
-      "Obrigatórios vazios com autocompletar que o kit não calcula na etapa Triagem (atual): " +
-        "Quem atende (usuário atual), Cidade do cliente (campo de vínculo), Canal (opção pelo rótulo)"
+      "Campos com autocompletar que o kit não calcula na etapa Triagem (atual): " +
+        "Quem atende (usuário atual), Cidade do cliente (campo de vínculo), Estoque atual (campo de vínculo)"
     );
     // A2-F1: o aviso não afirma que a tela preenche (com a origem sem valor útil ela cobra).
     expect(out?.warning).toContain("a tela tenta preencher");
-    expect(out?.warning).not.toContain("preenche esses campos sozinha");
     expect(out?.warning).not.toContain("—");
+
+    // Só o usuário atual, não obrigatório: também no aviso (antes sumia do mover calado).
+    fields = [...baseFields(), { ...extra[0]!, required: "0", validations: [] }];
+    preFields = [fields[fields.length - 1]!];
+    byCards = undefined;
+    process.exitCode = undefined;
+    const quiet = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(quiet?.warning).toContain("Quem atende (usuário atual)");
+  });
+
+  it("POP-2: vínculo com a origem preenchida e cópia de anexo (como o 433142 e o 1044110) vão no mover pelo by-cards da tela", async () => {
+    const extra = [
+      { id_field: 49, name: "h_cidade", title: "Cidade do cliente", type: "TEXT_SHORT_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 57, ac_child_field_id: 99 },
+      { id_field: 50, name: "h_estoque", title: "Estoque atual", type: "NUMBER_FIELD", form_id: 901, required: "0", validations: [], ac_type: 0, ac_parent_field_id: 57, ac_child_field_id: 98 },
+      { id_field: 51, name: "h_copias", title: "Anexos da proposta", type: "INPUT_ATTACH_FIELD", form_id: 901, required: "0", validations: [], ac_type: 0, ac_parent_field_id: 58 }
+    ];
+    fields = [
+      ...baseFields(),
+      { id_field: 57, name: "h_produto", title: "Produto", type: "COMBO_BOX_REGISTER_FIELD", form_id: 900 },
+      { id_field: 58, name: "h_docs", title: "Documentos", type: "INPUT_ATTACH_FIELD", form_id: 900 },
+      ...extra
+    ];
+    confirmed[0]!.form_answer_fields.push(row(57, "4311039"), row(58, "1031274", 0), row(58, "1031275", 1));
+    linked = {
+      "4311039:99": [{ field_id: 99, index: 0, value: "Porto Alegre" }],
+      "4311039:98": [{ field_id: 98, index: 0, value: "5" }]
+    };
+    preFields = extra;
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(dry?.calls[0].payload.values).toEqual({
+      h_horas: 1, h_resp: 76, h_cidade: "Porto Alegre", h_estoque: 5, h_copias: [1031274, 1031275]
+    });
+    expect(dry?.autocompleted).toEqual(["Cidade do cliente", "Estoque atual", "Anexos da proposta"]);
+    expect(dry?.warning).toBeUndefined();
+    // Liberado no dry-run forçado (é leitura), com a lista na ordem dos campos, como a tela.
+    expect(requests.find((request) => request.path === "/form/answers/by-cards")?.body).toEqual({
+      card_id: 55,
+      field_items: [
+        { flow_id: 316, field_id: 57, child_field_id: 99 },
+        { flow_id: 316, field_id: 57, child_field_id: 98 },
+        { flow_id: 316, field_id: 58 }
+      ]
+    });
+
+    // O cadastro apontado sem o campo (como o 67034): a tela fica vazia e o obrigatório cobra.
+    linked = { "4311039:98": [{ field_id: 98, index: 0, value: "5" }] };
+    process.exitCode = undefined;
+    const blocked = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(blocked?.validation.message).toContain("Falta para a etapa Triagem (atual): Cidade do cliente (texto)");
   });
 
   it("autocompletar pendente MANDADO vazio (como o anexo do card 1121209): é campo limpo e bloqueia, como a tela", async () => {
@@ -638,12 +786,13 @@ describe("F2: autocompletar da tela (campo sem valor na pré-resposta)", () => {
       expect(errorMessage()).toContain("Falta para a etapa Triagem (atual): Contrato");
     }
 
-    // Sem mandar o campo: segue aviso (a tela poria o anexo do autocompletar).
+    // Sem mandar o campo: o anexo do autocompletar vai no mover, como a tela manda (POP-2).
     process.exitCode = undefined;
     stderr.length = 0;
     const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
     expect(process.exitCode ?? 0).toBe(0);
-    expect(out?.warning).toContain("Contrato (tipo que o kit não remonta)");
+    expect(moveBody()?.values).toEqual({ h_horas: 1, h_resp: 76, h_contrato: [1166868] });
+    expect(out?.autocompleted).toEqual(["Contrato"]);
   });
 
   it("outro obrigatório bloqueia: a dica cita os pendentes de autocompletar sem cobrá-los", async () => {
@@ -744,38 +893,37 @@ describe("A2-F1: origem do autocompletar vazia bloqueia, e a opção pelo rótul
     expect(errorMessage()).toContain("Falta para a etapa Triagem (atual): Canal (Telefone)");
   });
 
-  it("rótulo pelo valueString do GET /card, pelo field_option_id do rascunho e lista de várias opções", () => {
+  it("opção pelo rótulo: o valueString da resposta do by-cards, sem maiúscula, e lista de várias opções", () => {
     fields = [
       ...baseFields(),
-      { id_field: 64, name: "h_prio_ini", title: "Prioridade inicial", type: "COMBO_BOX_FIELD", form_id: 900, options: [{ id_field_option: 7, value: "3", label: "Alta" }] },
-      { id_field: 65, name: "h_nivel", title: "Nível", type: "COMBO_BOX_FIELD", form_id: 901, options: [{ id_field_option: 8, value: "1", label: "Baixa" }] },
-      { id_field: 66, name: "h_tags", title: "Tags", type: "CHECK_BOX_FIELD", form_id: 900 },
       { id_field: 70, name: "h_urg2", title: "Urgência", type: "COMBO_BOX_FIELD", form_id: 901, ac_type: 0, ac_parent_field_id: 64, options: [{ value: "9", label: "ALTA" }] },
-      { id_field: 71, name: "h_nivel2", title: "Nível 2", type: "RADIO_BOX_FIELD", form_id: 901, ac_type: 0, ac_parent_field_id: 65, options: [{ value: "5", label: "baixa" }] },
-      { id_field: 72, name: "h_tags2", title: "Tags 2", type: "CHECK_BOX_FIELD", form_id: 901, ac_type: 0, ac_parent_field_id: 66, options: [{ value: "a", label: "Azul" }, { value: "v", label: "Verde" }, { value: "r", label: "Roxo" }] }
+      { id_field: 72, name: "h_tags2", title: "Tags 2", type: "CHECK_BOX_FIELD", form_id: 901, ac_type: 0, ac_parent_field_id: 66, options: [{ value: "a", label: "Azul" }, { value: "v", label: "Verde" }, { value: "r", label: "Roxo" }] },
+      { id_field: 73, name: "h_nivel3", title: "Nível 3", type: "RADIO_BOX_FIELD", form_id: 901, ac_type: 0, ac_parent_field_id: 65, options: [{ value: "5", label: "baixa" }] }
     ];
-    // GET /card: a linha traz o valueString (o rótulo da opção de origem, as tags pelo texto).
-    confirmed[0]!.form_answer_fields.push(
-      row(64, "3", 0, { valueString: "Alta" }),
-      row(66, "x", 0, { valueString: "azul" }),
-      row(66, "y", 1, { valueString: "VERDE" })
+    const scope = normalizeFieldsFromApiResponse(fields).filter((field) => String(field.formId) === "901");
+    const carry = readStepCarryOver({
+      cardRaw: cardRaw(),
+      preAnswerRaw: { fields: fields.filter((field) => [70, 72, 73].includes(field.id_field as number)), formsAnswers: draft([row(30, "1")]) },
+      formId: "901",
+      fields: scope
+    });
+    resolveByCards(
+      carry,
+      scope,
+      [
+        { card_id: 55, flow_id: 316, field_id: 64, formAnswer: { form_answer_fields: [{ field_id: 64, index: 0, value: "3", valueString: "Alta" }] } },
+        {
+          card_id: 55, flow_id: 316, field_id: 66,
+          formAnswer: { form_answer_fields: [{ field_id: 66, index: 0, value: "x", valueString: "azul" }, { field_id: 66, index: 1, value: "y", valueString: "VERDE" }] }
+        },
+        // Origem sem texto (null): a tela não acha rótulo; o campo fica vazio.
+        { card_id: 55, flow_id: 316, field_id: 65, formAnswer: { form_answer_fields: [{ field_id: 65, index: 0, value: "1", valueString: null }] } }
+      ],
+      { cardId: 55, flowId: "316" }
     );
-    const all = normalizeFieldsFromApiResponse(fields);
-    const scope = all.filter((field) => String(field.formId) === "901");
-    const preAnswerRaw = {
-      fields: fields.filter((field) => [70, 71, 72].includes(field.id_field as number)),
-      // Rascunho cru: sem valueString, com o field_option_id (o rótulo vem das opções do campo de origem).
-      formsAnswers: draft([row(65, "1", 0, { field_option_id: 8 })])
-    };
-    const carry = readStepCarryOver({ cardRaw: cardRaw(), preAnswerRaw, formId: "901", fields: scope, flowFields: all });
-    expect(carry.values).toMatchObject({ h_urg2: "9", h_nivel2: "5", h_tags2: ["a", "v"] });
-    expect(carry.autoFilled.map((item) => item.rule)).toEqual(["opcao-pelo-rotulo", "opcao-pelo-rotulo", "opcao-pelo-rotulo"]);
+    expect(carry.values).toEqual({ h_horas: 1, h_urg2: "9", h_tags2: ["a", "v"] });
+    expect(carry.autoFilled.map((item) => item.rule)).toEqual(["opcao-pelo-rotulo", "opcao-pelo-rotulo"]);
     expect(carry.autoPending).toEqual([]);
-
-    // Sem as opções do campo de origem, o rótulo da linha do rascunho o kit não sabe: pendente.
-    const blind = readStepCarryOver({ cardRaw: cardRaw(), preAnswerRaw, formId: "901", fields: scope });
-    expect(blind.values.h_nivel2).toBeUndefined();
-    expect(blind.autoPending).toEqual([{ name: "h_nivel2", title: "Nível 2", reason: "opção pelo rótulo" }]);
   });
 });
 
@@ -1478,5 +1626,304 @@ describe("R3-F5: check list 'exigir todos concluídos' bloqueia oculto e com con
     expect(checkListProgress([item("a", "S", 1), item("", "N", 2)])).toEqual({ total: 1, pending: 0 });
     expect(checkListProgress([{ value: "1", label: JSON.stringify({ checked: "N" }) }])).toBeUndefined();
     expect(checkListProgress([{ description: "", checked: "N" }, { description: "b", checked: "N" }])).toEqual({ total: 1, pending: 1 });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Revisão 4 do EXTRA-06 (07/10)
+// ---------------------------------------------------------------------------
+
+describe("R4-F1: a resposta do movimento que começou a passagem fica fora (corte estrito)", () => {
+  function withApproval(): void {
+    fields = [
+      ...baseFields(),
+      {
+        id_field: 60, name: "h_aprova", title: "Você aprova a arte abaixo?", type: "RADIO_BOX_FIELD", form_id: 901, required: "1",
+        validation_type: "string", validations: REQUIRED, options: [{ value: "1", label: "SIM" }, { value: "2", label: "NÃO" }]
+      },
+      { id_field: 53, name: "h_nota", title: "Nota", type: "TEXT_SHORT_FIELD", form_id: 902 }
+    ];
+    confirmed = [confirmed[0]!];
+  }
+
+  it("etapa atual: confirmada gravada no MESMO segundo da entrada (o formulário público que trouxe o cartão) não disputa com o rascunho", async () => {
+    withApproval();
+    preAnswer = draft([stamped(30, "1", "2026-07-08T17:18:24.000Z"), stamped(33, "76", "2026-07-08T17:18:24.000Z")], {
+      dt_created: "2026-07-08T17:18:24.000Z"
+    });
+    confirmed.push({
+      id_form_answer: 5166799, form_id: 901, flow_step_id: 2, origin: "/PublicForm/Step", dt_created: "2026-07-08T20:19:34.000Z",
+      form_answer_fields: [stamped(60, "1", "2026-07-08T20:19:34.000Z")]
+    });
+    movements = [
+      { id_card_movement: 1, card_id: 55, flow_step_id: 2, dt_entry: "2026-07-08T20:17:54.000Z", dt_exit: "2026-07-08T20:19:34.000Z" },
+      { id_card_movement: 2, card_id: 55, flow_step_id: 1, dt_entry: "2026-07-08T20:19:34.000Z", dt_exit: null }
+    ];
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(dry?.validation.message).toContain("Falta para a etapa Triagem (atual): Você aprova a arte abaixo? (SIM | NÃO)");
+    expect(dry?.calls[0].payload.values).toEqual({ h_horas: 1, h_resp: 76 });
+
+    // Um segundo depois da entrada (card update-values nesta passagem) segue valendo.
+    confirmed[1]!.form_answer_fields = [stamped(60, "1", "2026-07-08T20:19:35.000Z")];
+    process.exitCode = undefined;
+    const later = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(later?.calls[0].payload.values).toEqual({ h_horas: 1, h_resp: 76, h_aprova: "1" });
+  });
+
+  it("formulário gravado fora da etapa atual (como o 1114758): corta pela SAÍDA da última passagem pela etapa dona dele", async () => {
+    withApproval();
+    flow = { ...flow, use_query_v2: "N" };
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(60, "1")]);
+    // Rascunho do 902 (Agendamento) da passagem anterior, sem a Nota; a resposta do formulário
+    // público que tirou o cartão do Agendamento traz a Nota, no segundo da saída (e da entrada na Triagem).
+    otherDrafts[902] = draft([stamped(40, "2026-07-10T00:00:00.000Z", "2026-07-08T20:18:24.000Z")], {
+      form_id: 902, id_form_answer: 5166774, dt_created: "2026-07-08T20:18:24.000Z"
+    });
+    confirmed.push({
+      id_form_answer: 5166799, form_id: 902, flow_step_id: 2, origin: "/PublicForm/Step", dt_created: "2026-07-08T20:19:34.000Z",
+      form_answer_fields: [stamped(53, "SIM da rodada anterior", "2026-07-08T20:19:34.000Z")]
+    });
+    movements = [
+      { id_card_movement: 1, card_id: 55, flow_step_id: 2, dt_entry: "2026-07-08T20:17:54.000Z", dt_exit: "2026-07-08T20:19:34.000Z" },
+      { id_card_movement: 2, card_id: 55, flow_step_id: 1, dt_entry: "2026-07-08T20:19:34.000Z", dt_exit: null }
+    ];
+    const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, values: {} });
+    const dry = await run(["card", "move-step-with-values", "--payload", file, "--dry-run"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(dry?.payload.values).toEqual({ h_data: "2026-07-10T00:00:00.000Z" });
+    expect(dry?.keptFrom).toBe("rascunho");
+    expect(dry?.dataLossCheck.orphans).toEqual([]);
+
+    // Gravada depois da saída (card update-values com o cartão já na Triagem): vale.
+    confirmed[1]!.form_answer_fields = [stamped(53, "nota nova", "2026-07-09T10:00:00.000Z")];
+    process.exitCode = undefined;
+    const later = await run(["card", "move-step-with-values", "--payload", file, "--dry-run"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(later?.payload.values).toEqual({ h_data: "2026-07-10T00:00:00.000Z", h_nota: "nota nova" });
+  });
+});
+
+describe("POP-1/R4-P1: valor gravado que a tela não resolve conta como vazio", () => {
+  /** Regra gravada do campo (com o field_id do banco): o createYupSchema usa a lista nova. */
+  const dbRequired = (fieldId: number) => [{ id_field_validation: 1, field_id: fieldId, type: "required", params: "obrigatório" }];
+
+  function withUserRule(): void {
+    fields = baseFields().map((field) => (field.id_field === 33 ? { ...field, validations: dbRequired(33) } : field));
+    usersByForm = [
+      { id_user: 76, name: "Matheus", flow_user_type: "A" },
+      { id_user: 80, name: "Leitor", flow_user_type: "V" }
+    ];
+  }
+
+  it("usuário bloqueado ou leitor no rascunho (como o 824006 e o 311243): a tela mostra vazio e o obrigatório bloqueia com o motivo", async () => {
+    withUserRule();
+    for (const user of ["517", "80"]) {
+      preAnswer = draft([row(30, "1"), row(33, user)]);
+      process.exitCode = undefined;
+      process.env[FORCE_DRY_RUN_ENV] = "1";
+      const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+      expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+      const message = String(dry?.validation.message);
+      expect(message).toContain(`Responsável pelo Atendimento está gravado no cartão, mas a tela mostra o campo vazio (usuário ${user} bloqueado`);
+      expect(message).toContain('--set "Responsável pelo Atendimento=<usuário: id, e-mail ou nome>"');
+      expect(message).not.toContain("Falta para a etapa Triagem (atual): Responsável");
+      expect(dry?.calls[0].payload.values).toEqual({ h_horas: 1 });
+    }
+    const read = requests.find((request) => request.path === "/user/by-flow");
+    expect(read?.query.get("form_id")).toBe("901");
+
+    // O --set com outro usuário bloqueado (fora da lista) não serve; com um da lista, move.
+    process.exitCode = undefined;
+    const bad = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--set", "Responsável pelo Atendimento=3150"]);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(String(bad?.validation.message)).toContain("o usuário 3150 não aparece neste campo na tela");
+    process.exitCode = undefined;
+    const ok = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--set", "Responsável pelo Atendimento=76"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(ok?.calls[0].payload.values).toEqual({ h_horas: 1, h_resp: 76 });
+  });
+
+  it("campo de usuário não obrigatório fora da lista sai do mover e vai no aviso; sem a regra gravada na 1ª posição a tela não cobra", async () => {
+    fields = [
+      ...baseFields(),
+      { id_field: 34, name: "h_apoio", title: "Apoio", type: "COMBO_BOX_USER_FIELD", form_id: 901, required: "0", validations: [] }
+    ];
+    usersByForm = [{ id_user: 76, flow_user_type: "A" }];
+    // Responsável obrigatório SEM o field_id na regra (lista antiga): o `{}` passa no required da tela.
+    preAnswer = draft([row(30, "1"), row(33, "517"), row(34, "3101")]);
+    const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(moveBody()?.values).toEqual({ h_horas: 1 });
+    expect(out?.warning).toContain("Gravados no cartão que a tela não mostra na etapa Triagem (atual): ");
+    expect(out?.warning).toContain("Responsável pelo Atendimento (usuário 517 bloqueado");
+    expect(out?.warning).toContain("Apoio (usuário 3101 bloqueado");
+  });
+
+  it("combo com 'none' ou opção apagada, rádio com opção oculta, caixa de marcação e check list: o que a tela mostra", async () => {
+    const item = (description: string, index: number) => JSON.stringify({ id_check_list_item: 0, hash: `h${index}`, description, index, checked: "S" });
+    fields = [
+      ...baseFields(),
+      { id_field: 80, name: "h_motivo", title: "Motivo da perda", type: "COMBO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, options: [{ value: "1", label: "Preço" }, { value: "2", label: "Prazo", hide: "S" }] },
+      { id_field: 81, name: "h_canal", title: "Canal", type: "RADIO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, options: [{ value: "1", label: "Telefone" }, { value: "2", label: "Loja", hide: "S" }] },
+      { id_field: 82, name: "h_tags", title: "Tags", type: "CHECK_BOX_FIELD", form_id: 901, required: "0", validations: [], options: [{ value: "a", label: "Azul" }, { value: "v", label: "Verde", hide: "S" }] },
+      { id_field: 83, name: "h_check", title: "Conferência", type: "CHECK_LIST_FIELD", form_id: 901, required: "1", validation_type: "array", validations: REQUIRED }
+    ];
+    preAnswer = draft([
+      row(30, "1"), row(33, "76"), row(80, "none"), row(81, "2"), row(82, "a", 0), row(82, "v", 1), row(83, item("", 1), 1), row(83, item("", 2), 2)
+    ]);
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    const message = String(dry?.validation.message);
+    expect(message).toContain('Motivo da perda está gravado no cartão, mas a tela mostra o campo vazio (gravado "none"');
+    expect(message).toContain('Canal está gravado no cartão, mas a tela mostra o campo vazio (opção "2" oculta)');
+    expect(message).toContain("Conferência está gravado no cartão, mas a tela mostra o campo vazio (2 item(ns) sem descrição");
+    expect(dry?.calls[0].payload.values).toEqual({ h_horas: 1, h_resp: 76, h_tags: ["a"] });
+    expect(dry?.warning).toContain('Tags (opção "v" oculta ou que não existe mais)');
+
+    // Opção oculta no COMBO vale (a tela acha nas opções todas); a apagada não.
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(80, "2"), row(81, "1"), row(83, item("RG", 1), 1)]);
+    process.exitCode = undefined;
+    const ok = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(ok?.calls[0].payload.values).toMatchObject({ h_motivo: "2", h_canal: "1" });
+  });
+
+  it("cartão conectado excluído (como o 675472) e anexo que não existe: a tela não carrega e o obrigatório cobra", async () => {
+    fields = [
+      ...baseFields(),
+      { id_field: 84, name: "h_onb", title: "Onboarding CS", type: "COMBO_BOX_FLOW_FIELD", form_id: 901, flow_id: 400, required: "1", validation_type: "array", validations: REQUIRED },
+      { id_field: 85, name: "h_contrato", title: "Contrato", type: "INPUT_ATTACH_FIELD", form_id: 901, required: "1", validation_type: "mixed", validations: REQUIRED },
+      { id_field: 86, name: "h_extra", title: "Extras", type: "INPUT_ATTACH_FIELD", form_id: 901, required: "0", validations: [] }
+    ];
+    cardsByIds = (body) => (body.card_items as string[]).filter((id) => id !== "821921").map((id) => ({ id_card: Number(id) }));
+    missingAttachments = new Set([1166868]);
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(84, "821921"), row(85, "1166868"), row(85, "1166869", 1), row(86, "1166868")]);
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    const message = String(dry?.validation.message);
+    expect(message).toContain("Onboarding CS está gravado no cartão, mas a tela mostra o campo vazio (cartão 821921 excluído ou sem acesso");
+    expect(message).toContain("Contrato está gravado no cartão, mas a tela mostra o campo vazio (anexo 1166868 que não existe mais");
+    expect(dry?.calls[0].payload.values).toEqual({ h_horas: 1, h_resp: 76 });
+    expect(dry?.warning).toContain("Extras (anexo 1166868");
+    expect(requests.find((request) => request.path === "/card/by-cards")?.body).toEqual({ card_items: ["821921"], flow_id: 400, flow_parent_id: 316 });
+
+    // Cartão que carrega e anexos que existem: vão como estão.
+    missingAttachments = new Set();
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(84, "821922"), row(85, "1166869")]);
+    process.exitCode = undefined;
+    const ok = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(ok?.calls[0].payload.values).toEqual({ h_horas: 1, h_resp: 76, h_onb: [821922], h_contrato: [1166869] });
+
+    // Leitura que falha (rede, 5xx): o kit não afirma o que não conferiu e leva como está.
+    cardsByIds = undefined;
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(84, "821921"), row(85, "1166869")]);
+    process.exitCode = undefined;
+    const unknown = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(unknown?.calls[0].payload.values).toMatchObject({ h_onb: [821921] });
+  });
+
+  it("--payload: o obrigatório cobra igual, e o não obrigatório que a tela não mostra não vira órfão no dataLossCheck", async () => {
+    withUserRule();
+    fields = [...fields, { id_field: 34, name: "h_apoio", title: "Apoio", type: "COMBO_BOX_USER_FIELD", form_id: 901, required: "0", validations: [] }];
+    preAnswer = draft([row(30, "1"), row(33, "517")]);
+    const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: {} });
+    const dry = await run(["card", "move-step-with-values", "--payload", file, "--dry-run"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(String(dry?.validation.message)).toContain("Responsável pelo Atendimento está gravado no cartão, mas a tela mostra o campo vazio");
+    expect(dry?.payload.values).toEqual({ h_horas: 1 });
+
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(34, "3101")]);
+    process.exitCode = undefined;
+    const ok = await run(["card", "move-step-with-values", "--payload", file, "--dry-run"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(ok?.payload.values).toEqual({ h_horas: 1, h_resp: 76 });
+    expect(ok?.dataLossCheck.orphans).toEqual([]);
+    expect(ok?.warning).toContain("Apoio (usuário 3101 bloqueado");
+  });
+});
+
+describe("R4-P2: documento e telefone com a régua da tela", () => {
+  function withDocs(): void {
+    fields = [
+      ...baseFields(),
+      { id_field: 90, name: "h_cpf", title: "CPF3", type: "DOC_FIELD", form_id: 901, required: "1", validation_type: null, validations: REQUIRED },
+      { id_field: 91, name: "h_doc", title: "CPF ou CNPJ", type: "DOC_FIELD", variation: "3", form_id: 901, required: "0", validations: [], show_on_form: "S" },
+      { id_field: 92, name: "h_zap", title: "WhatsApp do Executor", type: "PHONE_FIELD", form_id: 901, required: "0", validations: [] }
+    ];
+  }
+
+  it("valor gravado inválido bloqueia o mover com a frase da tela, mesmo não obrigatório e oculto (como o 52385, 359355 e 1116619)", async () => {
+    withDocs();
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(90, "555.555.555-55"), row(91, "16.505.668/0001-22"), row(92, "(12) 31231")]);
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    const message = String(dry?.validation.message);
+    expect(message).toContain('CPF3 (CPF): "555.555.555-55" não passa na tela (CPF inválido)');
+    expect(message).toContain('CPF ou CNPJ (CPF ou CNPJ): "16.505.668/0001-22" não passa na tela (CPF ou CNPJ inválido)');
+    expect(message).toContain('WhatsApp do Executor (telefone com DDD): "(12) 31231" não passa na tela (Telefone inválido');
+    expect(message).toContain('--set "CPF3=<CPF>"');
+    expect(message).not.toContain("—");
+
+    // Válidos (o 13 dígitos a tela corta para 11 e aceita): move e reenvia como gravados.
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(90, "123.456.789-09"), row(91, "11222333000181"), row(92, "+55 21 98765-4321")]);
+    process.exitCode = undefined;
+    const ok = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(ok?.calls[0].payload.values).toEqual({
+      h_horas: 1, h_resp: 76, h_cpf: "123.456.789-09", h_doc: "11222333000181", h_zap: "+55 21 98765-4321"
+    });
+  });
+
+  it("documento sem dígito ('N/A') a tela mostra vazio: obrigatório cobra, não obrigatório sai do mover", async () => {
+    withDocs();
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(90, "N/A"), row(92, "sem")]);
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(String(dry?.validation.message)).toContain("CPF3 está gravado no cartão, mas a tela mostra o campo vazio");
+    expect(dry?.calls[0].payload.values).toEqual({ h_horas: 1, h_resp: 76 });
+    expect(dry?.warning).toContain("WhatsApp do Executor (");
+  });
+
+  it("--set: CPF repetido, CNPJ em campo de CPF e telefone fora de 10/11 dígitos não servem; os válidos passam", async () => {
+    withDocs();
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const cases: Array<[string, string]> = [
+      ["CPF3=111.111.111-11", "CPF inválido"],
+      ["CPF3=11.222.333/0001-81", "CPF inválido"],
+      ["WhatsApp do Executor=+55 21 98765-4321", "Telefone inválido"],
+      ["WhatsApp do Executor=98765432", "Telefone inválido"]
+    ];
+    for (const [set, reason] of cases) {
+      process.exitCode = undefined;
+      const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--set", set]);
+      expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+      expect(String(dry?.validation.message)).toContain(reason);
+    }
+    process.exitCode = undefined;
+    const ok = await run([
+      "card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento",
+      "--set", "CPF3=111.444.777-35", "--set", "CPF ou CNPJ=12.ABC.345/01DE-35", "--set", "WhatsApp do Executor=(21) 98765-4321"
+    ]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(ok?.calls[0].payload.values).toMatchObject({ h_cpf: "111.444.777-35", h_doc: "12.ABC.345/01DE-35", h_zap: "(21) 98765-4321" });
   });
 });
