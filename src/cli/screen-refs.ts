@@ -4,6 +4,7 @@ import type { CangeAgentKit } from "../index.js";
 import type { NormalizedField } from "../schemas/fields.js";
 import { applyScreenValue, resolveLocalScreenValues, type CarryOverResult } from "../utils/carryOver.js";
 import { normalizeFieldType } from "../utils/fieldTypeGuards.js";
+import { createThrottle, type Throttle } from "../utils/rateLimit.js";
 import { isRequiredOnScreen } from "../utils/requiredFields.js";
 import { SCREEN_USER_TYPES } from "../utils/valueResolver.js";
 
@@ -25,7 +26,18 @@ import { screenUsersFor } from "./write-support.js";
  * O que sobra vazio sai do mover e do preenchido (o obrigatório cobra com motivo próprio); o não
  * obrigatório sai do mover, como a tela, e volta no aviso. Falha de leitura (rede, 5xx) não muda
  * nada: o kit não afirma o que não conferiu.
+ *
+ * Teto de leitura do back (10 GET/s por chave; estourar bloqueia a chave por 5 minutos): o mover
+ * já faz até 8 GETs antes daqui, então estas leituras saem uma por vez, a 2 por segundo
+ * (`CANGE_SCREEN_REFS_RPS` muda o ritmo, para teste), e os anexos um por um, parando no primeiro
+ * que não existe, como a tela.
  */
+const DEFAULT_SCREEN_REFS_RPS = 2;
+
+function screenRefsRps(): number {
+  const raw = Number(process.env.CANGE_SCREEN_REFS_RPS);
+  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_SCREEN_REFS_RPS;
+}
 export interface ScreenRefsInput {
   carry: CarryOverResult;
   fields: NormalizedField[];
@@ -39,6 +51,7 @@ export async function resolveScreenReferences(kit: CangeAgentKit, input: ScreenR
   const { carry, fields } = input;
   resolveLocalScreenValues(carry, fields, input.preFields);
   const userLists = new Map<string, Promise<ReadonlySet<number> | undefined>>();
+  const throttle = createThrottle({ rps: screenRefsRps(), concurrency: 1 });
   await Promise.all(
     fields.map(async (field) => {
       if (!(field.name in carry.values)) return;
@@ -46,7 +59,7 @@ export async function resolveScreenReferences(kit: CangeAgentKit, input: ScreenR
       const value = carry.values[field.name];
       if (SCREEN_USER_TYPES.has(type)) {
         if (typeof value !== "number") return;
-        const allowed = await screenUsersFor(kit, field, userLists);
+        const allowed = await screenUsersFor(kit, field, userLists, undefined, throttle);
         if (!allowed || allowed.has(value)) return;
         applyScreenValue(
           carry,
@@ -56,9 +69,9 @@ export async function resolveScreenReferences(kit: CangeAgentKit, input: ScreenR
           !userEmptyBlocks(field)
         );
       } else if (type === "COMBO_BOX_FLOW_FIELD") {
-        await resolveConnectedCards(kit, carry, field, value, input.flowId);
+        await resolveConnectedCards(kit, carry, field, value, input.flowId, throttle);
       } else if (type === "INPUT_ATTACH_FIELD") {
-        await resolveAttachments(kit, carry, field, value);
+        await resolveAttachments(kit, carry, field, value, throttle);
       }
     })
   );
@@ -82,18 +95,21 @@ async function resolveConnectedCards(
   carry: CarryOverResult,
   field: NormalizedField,
   value: unknown,
-  parentFlowId: number | string | undefined
+  parentFlowId: number | string | undefined,
+  throttle: Throttle
 ): Promise<void> {
   if (!Array.isArray(value) || value.length === 0) return;
   const linkedFlow = field.raw?.flow_id;
   if (linkedFlow === undefined || linkedFlow === null || String(linkedFlow).trim() === "") return;
   let response: unknown;
   try {
-    response = await kit.contracts.getCardsByIds({
-      flowId: String(linkedFlow),
-      ...(parentFlowId !== undefined ? { parentFlowId } : {}),
-      cardIds: value.map((item) => String(item))
-    });
+    response = await throttle.run(() =>
+      kit.contracts.getCardsByIds({
+        flowId: String(linkedFlow),
+        ...(parentFlowId !== undefined ? { parentFlowId } : {}),
+        cardIds: value.map((item) => String(item))
+      })
+    );
   } catch {
     return;
   }
@@ -109,20 +125,24 @@ async function resolveConnectedCards(
   applyScreenValue(carry, field, kept, `cartão ${dropped.join(", ")} excluído ou sem acesso; a tela não o carrega`);
 }
 
-async function resolveAttachments(kit: CangeAgentKit, carry: CarryOverResult, field: NormalizedField, value: unknown): Promise<void> {
+async function resolveAttachments(
+  kit: CangeAgentKit,
+  carry: CarryOverResult,
+  field: NormalizedField,
+  value: unknown,
+  throttle: Throttle
+): Promise<void> {
   if (!Array.isArray(value) || value.length === 0) return;
-  const results = await Promise.all(
-    value.map(async (id) => {
-      try {
-        await kit.contracts.getAttachment({ attachmentId: String(id) });
-        return "ok" as const;
-      } catch (error) {
-        return error instanceof CangeApiError && error.status === 404 ? ("missing" as const) : ("unknown" as const);
+  // O InputAttach carrega um por um e para no primeiro que falha: não mostra nenhum do campo.
+  for (const id of value) {
+    try {
+      await throttle.run(() => kit.contracts.getAttachment({ attachmentId: String(id) }));
+    } catch (error) {
+      if (error instanceof CangeApiError && error.status === 404) {
+        applyScreenValue(carry, field, undefined, `anexo ${String(id)} que não existe mais; a tela não mostra os anexos do campo`);
       }
-    })
-  );
-  const missing = value.filter((_, index) => results[index] === "missing").map(String);
-  if (missing.length === 0) return;
-  // O InputAttach carrega um por um e para no primeiro que falha: não mostra nenhum.
-  applyScreenValue(carry, field, undefined, `anexo ${missing.join(", ")} que não existe mais; a tela não mostra os anexos do campo`);
+      // Outra falha (rede, 5xx): o kit não afirma o que não conferiu.
+      return;
+    }
+  }
 }

@@ -25,6 +25,8 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   usuário vazio só é recusado quando a 1ª regra gravada dele é a `required` (o `matches` do `createYupSchema`); sem
   isso a tela move com ele vazio, e o kit também. O `--set` de usuário (todas as escritas) confere o id contra a mesma
   lista e recusa o bloqueado, o leitor e quem está fora do fluxo privado. Leitura que falha (rede, 5xx) não muda nada.
+  Essas leituras saem uma por vez, a 2 por segundo, e os anexos um por um parando no primeiro que não existe: o mover
+  já faz até 8 GETs antes e o back bloqueia a chave por 5 minutos acima de 10 GET/s.
   **Decisão pendente (Matheus):** o não obrigatório que a tela descarta sai do mover (igual à tela) em vez de ir com
   aviso.
 - **R4-P2, documento e telefone:** a tela valida o formato sempre, obrigatório ou não, oculto também, sobre o valor

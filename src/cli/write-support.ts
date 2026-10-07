@@ -19,6 +19,8 @@ import {
   type ValueIssue
 } from "../utils/valueResolver.js";
 
+import type { Throttle } from "../utils/rateLimit.js";
+
 import { envCardId, envFlowId } from "./env-defaults.js";
 import { FLOW_FROM_CARD_HINT } from "./resource-ref.js";
 
@@ -121,8 +123,11 @@ export function screenUsersFor(
   kit: CangeAgentKit,
   field: NormalizedField,
   cache: Map<string, Promise<ReadonlySet<number> | undefined>>,
-  ensureAuth?: () => Promise<unknown>
+  ensureAuth?: () => Promise<unknown>,
+  /** Ritmo das leituras (o mover passa o do `screen-refs`). */
+  throttle?: Throttle
 ): Promise<ReadonlySet<number> | undefined> {
+  const run = <T>(task: () => Promise<T>): Promise<T> => (throttle ? throttle.run(task) : task());
   const variation = String(field.variation ?? field.raw?.variation ?? "").trim();
   const formId = field.formId ?? field.raw?.form_id;
   const key = variation === "2" ? "empresa" : `form:${String(formId ?? "")}`;
@@ -132,10 +137,10 @@ export function screenUsersFor(
       try {
         if (ensureAuth) await ensureAuth();
         if (variation === "2") {
-          return new Set((await kit.contracts.listCompanyUsers()).users.map((user) => user.id));
+          return new Set((await run(() => kit.contracts.listCompanyUsers())).users.map((user) => user.id));
         }
         if (formId === undefined || formId === null || String(formId).trim() === "") return undefined;
-        const { users } = await kit.contracts.listUsersByForm({ formId: String(formId) });
+        const { users } = await run(() => kit.contracts.listUsersByForm({ formId: String(formId) }));
         return new Set(users.filter((user) => user.flowUserType !== "V").map((user) => user.id));
       } catch {
         return undefined;
