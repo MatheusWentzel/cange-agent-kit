@@ -26,6 +26,8 @@ import {
  *  - D2/D3: obrigatório é o que a tela cobra (regra `required` em `field.validations`).
  *  - D4: rich text `<p></p>` (e HTML sem texto) é vazio.
  *  - D5: check list com "exigir todos concluídos" (`formula = '1'`) bloqueia com item sem marcar.
+ *  - Revisão (07/10): F1 rascunho x confirmada pela recência da LINHA; F2 autocompletar da
+ *    tela; F3 `card move-step --allow-data-loss`.
  * Fetch mockado (a suíte bloqueia rede real).
  */
 
@@ -57,13 +59,24 @@ let fields: Array<Record<string, unknown>>;
 let flow: Record<string, unknown>;
 /** Respostas confirmadas (o GET /card só traz estas). */
 let confirmed: Array<Record<string, any>>;
-/** Pré-resposta da etapa: `undefined` = a rota responde 404 (back sem a rota). */
+/** Pré-resposta da etapa: `undefined` = a rota responde 404 (back sem a rota), salvo com `preFields`. */
 let preAnswer: Record<string, any> | undefined;
 let preAnswerStatus = 200;
+/** `fields` da pré-resposta (autocompletar). Definido sem `preAnswer`: a rota responde sem rascunho. */
+let preFields: Array<Record<string, unknown>> | undefined;
+/** Relógio do back mockado: cada linha gravada pelo PUT ganha um `dt_last_update` mais novo. */
+let clock = 0;
+let nextRowId = 0;
 
-function row(fieldId: number, value: string, index = 0): Record<string, unknown> {
+function row(fieldId: number, value: string, index = 0, extra: Record<string, unknown> = {}): Record<string, unknown> {
   const field = fields.find((item) => item.id_field === fieldId);
-  return { field_id: fieldId, index, value, deleted: "N", field: { id_field: fieldId, name: field?.name, type: field?.type } };
+  return { field_id: fieldId, index, value, deleted: "N", field: { id_field: fieldId, name: field?.name, type: field?.type }, ...extra };
+}
+
+/** Linha com a data da última edição (e o id), como o back grava. */
+function stamped(fieldId: number, value: string, at: string, index = 0): Record<string, unknown> {
+  nextRowId += 1;
+  return row(fieldId, value, index, { id_form_answer_field: nextRowId, dt_created: at, dt_last_update: at });
 }
 
 /** Rascunho da etapa Triagem (form_answer com flow_step_id NULL), como a tela grava. */
@@ -81,7 +94,7 @@ function draft(rows: Array<Record<string, unknown>>, extra: Record<string, unkno
 }
 
 function cardRaw(): Record<string, unknown> {
-  return { id_card: 55, flow_id: 316, flow_step_id: 1, form_answers: confirmed };
+  return { id_card: 55, flow_id: 316, flow_step_id: 1, user_id_creator: 76, form_answers: confirmed };
 }
 
 function json(body: unknown, status = 200): Response {
@@ -100,7 +113,9 @@ function putFormAnswer(body: Record<string, any>): void {
   for (const [name, value] of Object.entries(body.values as Record<string, unknown>)) {
     const field = fields.find((item) => item.name === name)!;
     target.form_answer_fields = target.form_answer_fields.filter((item: any) => item.field_id !== field.id_field);
-    target.form_answer_fields.push(row(field.id_field as number, String(value)));
+    // O UpdateFormAnswerFieldService apaga a linha e grava outra (data e id novos).
+    clock += 1000;
+    target.form_answer_fields.push(stamped(field.id_field as number, String(value), new Date(clock).toISOString()));
   }
 }
 
@@ -139,6 +154,9 @@ beforeEach(() => {
   confirmed[1]!.form_answer_fields = [row(31, "antigo")];
   preAnswer = undefined;
   preAnswerStatus = 200;
+  preFields = undefined;
+  clock = Date.parse("2026-10-07T12:00:00.000Z");
+  nextRowId = 1000;
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
     stdout.push(String(chunk));
     return true;
@@ -157,9 +175,9 @@ beforeEach(() => {
     if (method === "GET" && url.pathname === "/card/") return json(cardRaw());
     if (method === "GET" && url.pathname === "/form/pre-answer") {
       if (preAnswerStatus !== 200) return json({ message: "falhou" }, preAnswerStatus);
-      if (preAnswer === undefined) return json({ message: "rota não mockada" }, 404);
+      if (preAnswer === undefined && preFields === undefined) return json({ message: "rota não mockada" }, 404);
       const formId = Number(url.searchParams.get("id_form"));
-      return json({ fields: [], formsAnswers: preAnswer.form_id === formId ? preAnswer : null });
+      return json({ fields: preFields ?? [], formsAnswers: preAnswer && preAnswer.form_id === formId ? preAnswer : null });
     }
     if (method === "PUT" && url.pathname === "/form/answer") {
       putFormAnswer(body);
@@ -261,13 +279,76 @@ describe("EXTRA-06 D1: card move lê a pré-resposta da etapa atual e reenvia", 
     expect(writes()).toEqual([]);
   });
 
-  it("resposta confirmada MAIS NOVA que o rascunho (caminho antigo) entra por cima, por campo", async () => {
-    preAnswer = draft([row(30, "1"), row(33, "76"), row(31, "rascunho")]);
-    confirmed.push({ id_form_answer: 801, form_id: 901, flow_step_id: 1, dt_created: "2026-10-05T10:00:00.000Z", form_answer_fields: [row(30, "9")] });
-    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+  it("F1: rascunho editado DEPOIS da confirmada mais nova (como o card 1107439): o rascunho vence o campo", async () => {
+    // Rascunho criado às 10:00:00 e editado no dia seguinte pelo autosave da tela (a linha muda,
+    // o form_answer não); a confirmada nasceu 11 s depois do rascunho, com o valor antigo.
+    preAnswer = draft(
+      [stamped(30, "1", "2026-10-03T09:47:24.000Z"), stamped(33, "76", "2026-10-03T09:47:25.000Z")],
+      { dt_created: "2026-10-02T10:00:00.000Z" }
+    );
+    confirmed.push({
+      id_form_answer: 801, form_id: 901, flow_step_id: 1, dt_created: "2026-10-02T10:00:11.000Z",
+      form_answer_fields: [stamped(30, "9", "2026-10-02T10:00:11.000Z"), stamped(33, "76", "2026-10-02T10:00:11.000Z")]
+    });
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
 
     expect(process.exitCode ?? 0).toBe(0);
-    expect(moveBody()?.values).toEqual({ h_horas: 9, h_resp: 76, h_obs: "rascunho" });
+    expect(dry).toMatchObject({ dryRun: true, keptFrom: "rascunho" });
+    expect(dry?.calls[0]?.payload.values).toEqual({ h_horas: 1, h_resp: 76 });
+  });
+
+  it("F1: card update-values na confirmada DEPOIS do rascunho: a confirmada vence o campo", async () => {
+    // Rascunho mais antigo que a confirmada: o PUT /form/answer grava na confirmada (a mais recente).
+    preAnswer = draft([stamped(30, "1", "2026-10-04T10:00:00.000Z"), stamped(33, "76", "2026-10-04T10:00:00.000Z")], {
+      dt_created: "2026-10-02T10:00:00.000Z"
+    });
+    confirmed.push({
+      id_form_answer: 801, form_id: 901, flow_step_id: 1, dt_created: "2026-10-03T10:00:00.000Z",
+      form_answer_fields: [stamped(30, "4", "2026-10-03T10:00:00.000Z")]
+    });
+    // Antes do update-values: a linha do rascunho (editada em 04/10) é a mais nova.
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const before = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(before?.calls[0]?.payload.values).toMatchObject({ h_horas: 1 });
+
+    delete process.env[FORCE_DRY_RUN_ENV];
+    await run(["card", "update-values", "--card-id", "55", "--flow-id", "316", "--set", "Horas=9"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(confirmed[2]!.form_answer_fields.map((item: any) => [item.field_id, item.value])).toContainEqual([30, "9"]);
+
+    requests.length = 0;
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(moveBody()?.values).toEqual({ h_horas: 9, h_resp: 76 });
+  });
+
+  it("F1: campo de várias linhas vale a linha mais nova entre elas", () => {
+    const list = normalizeFieldsFromApiResponse([
+      ...baseFields(),
+      { id_field: 41, name: "h_tags", title: "Tags", type: "CHECK_BOX_FIELD", form_id: 901, required: "0", validations: [] }
+    ]);
+    const scope = list.filter((field) => String(field.formId) === "901");
+    fields = [...baseFields(), { id_field: 41, name: "h_tags", type: "CHECK_BOX_FIELD", form_id: 901 }];
+    const carry = readStepCarryOver({
+      cardRaw: {
+        ...cardRaw(),
+        form_answers: [
+          { id_form_answer: 801, form_id: 901, flow_step_id: 1, dt_created: "2026-10-03T10:00:00.000Z",
+            form_answer_fields: [stamped(41, "a", "2026-10-03T10:00:00.000Z", 0), stamped(41, "b", "2026-10-03T10:00:00.000Z", 1)] }
+        ]
+      },
+      preAnswerRaw: {
+        fields: [],
+        formsAnswers: draft([stamped(41, "x", "2026-10-02T10:00:00.000Z", 0), stamped(41, "y", "2026-10-05T10:00:00.000Z", 1)], {
+          dt_created: "2026-10-02T10:00:00.000Z"
+        })
+      },
+      formId: "901",
+      fields: scope
+    });
+    // A 2ª linha do rascunho (05/10) é mais nova que as da confirmada (03/10): o rascunho inteiro vence.
+    expect(carry.values.h_tags).toEqual(["x", "y"]);
   });
 
   it("anexo no rascunho que o kit não remonta: avisa que não vai (Não reenviados)", async () => {
@@ -313,6 +394,143 @@ describe("EXTRA-06 D1: card update-values seguido de card move preserva o valor"
   });
 });
 
+describe("F2: autocompletar da tela (campo sem valor na pré-resposta)", () => {
+  /** Prioridade como o campo 8616 do fluxo 192: obrigatório, lista de opções, autocompletar estático '2'. */
+  function withPriority(extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const field = {
+      id_field: 42, name: "h_prio", title: "Prioridade", type: "COMBO_BOX_FIELD", form_id: 901, required: "1",
+      validation_type: "string", validations: REQUIRED,
+      options: [{ value: "1", label: "Baixa" }, { value: "2", label: "Média" }, { value: "3", label: "Alta" }],
+      ac_type: 1, ac_parent_field_id: null, ac_child_field_id: null,
+      auto_complete: { id_form_answer: 906690, form_answer_fields: [{ id_form_answer_field: 5779242, field_id: 42, index: 0, value: "2", deleted: null }] },
+      ...extra
+    };
+    fields = [...baseFields(), field];
+    return field;
+  }
+
+  it("estático, rascunho sem linhas (como o card 1120391): conta como preenchido e vai no mover", async () => {
+    const prio = withPriority();
+    preFields = [prio];
+    preAnswer = draft([]);
+    process.env[FORCE_DRY_RUN_ENV] = "1";
+    const dry = await run([
+      "card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento",
+      "--set", "Horas=1", "--set", "Responsável pelo Atendimento=76"
+    ]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(dry).toMatchObject({ validation: { valid: true }, autocompleted: ["Prioridade"] });
+    expect(dry?.calls[0]?.payload.values).toMatchObject({ h_prio: "2", h_horas: 1, h_resp: 76 });
+  });
+
+  it("rota sem rascunho nenhum (formsAnswers null) também autocompleta; --set vence o autocompletar", async () => {
+    const prio = withPriority();
+    preFields = [prio];
+    const out = await run([
+      "card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento",
+      "--set", "Horas=1", "--set", "Responsável pelo Atendimento=76", "--set", "Prioridade=Alta"
+    ]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(moveBody()?.values.h_prio).toBe("3");
+    expect(out?.autocompleted).toBeUndefined();
+  });
+
+  it("campo com linha (mesmo vazia) na pré-resposta: a tela não autocompleta, o kit também não", async () => {
+    const prio = withPriority();
+    preFields = [prio];
+    preAnswer = draft([row(30, "1"), row(33, "76"), row(42, "")]);
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(errorMessage()).toContain("Falta para a etapa Triagem (atual): Prioridade");
+  });
+
+  it("dinâmico: valor de outro campo do cartão, data atual e criador do cartão", async () => {
+    const extra = [
+      { id_field: 43, name: "h_copia", title: "Cópia do título", type: "TEXT_SHORT_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 20 },
+      { id_field: 44, name: "h_quando", title: "Quando", type: "DATE_PICKER_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: -1 },
+      { id_field: 45, name: "h_dono", title: "Dono", type: "COMBO_BOX_USER_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: -3 }
+    ];
+    fields = [...baseFields(), ...extra];
+    preFields = extra;
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    const values = moveBody()?.values;
+    expect(values).toMatchObject({ h_copia: "Pedido ACME", h_dono: 76, h_horas: 1, h_resp: 76 });
+    expect(Number.isFinite(Date.parse(values?.h_quando))).toBe(true);
+    expect(out?.autocompleted).toEqual(["Cópia do título", "Quando", "Dono"]);
+    // O autocompletar não entra no `kept` (é valor novo, não o que o cartão tinha).
+    expect(out).toMatchObject({ kept: 2, keptFrom: "rascunho" });
+  });
+
+  it("dinâmico de data copia em ISO (dd/MM/yyyy também); origem no rascunho da etapa", () => {
+    fields = [
+      ...baseFields(),
+      { id_field: 46, name: "h_ref", title: "Referência", type: "TEXT_SHORT_FIELD", form_id: 901 },
+      { id_field: 47, name: "h_prazo", title: "Prazo", type: "DUE_DATE_FIELD", form_id: 901, ac_type: 0, ac_parent_field_id: 46 }
+    ];
+    const scope = normalizeFieldsFromApiResponse(fields).filter((field) => String(field.formId) === "901");
+    const carry = readStepCarryOver({
+      cardRaw: cardRaw(),
+      preAnswerRaw: { fields: [fields[fields.length - 1]], formsAnswers: draft([row(46, "08/10/2026")]) },
+      formId: "901",
+      fields: scope
+    });
+    expect(carry.values.h_prazo).toBe("2026-10-08T00:00:00.000Z");
+    expect(carry.autoFilled).toEqual([{ name: "h_prazo", title: "Prazo", rule: "campo-do-cartao" }]);
+  });
+
+  it("autocompletar que o kit não calcula (usuário atual, vínculo, opção por rótulo): obrigatório vazio vira aviso", async () => {
+    const extra = [
+      { id_field: 48, name: "h_atual", title: "Quem atende", type: "COMBO_BOX_USER_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: -2 },
+      { id_field: 49, name: "h_cliente", title: "Cidade do cliente", type: "TEXT_SHORT_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 20, ac_child_field_id: 99 },
+      { id_field: 50, name: "h_canal", title: "Canal", type: "RADIO_BOX_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: 20, options: [{ value: "1", label: "Telefone" }] }
+    ];
+    fields = [...baseFields(), ...extra];
+    preFields = extra;
+    preAnswer = draft([row(30, "1"), row(33, "76")]);
+    const out = await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(moveBody()?.values).toEqual({ h_horas: 1, h_resp: 76 });
+    expect(out?.warning).toContain(
+      "Obrigatórios vazios com autocompletar que o kit não calcula na etapa Triagem (atual): " +
+        "Quem atende (usuário atual), Cidade do cliente (campo de vínculo), Canal (opção pelo rótulo)"
+    );
+    expect(out?.warning).not.toContain("—");
+  });
+
+  it("outro obrigatório bloqueia: a dica cita os pendentes de autocompletar sem cobrá-los", async () => {
+    const extra = [
+      { id_field: 48, name: "h_atual", title: "Quem atende", type: "COMBO_BOX_USER_FIELD", form_id: 901, required: "1", validation_type: "string", validations: REQUIRED, ac_type: 0, ac_parent_field_id: -2 }
+    ];
+    fields = [...baseFields(), ...extra];
+    preFields = extra;
+    preAnswer = draft([row(33, "76")]);
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    const message = errorMessage();
+    expect(message).toContain("Falta para a etapa Triagem (atual): Horas");
+    expect(message).not.toContain("Falta para a etapa Triagem (atual): Horas (número), Quem atende");
+    expect(message).toContain("Também vazios, com autocompletar que o kit não calcula");
+  });
+
+  it("--payload que grava a etapa atual leva o autocompletar (e diz em autocompleted)", async () => {
+    const prio = withPriority();
+    preFields = [prio];
+    preAnswer = draft([row(33, "76")]);
+    const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: { h_horas: 3 } });
+    const out = await run(["card", "move-step-with-values", "--payload", file]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(moveBody()?.values).toEqual({ h_resp: 76, h_prio: "2", h_horas: 3 });
+    expect(out).toMatchObject({ kept: 1, keptFrom: "rascunho", autocompleted: ["Prioridade"] });
+  });
+});
+
 describe("EXTRA-06 D1: mover por --payload", () => {
   it("payload que grava a etapa atual: reenvia o rascunho com o values por cima e conta o rascunho", async () => {
     preAnswer = draft([row(33, "76"), row(31, "rascunho")]);
@@ -355,6 +573,23 @@ describe("EXTRA-06 D1: mover por --payload", () => {
     stderr.length = 0;
     await run(["card", "move-step-with-values", "--payload", file, "--allow-data-loss"]);
     expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it("F3: card move-step (deprecado) aceita o --allow-data-loss que a mensagem de bloqueio sugere", async () => {
+    preAnswer = draft([row(30, "2"), row(33, "76")]);
+    const file = await payloadFile({
+      flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 902, values: { h_data: "2026-10-06T00:00:00.000Z" }
+    });
+    await run(["card", "move-step", "--payload", file, "--dry-run"]);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+
+    process.exitCode = undefined;
+    stderr.length = 0;
+    const out = await run(["card", "move-step", "--payload", file, "--dry-run", "--allow-data-loss"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(stderr.join("")).not.toContain("unknown option");
+    expect(out?.validation).toMatchObject({ valid: true });
+    expect(writes()).toEqual([]);
   });
 
   it("card move-step (deprecado) também reenvia o rascunho", async () => {

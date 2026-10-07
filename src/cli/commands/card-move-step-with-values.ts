@@ -233,7 +233,10 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         }
 
         // Obrigatório com condicional vazio não bloqueia (o kit não avalia a condicional): avisa.
-        const keptInfo = check.kept.length > 0 && check.carry ? { kept: check.kept.length, keptFrom: check.carry.source } : {};
+        const keptInfo = {
+          ...(check.kept.length > 0 && check.carry ? { kept: check.kept.length, keptFrom: check.carry.source } : {}),
+          ...(check.autocompleted.length > 0 ? { autocompleted: check.autocompleted } : {})
+        };
         if (options.dryRun) {
           return {
             ...createDryRunResult(payload),

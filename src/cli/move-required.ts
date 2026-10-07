@@ -42,6 +42,10 @@ import { loadFlowContext, stepLabel, stepScope, type FlowContext } from "./write
  *   pré-resposta (`readOriginCarry`), e é reenviado no mover; obrigatório é o que a tela
  *   cobra (regra `required` do campo, ver `isRequiredOnScreen`); check list "exigir todos
  *   concluídos" (`formula = '1'`) com item sem marcar bloqueia, como a tela.
+ * - Autocompletar (F2, 07/10): campo sem valor que o autocompletar da tela preenche conta
+ *   como preenchido e o valor vai no mover (`carry.autoFilled`). Obrigatório vazio com
+ *   autocompletar que o kit não calcula (`carry.autoPending`) não bloqueia: vira aviso,
+ *   como o da condicional.
  */
 
 export const MOVE_REQUIRED_RULE = "Mover exige os obrigatórios da etapa atual (regra da plataforma, igual à tela).";
@@ -80,13 +84,21 @@ interface RequiredSplit {
   blocking: NormalizedField[];
   /** Com condicional: a tela só cobra se a condicional exibir o campo; vira aviso. */
   conditional: NormalizedField[];
+  /** Com autocompletar que o kit não calcula: a tela preencheria; vira aviso. */
+  autoPending: NormalizedField[];
 }
 
-function splitByConditional(missing: NormalizedField[], step: FlowStepSummary): RequiredSplit {
+function splitByConditional(
+  missing: NormalizedField[],
+  step: FlowStepSummary,
+  carry?: Pick<CarryOverResult, "autoPending">
+): RequiredSplit {
   const names = conditionalFieldNames(step);
+  const pending = new Set((carry?.autoPending ?? []).map((item) => item.name));
   return {
-    blocking: missing.filter((field) => !names.has(field.name)),
-    conditional: missing.filter((field) => names.has(field.name))
+    blocking: missing.filter((field) => !names.has(field.name) && !pending.has(field.name)),
+    conditional: missing.filter((field) => names.has(field.name)),
+    autoPending: missing.filter((field) => !names.has(field.name) && pending.has(field.name))
   };
 }
 
@@ -97,6 +109,27 @@ function fieldList(fields: NormalizedField[]): string {
 /** "na etapa Triagem (atual)" / "no formulário inicial". */
 function inLabel(label: string): string {
   return `${/^etapa\b/i.test(label) ? "na" : "no"} ${label}`;
+}
+
+/**
+ * Aviso (não bloqueia) dos obrigatórios vazios com autocompletar que o kit não calcula (F2):
+ * a tela preencheria pelo autocompletar do campo; o mover vai sem ele.
+ */
+export function autoPendingWarning(
+  origin: FormScope,
+  fields: NormalizedField[],
+  carry?: Pick<CarryOverResult, "autoPending">
+): string | undefined {
+  if (fields.length === 0) return undefined;
+  const reasons = new Map((carry?.autoPending ?? []).map((item) => [item.name, item.reason]));
+  const list = fields
+    .map((field) => `${field.title ?? field.name} (${reasons.get(field.name) ?? "autocompletar"})`)
+    .join(", ");
+  return (
+    `Obrigatórios vazios com autocompletar que o kit não calcula ${inLabel(origin.label)}: ${list}. ` +
+    "A tela preenche esses campos sozinha ao abrir o cartão e o mover do kit vai sem eles: " +
+    "confira o valor no cartão e mande com --set no mover (ou confirme com o usuário)."
+  );
 }
 
 /** Aviso (não bloqueia) dos obrigatórios com condicional que ficaram vazios. */
@@ -125,6 +158,8 @@ interface HintInput {
   payloadSent?: string[];
   /** Obrigatórios com condicional também vazios: a dica cita, sem bloquear por eles. */
   conditional?: NormalizedField[];
+  /** Obrigatórios com autocompletar que o kit não calcula, também vazios: a dica cita. */
+  autoPending?: NormalizedField[];
 }
 
 /**
@@ -144,9 +179,12 @@ export function moveRequiredHint(input: HintInput): ValueIssue {
         : " (ou inclua esses campos no values do payload)"
       : "";
   const conditional =
-    input.conditional && input.conditional.length > 0
+    (input.conditional && input.conditional.length > 0
       ? `Também vazios, com condicional (a tela só exige se o campo aparecer para este cartão): ${fieldList(input.conditional)}. `
-      : "";
+      : "") +
+    (input.autoPending && input.autoPending.length > 0
+      ? `Também vazios, com autocompletar que o kit não calcula (a tela preenche ao abrir o cartão): ${fieldList(input.autoPending)}. `
+      : "");
   return {
     kind: "hint",
     blocking: false,
@@ -166,6 +204,8 @@ export interface OriginRequiredInput {
   values: Record<string, unknown>;
   /** Hashes que o cartão já tem preenchidos e continuam valendo depois do mover. */
   filled?: ReadonlySet<string>;
+  /** O que o cartão tem na etapa (o `autoPending` vira aviso em vez de bloquear). */
+  carry?: CarryOverResult;
   cardId: string | number;
   flowId?: string | number;
   repeatSent?: boolean;
@@ -184,10 +224,14 @@ export function originRequired(input: OriginRequiredInput): OriginRequiredResult
   if (!origin) return { issues: [] };
   if (skipsRequiredOnBackwardMove(input.ctx.flowRecord, input.fromStep, input.toStep)) return { issues: [] };
   const missing = missingRequiredFields(origin, input.values, input.filled);
-  const { blocking, conditional } = splitByConditional(missing, input.fromStep);
+  const { blocking, conditional, autoPending } = splitByConditional(missing, input.fromStep, input.carry);
   const checklist = pendingChecklists(origin, input.fromStep, input.values);
   if (blocking.length === 0) {
-    const warning = joinWarnings(conditionalRequiredWarning(origin, conditional), checklist.warning);
+    const warning = joinWarnings(
+      conditionalRequiredWarning(origin, conditional),
+      autoPendingWarning(origin, autoPending, input.carry),
+      checklist.warning
+    );
     return { issues: checklist.issues, ...(warning ? { warning } : {}) };
   }
   return {
@@ -201,6 +245,7 @@ export function originRequired(input: OriginRequiredInput): OriginRequiredResult
         toStep: input.toStep,
         cardId: input.cardId,
         conditional,
+        autoPending,
         ...(input.flowId !== undefined ? { flowId: input.flowId } : {}),
         ...(input.repeatSent ? { repeatSent: true } : {})
       })
@@ -267,6 +312,18 @@ export async function readOriginCarry(
   return readStepCarryOver({ cardRaw, preAnswerRaw: pre?.raw, formId: origin.formId, fields: origin.fields });
 }
 
+/** Campos do cartão reenviados sem estar no que foi mandado (o autocompletar sai à parte). */
+export function keptFields(carry: CarryOverResult | undefined, sent: Record<string, unknown>): string[] {
+  if (!carry) return [];
+  const auto = new Set(carry.autoFilled.map((item) => item.name));
+  return Object.keys(carry.values).filter((name) => !(name in sent) && !auto.has(name));
+}
+
+/** Títulos dos campos que o autocompletar da tela preencheu e o mover leva (fora os mandados). */
+export function autocompletedTitles(carry: CarryOverResult | undefined, sent: Record<string, unknown>): string[] {
+  return (carry?.autoFilled ?? []).filter((item) => !(item.name in sent)).map((item) => item.title ?? item.name);
+}
+
 /** Aviso dos preenchidos que o mover não consegue reenviar (anexo, fórmula, ID automático). */
 export function notKeptWarning(step: FlowStepSummary, carry: CarryOverResult | undefined): string | undefined {
   const notKept = carry?.notKept ?? [];
@@ -303,6 +360,8 @@ export interface PayloadMoveCheck {
   values: Record<string, unknown>;
   /** Campos do cartão reenviados sem estar no payload. */
   kept: string[];
+  /** Campos que o autocompletar da tela preencheu e o mover leva (títulos). */
+  autocompleted: string[];
   /** O mover grava o formulário da etapa atual. */
   writesOrigin: boolean;
   /** O que o cartão tem na etapa atual (fonte da tela). */
@@ -373,16 +432,27 @@ export async function checkPayloadMove(
 
   const origin = stepScope(ctx, fromStep, 0, " (atual)");
   if (!origin) {
-    return { ctx, card, writtenFormId, issues, values, kept: [], writesOrigin: false };
+    return { ctx, card, writtenFormId, issues, values, kept: [], autocompleted: [], writesOrigin: false };
   }
 
   const writesOrigin = writtenFormId === origin.formId;
   const carry = await readOriginCarry(kit, card.raw, origin, payload.cardId);
   const resend = writesOrigin && options.resend !== false;
   const sendValues = resend ? { ...carry.values, ...values } : values;
-  const kept = resend ? Object.keys(carry.values).filter((name) => !(name in values)) : [];
+  const kept = resend ? keptFields(carry, values) : [];
+  const autocompleted = resend ? autocompletedTitles(carry, values) : [];
   const notKept = resend ? notKeptWarning(fromStep, carry) : undefined;
-  const base = { ctx, card, writtenFormId, originFormId: origin.formId, values: sendValues, kept, writesOrigin, carry };
+  const base = {
+    ctx,
+    card,
+    writtenFormId,
+    originFormId: origin.formId,
+    values: sendValues,
+    kept,
+    autocompleted,
+    writesOrigin,
+    carry
+  };
 
   // Gravando outro formulário, o rascunho da etapa atual some ao sair dela (o back apaga).
   if (!writesOrigin && carry.source === "rascunho" && !options.allowDataLoss) {
@@ -407,7 +477,9 @@ export async function checkPayloadMove(
   const counted = writesOrigin ? sendValues : {};
   const filled = writesOrigin && !resend ? new Set<string>() : carry.filled;
   const missing = missingRequiredFields(origin, counted, filled);
-  const { blocking, conditional } = splitByConditional(missing, fromStep);
+  // O autocompletar só vai quando o mover grava a etapa atual com o reenvio; sem ele, o
+  // obrigatório com autocompletar pendente segue bloqueando (nada o preencheria).
+  const { blocking, conditional, autoPending } = splitByConditional(missing, fromStep, resend ? carry : undefined);
   // Preenchido no cartão e fora do values (só com --allow-data-loss): motivo próprio. Mandado vazio = falta.
   const notResent = blocking.filter((field) => carry.filled.has(field.name) && !(field.name in counted));
   const empty = blocking.filter((field) => !notResent.includes(field));
@@ -436,7 +508,8 @@ export async function checkPayloadMove(
         flowId: payload.flowId,
         payloadMode: true,
         payloadSent: sentTitles(ctx, values),
-        conditional
+        conditional,
+        autoPending
       })
     );
   }
@@ -444,6 +517,7 @@ export async function checkPayloadMove(
   const warning = joinWarnings(
     notKept,
     empty.length === 0 ? conditionalRequiredWarning(origin, conditional) : undefined,
+    empty.length === 0 ? autoPendingWarning(origin, autoPending, carry) : undefined,
     checklist.warning
   );
   return { ...base, issues, ...(warning ? { warning } : {}) };

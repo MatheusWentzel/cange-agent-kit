@@ -25,17 +25,32 @@ import { isEmptyForField, isRichTextType } from "./requiredFields.js";
  * O `GET /card` não traz o rascunho: o kit via campo vazio que a tela mostra preenchido
  * (falso "Falta" no mover) e, pior, o mover apaga o rascunho (`/card/v2/move-step`) e o
  * que estava só nele sumia. Agora o que está no rascunho é contado e reenviado.
- * Resposta confirmada MAIS NOVA que o rascunho (caminho antigo) entra por cima, por
- * campo: o `PUT /form/answer` grava na resposta mais recente, e o valor gravado por
- * `card update-values` nela não pode sumir no mover.
+ *
+ * Rascunho x resposta confirmada mais nova (F1 da revisão, 07/10): decide por CAMPO e pela
+ * recência da LINHA (`form_answer_field.dt_last_update`, no empate o `id_form_answer_field`),
+ * não pelo `dt_created` do form_answer. O autosave da tela (`POST /form/pre-new-answer`)
+ * regrava as linhas do rascunho sem mudar o form_answer: um rascunho criado antes e editado
+ * depois da confirmada é o valor que a tela mostra (cartão 1107439: 18:30 no rascunho
+ * editado em 08/07 contra 18:00 na confirmada de 07/07). A confirmada só vence quando a
+ * linha dela é a mais nova, que é o caso do `card update-values` (o `PUT /form/answer`
+ * grava na resposta mais recente, e esse valor não pode sumir no mover).
+ *
+ * Autocompletar da tela (F2 da revisão): a tela preenche o campo SEM linha na pré-resposta
+ * com o autocompletar dele (`getAutoCompleteRule('answer')`) e manda esse valor no mover.
+ * O kit faz igual (`applyAutoComplete`): estático, data atual, criador do cartão e o valor
+ * de outro campo do cartão. O que o kit não calcula (usuário atual, campo de vínculo,
+ * opção pelo rótulo) vai para `autoPending` e o obrigatório vazio vira aviso.
  * Sem a rota (404) ou sem nada nela, vale o `GET /card` como antes.
  */
 
 /** De onde veio o que o cartão tem na etapa atual. */
 export type CarrySource = "rascunho" | "ultima-passagem" | "cartao";
 
+/** Regra do autocompletar que deu o valor (o que a tela faria no campo sem valor). */
+export type AutoFillRule = "estatico" | "data-atual" | "criador-do-cartao" | "campo-do-cartao";
+
 export interface CarryOverResult {
-  /** hash → valor remontado, pronto para o `values` do mover. */
+  /** hash → valor remontado, pronto para o `values` do mover (autocompletar incluído). */
   values: Record<string, unknown>;
   /** hashes preenchidos hoje no cartão (contam como presentes nos obrigatórios). */
   filled: Set<string>;
@@ -45,6 +60,12 @@ export interface CarryOverResult {
   source: CarrySource;
   /** Valor gravado em texto por campo (detector de perda de dados). */
   stored: Map<string, string>;
+  /** Campos com linha gravada na fonte, mesmo vazia (a tela não autocompleta esses). */
+  answered: Set<string>;
+  /** Campos sem valor que o autocompletar da tela preenche; o valor já está em `values`. */
+  autoFilled: Array<{ name: string; title?: string; rule: AutoFillRule }>;
+  /** Campos sem valor com autocompletar que o kit não calcula: obrigatório vazio vira aviso. */
+  autoPending: Array<{ name: string; title?: string; reason: string }>;
 }
 
 const MULTI_ID_TYPES = new Set(["COMBO_BOX_REGISTER_FIELD", "REGISTER_FIELD", "COMBO_BOX_FLOW_FIELD", "FLOW_FIELD"]);
@@ -84,10 +105,18 @@ const SINGLE_TEXT_TYPES = new Set([
 /** Origem do form_answer sintético que o back monta sem rascunho (BuildReturnStepAutocompleteService). */
 const SYNTHETIC_ORIGIN = "return-step-autocomplete";
 
+/** Recência de uma linha: [data da linha em ms, id_form_answer_field, ordem da resposta]. */
+type Recency = [number, number, number];
+
 interface StoredField {
   /** Valores da resposta que vence o campo, na ordem do `index`. */
   items: Array<{ index: number; value: string }>;
+  /** A linha mais nova do campo nesta resposta (campo de várias linhas: a maior). */
+  recency: Recency;
 }
+
+/** Como escolher, por campo, entre as respostas: a mais recente que traz o campo, ou a linha mais nova. */
+type MergeMode = "resposta" | "linha";
 
 /** Só o `GET /card` (respostas confirmadas): o mais recente vence por campo. */
 export function readCarryOver(cardRaw: unknown, formId: string, fields: NormalizedField[]): CarryOverResult {
@@ -106,11 +135,29 @@ export interface StepCarryOverInput {
 /** O que o cartão tem no formulário da etapa atual, pela mesma fonte da tela (ver o topo). */
 export function readStepCarryOver(input: StepCarryOverInput): CarryOverResult {
   const pre = preAnswerRecord(input.preAnswerRaw, input.formId);
-  if (!pre) return readCarryOver(input.cardRaw, input.formId, input.fields);
-  const synthetic = String(pre.origin ?? "") === SYNTHETIC_ORIGIN || firstDefined(pre.id_form_answer, pre.id) === undefined;
-  if (synthetic) return build([pre], input.fields, "ultima-passagem");
-  const newer = confirmedAnswers(input.cardRaw, input.formId).filter((answer) => isNewer(answer, pre));
-  return build([pre, ...newer], input.fields, "rascunho");
+  let result: CarryOverResult;
+  let draft: Record<string, unknown> | undefined;
+  if (!pre) {
+    result = readCarryOver(input.cardRaw, input.formId, input.fields);
+  } else if (String(pre.origin ?? "") === SYNTHETIC_ORIGIN || firstDefined(pre.id_form_answer, pre.id) === undefined) {
+    result = build([pre], input.fields, "ultima-passagem");
+  } else {
+    draft = pre;
+    // Só a confirmada mais nova que o rascunho disputa com ele (é nela que o PUT /form/answer
+    // grava quando o rascunho é mais antigo); a disputa é campo a campo, pela linha (F1).
+    const newer = confirmedAnswers(input.cardRaw, input.formId).filter((answer) => isNewer(answer, pre));
+    result = build([pre, ...newer], input.fields, "rascunho", "linha");
+  }
+  // A rota respondeu: os `fields` dela trazem o autocompletar de cada campo, como a tela usa.
+  if (input.preAnswerRaw !== undefined) {
+    applyAutoComplete(result, {
+      preFields: asRecord(input.preAnswerRaw)?.fields,
+      cardRaw: input.cardRaw,
+      fields: input.fields,
+      ...(draft ? { draft } : {})
+    });
+  }
+  return result;
 }
 
 /** `formsAnswers` da pré-resposta, quando é deste formulário e tem campo gravado. */
@@ -138,9 +185,27 @@ function confirmedAnswers(cardRaw: unknown, formId: string): Array<Record<string
     .sort(compareByRecencyAsc);
 }
 
-/** `answers` do mais antigo para o mais recente: o mais recente que traz o campo vence. */
-function build(answers: Array<Record<string, unknown>>, fields: NormalizedField[], source: CarrySource): CarryOverResult {
-  const result: CarryOverResult = { values: {}, filled: new Set(), notKept: [], source, stored: new Map() };
+/**
+ * `answers` do mais antigo para o mais recente. Modo `resposta`: a mais recente que traz o
+ * campo vence. Modo `linha` (rascunho x confirmadas): vence a resposta com a linha mais nova
+ * do campo (`dt_last_update`, depois `id_form_answer_field`, depois a ordem da resposta).
+ */
+function build(
+  answers: Array<Record<string, unknown>>,
+  fields: NormalizedField[],
+  source: CarrySource,
+  mode: MergeMode = "resposta"
+): CarryOverResult {
+  const result: CarryOverResult = {
+    values: {},
+    filled: new Set(),
+    notKept: [],
+    source,
+    stored: new Map(),
+    answered: new Set(),
+    autoFilled: [],
+    autoPending: []
+  };
 
   const byId = new Map<string, NormalizedField>();
   const byName = new Map<string, NormalizedField>();
@@ -150,7 +215,7 @@ function build(answers: Array<Record<string, unknown>>, fields: NormalizedField[
   }
 
   const stored = new Map<string, StoredField>();
-  for (const answer of answers) {
+  answers.forEach((answer, order) => {
     const perAnswer = new Map<string, StoredField>();
     for (const item of toArray(answer.form_answer_fields)) {
       const record = asRecord(item);
@@ -162,16 +227,22 @@ function build(answers: Array<Record<string, unknown>>, fields: NormalizedField[
         (typeof fieldRecord?.name === "string" ? byName.get(fieldRecord.name) : undefined);
       if (!field) continue;
       const value = asString(record.value);
-      const entry = perAnswer.get(field.name) ?? { items: [] };
+      const recency = lineRecency(record, answer, order);
+      const entry = perAnswer.get(field.name) ?? { items: [], recency };
+      if (compareRecency(recency, entry.recency) > 0) entry.recency = recency;
       if (value !== undefined && value.trim().length > 0) {
         entry.items.push({ index: Number(record.index ?? entry.items.length) || 0, value });
       }
       perAnswer.set(field.name, entry);
     }
-    for (const [name, entry] of perAnswer) stored.set(name, entry);
-  }
+    for (const [name, entry] of perAnswer) {
+      const current = stored.get(name);
+      if (mode === "resposta" || !current || compareRecency(entry.recency, current.recency) > 0) stored.set(name, entry);
+    }
+  });
 
   for (const [name, entry] of stored) {
+    result.answered.add(name);
     if (entry.items.length === 0) continue;
     const field = byName.get(name)!;
     const items = entry.items.sort((a, b) => a.index - b.index);
@@ -190,6 +261,186 @@ function build(answers: Array<Record<string, unknown>>, fields: NormalizedField[
     }
   }
   return result;
+}
+
+/** Data da linha (a da última edição, senão a de criação, senão a da resposta), o id e a ordem. */
+function lineRecency(record: Record<string, unknown>, answer: Record<string, unknown>, order: number): Recency {
+  const time = parseTime(record.dt_last_update) ?? parseTime(record.dt_created) ?? parseTime(answer.dt_created) ?? 0;
+  const id = Number(firstDefined(record.id_form_answer_field, record.id) ?? 0);
+  return [time, Number.isFinite(id) ? id : 0, order];
+}
+
+function compareRecency(a: Recency, b: Recency): number {
+  for (let index = 0; index < a.length; index += 1) {
+    if (a[index] !== b[index]) return a[index]! < b[index]! ? -1 : 1;
+  }
+  return 0;
+}
+
+function parseTime(value: unknown): number | undefined {
+  if (typeof value !== "string" || value.trim() === "") return undefined;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : undefined;
+}
+
+// ---------------------------------------------------------------------------
+// Autocompletar da tela (F2)
+// ---------------------------------------------------------------------------
+
+/** Destino lista de opções: a tela casa pelo RÓTULO do valor de origem; o kit não reproduz. */
+const OPTION_TYPES = new Set(["COMBO_BOX_FIELD", "RADIO_BOX_FIELD", "CHECK_BOX_FIELD", "CHECKBOX_FIELD"]);
+const DATE_TYPES = new Set(["DATE_PICKER_FIELD", "DUE_DATE_FIELD", "DATE_FIELD"]);
+
+interface AutoCompleteInput {
+  /** `fields` do `GET /form/pre-answer` (com `ac_type`, `ac_parent_field_id`, `auto_complete`). */
+  preFields: unknown;
+  cardRaw: unknown;
+  fields: NormalizedField[];
+  /** O rascunho da etapa (a tela também lê o campo de origem nele). */
+  draft?: Record<string, unknown>;
+}
+
+/**
+ * Igual ao `usePreAnswer` + `getAutoCompleteRule('answer')` da tela: campo do formulário sem
+ * linha no que o cartão tem recebe o valor do autocompletar dele, e esse valor vai no mover.
+ *  - `ac_type = 1` (estático): as linhas de `auto_complete.form_answer_fields`;
+ *  - `ac_type = 0` e `ac_parent_field_id`: `-1` data atual, `-3` criador do cartão, `> 0` o
+ *    valor desse campo no cartão (a resposta mais recente que o traz, rascunho incluído).
+ * Fica em `autoPending` (o kit não calcula): `-2` usuário atual (quem abre a tela), campo de
+ * vínculo (`ac_child_field_id`) e destino lista de opções (a tela casa pelo rótulo).
+ */
+function applyAutoComplete(result: CarryOverResult, input: AutoCompleteInput): void {
+  const preFields = toArray(input.preFields)
+    .map(asRecord)
+    .filter((record): record is Record<string, unknown> => record !== undefined);
+  if (preFields.length === 0) return;
+  const byId = new Map<string, Record<string, unknown>>();
+  const byName = new Map<string, Record<string, unknown>>();
+  for (const record of preFields) {
+    const id = firstDefined(record.id_field, record.id);
+    if (id !== undefined) byId.set(String(id), record);
+    if (typeof record.name === "string") byName.set(record.name, record);
+  }
+
+  for (const field of input.fields) {
+    if (result.answered.has(field.name) || field.name in result.values) continue;
+    const raw = (field.id !== undefined ? byId.get(String(field.id)) : undefined) ?? byName.get(field.name);
+    if (!raw) continue;
+    const title = field.title ? { title: field.title } : {};
+    const pending = (reason: string): void => {
+      result.autoPending.push({ name: field.name, ...title, reason });
+    };
+    const fill = (items: Array<{ index: number; value: string }>, rule: AutoFillRule): void => {
+      const rebuilt = rebuild(field, items);
+      if (rebuilt === undefined) return pending("tipo que o kit não remonta");
+      if (isEmptyForField(field, rebuilt)) return;
+      result.values[field.name] = rebuilt;
+      result.autoFilled.push({ name: field.name, ...title, rule });
+    };
+
+    const acType = toInteger(raw.ac_type);
+    if (acType === 1) {
+      const fieldId = firstDefined(raw.id_field, field.id);
+      const items = valueItems(
+        toArray(asRecord(raw.auto_complete)?.form_answer_fields).filter((item) => {
+          const row = asRecord(item);
+          const rowField = row ? firstDefined(row.field_id, row.id_field) : undefined;
+          return rowField === undefined || fieldId === undefined || String(rowField) === String(fieldId);
+        })
+      );
+      if (items.length > 0) fill(items, "estatico");
+      continue;
+    }
+    if (acType !== 0) continue;
+    const parent = toInteger(raw.ac_parent_field_id);
+    if (parent === undefined || parent === 0) continue;
+    if (parent === -1) {
+      fill([{ index: 0, value: new Date().toISOString() }], "data-atual");
+    } else if (parent === -3) {
+      const creator = toInteger(findCardRecord(input.cardRaw)?.user_id_creator);
+      if (creator !== undefined && creator > 0) fill([{ index: 0, value: String(creator) }], "criador-do-cartao");
+      else pending("criador do cartão");
+    } else if (parent === -2) {
+      pending("usuário atual");
+    } else if (parent > 0) {
+      if (toInteger(raw.ac_child_field_id) !== undefined) {
+        pending("campo de vínculo");
+      } else if (OPTION_TYPES.has(normalizeFieldType(field.type))) {
+        pending("opção pelo rótulo");
+      } else {
+        const items = parentFieldItems(input.cardRaw, input.draft, parent);
+        if (!items) continue;
+        if (DATE_TYPES.has(normalizeFieldType(field.type))) {
+          const iso = items.length === 1 ? toIsoDate(items[0]!.value) : undefined;
+          // A tela descarta a data que não consegue ler (o campo fica vazio).
+          if (iso) fill([{ index: 0, value: iso }], "campo-do-cartao");
+        } else {
+          fill(items, "campo-do-cartao");
+        }
+      }
+    }
+  }
+}
+
+/** Linhas não excluídas com valor, na ordem do `index`. */
+function valueItems(rows: unknown[]): Array<{ index: number; value: string }> {
+  const items: Array<{ index: number; value: string }> = [];
+  for (const item of rows) {
+    const row = asRecord(item);
+    if (!row || isDeleted(row)) continue;
+    const value = asString(row.value);
+    if (value === undefined || value.trim().length === 0) continue;
+    items.push({ index: Number(row.index ?? items.length) || 0, value });
+  }
+  return items.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * Valor do campo de origem no cartão, como o `POST /form/answers/by-cards` da tela: a
+ * resposta mais recente (`dt_created`) que traz o campo, rascunho da etapa incluído.
+ */
+function parentFieldItems(
+  cardRaw: unknown,
+  draft: Record<string, unknown> | undefined,
+  parentId: number
+): Array<{ index: number; value: string }> | undefined {
+  const card = findCardRecord(cardRaw);
+  const answers = toArray(card?.form_answers)
+    .map(asRecord)
+    .filter((answer): answer is Record<string, unknown> => answer !== undefined && !isDeleted(answer));
+  if (draft) answers.push(draft);
+  let best: { answer: Record<string, unknown>; rows: unknown[] } | undefined;
+  for (const answer of answers) {
+    const rows = toArray(answer.form_answer_fields).filter((item) => {
+      const row = asRecord(item);
+      if (!row || isDeleted(row)) return false;
+      const fieldRecord = asRecord(row.field);
+      return String(firstDefined(row.field_id, row.id_field, fieldRecord?.id_field) ?? "") === String(parentId);
+    });
+    if (rows.length === 0) continue;
+    if (!best || compareByRecencyAsc(answer, best.answer) > 0) best = { answer, rows };
+  }
+  if (!best) return undefined;
+  const items = valueItems(best.rows);
+  return items.length > 0 ? items : undefined;
+}
+
+/** Data em ISO, como o `sanitizeAutoCompleteDateValue` da tela (ISO ou dd/MM/yyyy). */
+function toIsoDate(value: string): string | undefined {
+  const text = value.trim();
+  const br = /^(\d{2})\/(\d{2})\/(\d{4})/.exec(text);
+  if (br) {
+    const date = new Date(Date.UTC(Number(br[3]), Number(br[2]) - 1, Number(br[1])));
+    return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
+  }
+  const time = Date.parse(text);
+  return Number.isFinite(time) ? new Date(time).toISOString() : undefined;
+}
+
+function toInteger(value: unknown): number | undefined {
+  if (value === undefined || value === null || value === "") return undefined;
+  const n = Number(value);
+  return Number.isInteger(n) ? n : undefined;
 }
 
 function rebuild(field: NormalizedField, items: Array<{ index: number; value: string }>): unknown {

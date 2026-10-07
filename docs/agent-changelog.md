@@ -11,8 +11,22 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   resposta mais recente). O `POST /card/v2/move-step` apaga o rascunho, e o que estava só nele sumia; e o mover cobrava
   "Falta" de campo que a tela mostra preenchido (cerca de 9,8 mil cartões ativos no `cange_local`). Agora a fonte é a da
   tela, `GET /form/pre-answer?card_id=&id_form=<form da etapa atual>` (rascunho, ou a última passagem confirmada), e
-  tudo isso é reenviado no mover. Resposta confirmada mais nova que o rascunho entra por cima. Back sem a rota (404):
-  `GET /card` como antes; outra falha da rota: não move.
+  tudo isso é reenviado no mover. Back sem a rota (404): `GET /card` como antes; outra falha da rota: não move.
+- **Rascunho x resposta confirmada mais nova, por campo e pela LINHA** (revisão F1): vence a linha mais nova do campo
+  (`form_answer_field.dt_last_update`, no empate o id da linha; campo de várias linhas: a maior entre elas), não a data
+  do form_answer. O autosave da tela regrava as linhas do rascunho sem mudar o form_answer, e o kit gravava a confirmada
+  antiga por cima do que a pessoa editou depois (cartão 1107439: 18:00 no lugar do 18:30; 39 cartões ativos e 78 campos
+  no `cange_local`). A confirmada só vence quando a linha dela é a mais nova, que é o `card update-values` gravando na
+  resposta mais recente.
+- **Autocompletar da tela** (revisão F2): campo sem linha na pré-resposta recebe o valor do autocompletar dele, como a
+  tela, e esse valor conta no obrigatório e vai no mover. O kit calcula o estático (`ac_type = 1`), a data atual, o
+  criador do cartão e o valor de outro campo do cartão (a resposta mais recente que o traz; data em ISO). Acabou o falso
+  "Falta" em cerca de 10,8 mil cartões (ex.: Prioridade "Média" no cartão 1120391). Saída nova: `autocompleted` (títulos).
+  **Pendência:** o kit NÃO calcula o autocompletar de usuário atual (`-2`), de campo de vínculo (`ac_child_field_id`) e
+  com destino lista de opções (a tela casa pelo rótulo). Obrigatório vazio com um desses não bloqueia: volta em `warning`
+  (como o da condicional); mande o valor com `--set` no mover.
+- `card move-step` (deprecado) aceita `--allow-data-loss` (revisão F3): a mensagem de bloqueio do rascunho sugeria a
+  flag e o comando a recusava.
 - `card move-step-with-values --payload` (e `card move-step`) que grava a etapa atual reenvia o que o cartão tem nela,
   com o `values` por cima (antes bloqueava pedindo para o agente incluir). `--allow-data-loss` desliga o reenvio.
   Payload que grava OUTRO formulário com rascunho só na etapa atual: bloqueia (use `card move` ou `--allow-data-loss`).

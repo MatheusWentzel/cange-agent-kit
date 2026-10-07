@@ -13,6 +13,7 @@ import { authOnce, throwIfInvalid, validationSummary } from "../write-support.js
 interface CardMoveStepOptions {
   payload: string;
   validateFields?: boolean;
+  allowDataLoss?: boolean;
   dryRun?: boolean;
 }
 
@@ -22,6 +23,10 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
     .description("MUTAÇÃO (DEPRECATED): use `card move-step-with-values`")
     .requiredOption("--payload <path>", "Caminho do JSON de payload")
     .option("--validate-fields", "Valida values contra fields do idForm (os obrigatórios da etapa atual são sempre exigidos)")
+    .option(
+      "--allow-data-loss",
+      "Perda de dados intencional: não reenvia o que o cartão já tem na etapa atual e aceita perder o rascunho dela"
+    )
     .option("--dry-run", "Exibe payload sem executar a mutação")
     .action(
       createCommandAction(async ({ kit, ensureAuth }, options: CardMoveStepOptions) => {
@@ -43,7 +48,12 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
 
         // Decisão 1 (06/10): o alias também exige os obrigatórios da etapa ATUAL do cartão,
         // sempre (lê fluxo e cartão, inclusive em --dry-run).
-        const check = await checkPayloadMove(kit, payload);
+        // F3 (revisão 07/10): o bloqueio do rascunho manda repetir com --allow-data-loss; o
+        // alias aceita a flag, com o mesmo efeito do move-step-with-values.
+        const check = await checkPayloadMove(kit, payload, payload.values, undefined, {
+          resend: options.allowDataLoss !== true,
+          allowDataLoss: options.allowDataLoss === true
+        });
         // EXTRA-06 D1: gravando a etapa atual, reenvia o que o cartão tem nela (o rascunho da tela).
         payload.values = check.values;
 

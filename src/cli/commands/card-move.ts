@@ -6,7 +6,7 @@ import { valuesOf, type FormScope, type ValueIssue } from "../../utils/valueReso
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { EXIT_CODES } from "../exit-codes.js";
-import { notKeptWarning, originRequired, readOriginCarry } from "../move-required.js";
+import { autocompletedTitles, keptFields, notKeptWarning, originRequired, readOriginCarry } from "../move-required.js";
 import {
   addInlineValueOptions,
   authOnce,
@@ -89,7 +89,7 @@ export function registerCardMoveCommand(cardCommand: Command): void {
   annotateCommand(command, {
     mutates: true,
     envelope:
-      "{ ok, cardId, flowId, fromStepId, toStepId, written[], kept, keptFrom?, summary, warning? }. --dry-run: { dryRun, executed:false, calls[{call, action, form, payload}], kept, keptFrom, validation }. keptFrom: rascunho (pré-resposta da etapa, o que a tela mostra) | ultima-passagem | cartao",
+      "{ ok, cardId, flowId, fromStepId, toStepId, written[], kept, keptFrom?, autocompleted?, summary, warning? }. --dry-run: { dryRun, executed:false, calls[{call, action, form, payload}], kept, keptFrom, autocompleted?, validation }. keptFrom: rascunho (pré-resposta da etapa, o que a tela mostra) | ultima-passagem | cartao. autocompleted: campos vazios que o autocompletar da tela preenche (o mover leva o valor)",
     fieldsLocation:
       "Origem = etapa atual do cartão. Mover exige os obrigatórios da etapa atual (faltou = exit 2 com o comando pronto); peça ao usuário o que não estiver no pedido. Campo pelo título, id ou hash, de qualquer um dos 3 formulários (etapa atual, destino, inicial). Mesma etapa = use card update-values.",
     example: 'card move --card-id 1234 --to "Agendamento" --set "Data da ligação=06/10/2026" --set "Valor do Negócio=2.500,00"'
@@ -157,7 +157,7 @@ export async function runInlineMove(
     toStep,
     origin,
     values: moveValues,
-    ...(carry ? { filled: carry.filled } : {}),
+    ...(carry ? { filled: carry.filled, carry } : {}),
     cardId,
     ...(options.flowId !== undefined ? { flowId: options.flowId } : {}),
     repeatSent: inline !== undefined && Object.keys(inline).length > 0
@@ -221,6 +221,10 @@ export async function runInlineMove(
     ...(required.warning ? [required.warning] : [])
   ];
   const warning = warnings.length > 0 ? warnings.join(" ") : undefined;
+  const kept = keptFields(carry, originValues).length;
+  // F2: o que o autocompletar da tela preencheu e vai no mover (fora o que veio no --set).
+  const autocompleted = autocompletedTitles(carry, originValues);
+  const autoInfo = autocompleted.length > 0 ? { autocompleted } : {};
 
   if (options.dryRun) {
     const validation = validationSummary(allIssues);
@@ -231,8 +235,9 @@ export async function runInlineMove(
         from: { stepId: Number(fromStep.id), name: fromStep.name },
         to: { stepId: Number(toStep.id), name: toStep.name },
         calls,
-        kept: Object.keys(carry?.values ?? {}).filter((name) => !(name in originValues)).length,
+        kept,
         ...(carry ? { keptFrom: carry.source } : {}),
+        ...autoInfo,
         validation,
         ...(warning ? { warning } : {})
       },
@@ -269,7 +274,6 @@ export async function runInlineMove(
   }
 
   const written = resolved.map((item) => item.field.title ?? item.field.name);
-  const kept = Object.keys(carry?.values ?? {}).filter((name) => !(name in originValues)).length;
   return {
     ok: true,
     cardId: Number(cardId),
@@ -279,6 +283,7 @@ export async function runInlineMove(
     written,
     kept,
     ...(carry && kept > 0 ? { keptFrom: carry.source } : {}),
+    ...autoInfo,
     summary:
       `Cartão ${cardId} movido de ${fromStep.name ?? fromStep.id} para ${toStep.name ?? toStep.id}` +
       (written.length > 0 ? `; gravou ${fieldTitles(resolved)}.` : "."),
