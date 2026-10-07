@@ -6,6 +6,9 @@ import {
   validateValueByFieldType,
   type OptionDescriptor
 } from "./fieldTypeGuards.js";
+import { isEmptyForField, isRequiredOnScreen } from "./requiredFields.js";
+
+export { isHiddenOnForm } from "./requiredFields.js";
 
 /**
  * P4 (05/10, card #1367455): resolvedor ÚNICO de valores de escrita.
@@ -782,20 +785,11 @@ function checkCoercedValue(field: NormalizedField, value: unknown): ValueIssue |
 }
 
 /**
- * Campo oculto no formulário (`show_on_form = "S"`, vem no raw do GET /field/by-flow).
- * A tela nunca cobra: o FormBuilder (activeHiddenFields, ligado no cartão, na criação e no
- * formulário público) zera `required` e `validations` desse campo antes de validar.
- * Costuma ser preenchido por automação.
- */
-export function isHiddenOnForm(field: NormalizedField): boolean {
-  const flag = field.raw?.show_on_form ?? field.raw?.showOnForm;
-  return typeof flag === "string" && flag.trim().toUpperCase() === "S";
-}
-
-/**
  * Obrigatórios do formulário ainda vazios depois desta escrita. `alreadyFilled`
- * são os hashes que o cartão já tem preenchidos (contam como presentes). Campo oculto
- * no formulário não conta como obrigatório (igual à tela).
+ * são os hashes que o cartão já tem preenchidos (contam como presentes). Só entra o
+ * que a TELA cobra (`isRequiredOnScreen`: regra `required` do campo, visível no
+ * formulário) e vazio é o vazio da tela (`isEmptyForField`: rich text `<p></p>` é vazio,
+ * switch desligado não é).
  */
 export function missingRequiredFields(
   form: FormScope,
@@ -803,8 +797,8 @@ export function missingRequiredFields(
   alreadyFilled: ReadonlySet<string> = new Set()
 ): NormalizedField[] {
   return form.fields.filter((field) => {
-    if (!field.required || isHiddenOnForm(field)) return false;
-    const present = field.name in values ? !isMissingValue(values[field.name]) : alreadyFilled.has(field.name);
+    if (!isRequiredOnScreen(field)) return false;
+    const present = field.name in values ? !isEmptyForField(field, values[field.name]) : alreadyFilled.has(field.name);
     return !present;
   });
 }
@@ -821,13 +815,6 @@ export function findMissingRequired(
   alreadyFilled: ReadonlySet<string> = new Set()
 ): ValueIssue[] {
   return missingRequiredFields(form, values, alreadyFilled).map((field) => missingRequiredIssue(form, field));
-}
-
-function isMissingValue(value: unknown): boolean {
-  if (value === undefined || value === null) return true;
-  if (typeof value === "string") return value.trim().length === 0;
-  if (Array.isArray(value)) return value.length === 0;
-  return false;
 }
 
 /**

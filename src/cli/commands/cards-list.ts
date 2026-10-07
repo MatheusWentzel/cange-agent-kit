@@ -1,7 +1,7 @@
 import type { Command } from "commander";
 
 import { CangeCliUsageError } from "../../client/errors.js";
-import { parseV1Cursor, type FlowQueryEngineChoice } from "../../contracts/flowCards.js";
+import { readV1Page, type FlowQueryEngineChoice } from "../../contracts/flowCards.js";
 import { extractFlowSteps } from "../../contracts/payload-builder.js";
 import type { CardSummary } from "../../contracts/types.js";
 import type { CangeAgentKit } from "../../index.js";
@@ -107,47 +107,34 @@ export function registerCardsListCommand(cardCommand: Command): void {
         const forceLegacyV1 = usesV1Enrichment && engine !== "v2" && !options.viewId && !search;
 
         if (forceLegacyV1) {
-          const result = await kit.contracts.listCardsByFlow({
+          // EXE-K3: segue o cursor do fluxo grande (antes parava nos 150 da 1ª página).
+          const page = await readV1Page(kit.contracts, {
             flowId: options.flowId,
-            isArchived,
-            isWithPreAnswer: withPreAnswer,
-            isWithTimeTracking: withTimeTracking,
-            isTestModel: testModel
+            ...(isArchived !== undefined ? { isArchived } : {}),
+            ...(withPreAnswer !== undefined ? { isWithPreAnswer: withPreAnswer } : {}),
+            ...(withTimeTracking !== undefined ? { isWithTimeTracking: withTimeTracking } : {}),
+            ...(testModel !== undefined ? { isTestModel: testModel } : {}),
+            ...(options.stepId ? { flowStepId: options.stepId } : {}),
+            ...(limit !== undefined ? { limit } : {}),
+            ...(lean && options.cursor !== undefined ? { cursor: options.cursor } : {})
           });
-
-          let summaries = result.summaries;
-          if (options.stepId) {
-            summaries = summaries.filter(
-              (item) => String(item.currentStepId ?? item.step_id ?? "") === options.stepId
-            );
-          }
-          const matched = summaries.length;
-          const offset = lean ? parseV1Cursor(options.cursor) : 0;
-          if (offset > 0) {
-            summaries = summaries.slice(offset);
-          }
-          let nextCursor: string | undefined;
-          if (limit !== undefined) {
-            if (summaries.length > limit) nextCursor = String(offset + limit);
-            summaries = summaries.slice(0, limit);
-          }
 
           if (lean) {
             return listOutput(
               dropEmpty({
                 engine: "v1",
                 flowId: Number(options.flowId),
-                total: summaries.length,
-                totalCount: matched,
+                total: page.summaries.length,
+                totalCount: page.totalCount,
                 // K5: igual ao V2, o V1 diz que há mais além do `next`.
-                truncated: nextCursor !== undefined || result.truncated === true,
-                next: nextCursor ? nextPageCommand(options, nextCursor, "v1") : undefined,
-                summaries: await leanCardSummaries(kit, options.flowId, summaries)
+                truncated: page.truncated,
+                next: page.nextCursor ? nextPageCommand(options, page.nextCursor, "v1") : undefined,
+                summaries: await leanCardSummaries(kit, options.flowId, page.summaries)
               }),
               "summaries"
             );
           }
-          return { engine: "v1", raw: result.raw, summaries, total: summaries.length };
+          return { engine: "v1", raw: page.raw, summaries: page.summaries, total: page.summaries.length, truncated: page.truncated };
         }
 
         const result = await kit.contracts.fetchFlowCards({

@@ -164,36 +164,16 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
   }
 
   async function fetchViaV1(input: FetchFlowCardsInput): Promise<FetchFlowCardsResult> {
-    const result = await cards.listCardsByFlow({
-      flowId: input.flowId,
-      isArchived: input.isArchived
-    });
-    let summaries = result.summaries;
-    if (input.flowStepId !== undefined) {
-      const step = String(input.flowStepId);
-      summaries = summaries.filter((item) => String(item.currentStepId ?? item.step_id ?? "") === step);
-    }
-    // C4: no V1 a lista vem inteira; o cursor é o deslocamento nela.
-    const offset = parseV1Cursor(input.cursor);
-    const totalCount = summaries.length;
-    let nextCursor: string | undefined;
-    if (offset > 0) {
-      summaries = summaries.slice(offset);
-    }
-    if (input.limit !== undefined) {
-      if (summaries.length > input.limit) nextCursor = String(offset + input.limit);
-      summaries = summaries.slice(0, input.limit);
-    }
+    const page = await readV1Page(cards, input);
     return {
       engine: "v1",
       requestedEngine: input.engine ?? "auto",
       fellBackToV1: false,
-      summaries,
-      total: summaries.length,
-      // K5: o V1 também avisa que há mais (página do limit ou fluxo grande no back).
-      truncated: nextCursor !== undefined || result.truncated === true,
-      ...(input.paginate ? { totalCount } : {}),
-      ...(input.paginate && nextCursor !== undefined ? { nextCursor } : {})
+      summaries: page.summaries,
+      total: page.summaries.length,
+      truncated: page.truncated,
+      ...(input.paginate && page.totalCount !== undefined ? { totalCount: page.totalCount } : {}),
+      ...(input.paginate && page.nextCursor !== undefined ? { nextCursor: page.nextCursor } : {})
     };
   }
 
@@ -220,6 +200,70 @@ export function createFlowCardsContracts(deps: FlowCardsDeps): FlowCardsContract
   }
 
   return { resolveQueryEngine, fetchFlowCards };
+}
+
+export interface V1PageInput {
+  flowId: number | string;
+  flowStepId?: number | string;
+  isArchived?: boolean;
+  isTestModel?: boolean;
+  isWithPreAnswer?: boolean;
+  isWithTimeTracking?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
+export interface V1Page {
+  summaries: CardSummary[];
+  /** Cartões que casam (etapa) no fluxo, quando dá para saber. */
+  totalCount?: number;
+  nextCursor?: string;
+  /** Há mais além desta página (o `next`) ou a leitura parou no teto/cursor vencido. */
+  truncated: boolean;
+  /** 1ª resposta do back (no fluxo grande, com todos os cartões lidos). */
+  raw: unknown;
+}
+
+/**
+ * Página do V1 (`GET /card/by-flow`). O cursor do kit é o deslocamento na lista. EXE-K3:
+ * no fluxo grande o back pagina (150 por vez, `cursorKey` + `offset`); a leitura segue o
+ * cursor até ter deslocamento + limite + 1 cartões (o +1 diz se há página seguinte) ou o
+ * fim. Antes a lista parava nos 150 da 1ª página e o `next` sumia no 150º cartão.
+ */
+export async function readV1Page(
+  cards: Pick<CardsContracts, "listAllCardsByFlow">,
+  input: V1PageInput
+): Promise<V1Page> {
+  const offset = parseV1Cursor(input.cursor);
+  const step = input.flowStepId !== undefined ? String(input.flowStepId) : undefined;
+  const result = await cards.listAllCardsByFlow({
+    flowId: input.flowId,
+    ...(input.isArchived !== undefined ? { isArchived: input.isArchived } : {}),
+    ...(input.isTestModel !== undefined ? { isTestModel: input.isTestModel } : {}),
+    ...(input.isWithPreAnswer !== undefined ? { isWithPreAnswer: input.isWithPreAnswer } : {}),
+    ...(input.isWithTimeTracking !== undefined ? { isWithTimeTracking: input.isWithTimeTracking } : {}),
+    ...(input.limit !== undefined ? { need: offset + input.limit + 1 } : {}),
+    ...(step !== undefined
+      ? { accept: (summary: CardSummary) => String(summary.currentStepId ?? summary.step_id ?? "") === step }
+      : {})
+  });
+  const matched = result.summaries.length;
+  // Lista inteira: o total é o que casou. Parcial: sem filtro de etapa, o total do back.
+  const totalCount = result.complete ? matched : step === undefined ? result.totalIds : undefined;
+  let summaries = offset > 0 ? result.summaries.slice(offset) : result.summaries;
+  let nextCursor: string | undefined;
+  if (input.limit !== undefined) {
+    if (summaries.length > input.limit) nextCursor = String(offset + input.limit);
+    summaries = summaries.slice(0, input.limit);
+  }
+  return {
+    summaries,
+    ...(totalCount !== undefined ? { totalCount } : {}),
+    ...(nextCursor !== undefined ? { nextCursor } : {}),
+    // K5: há mais além do `next`; fluxo grande lido pela metade (teto ou cursor vencido) também.
+    truncated: nextCursor !== undefined || !result.complete,
+    raw: result.raw
+  };
 }
 
 /** K2: cursor do V1 é o deslocamento na lista (número). Outro texto é cursor de outro motor. */

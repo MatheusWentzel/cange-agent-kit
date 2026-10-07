@@ -376,20 +376,36 @@ describe("move-step-with-values --payload: obrigatórios da etapa atual do cart�
     expect(writes()[0]?.body?.values).toMatchObject({ h_horas: 2, h_qualif: "1" });
   });
 
-  it("obrigatório preenchido no cartão mas fora do values: o mover esvaziaria, então bloqueia com o motivo", async () => {
+  it("obrigatório preenchido no cartão e fora do values: o kit reenvia o que o cartão tem (como a tela) e move", async () => {
+    card = cardIn(1, [
+      { id_form_answer: 702, form_id: 901, form_answer_fields: [{ field_id: 30, value: "4" }, { field_id: 32, value: "1" }] }
+    ]);
+    const file = await payloadFile({
+      flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: { h_qualif: "2" }
+    });
+    const out = await run(["card", "move-step-with-values", "--payload", file]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(writes()).toHaveLength(1);
+    // O do payload vence; o resto vem do cartão (Observação e Horas).
+    expect(writes()[0]?.body?.values).toEqual({ h_obs: "cliente quente", h_horas: 4, h_qualif: "2" });
+    expect(out).toMatchObject({ kept: 2, keptFrom: "cartao" });
+  });
+
+  it("--allow-data-loss: não reenvia; obrigatório preenchido fora do values bloqueia com o motivo", async () => {
     card = cardIn(1, [
       { id_form_answer: 702, form_id: 901, form_answer_fields: [{ field_id: 30, value: "4" }, { field_id: 32, value: "1" }] }
     ]);
     const file = await payloadFile({
       flowId: 316, cardId: 55, fromStepId: 1, toStepId: 2, idForm: 901, values: { h_qualif: "1" }
     });
-    await run(["card", "move-step-with-values", "--payload", file]);
+    await run(["card", "move-step-with-values", "--payload", file, "--allow-data-loss"]);
 
     expect(process.exitCode).toBe(EXIT_CODES.USAGE);
     expect(writes()).toEqual([]);
     const message = errorMessage();
     expect(message).toContain("Horas está preenchido no cartão mas não veio no values");
-    expect(message).toContain("`cange card move`, que reenvia o que o cartão já tem");
+    expect(message).toContain("sem --allow-data-loss o kit reenvia o que o cartão já tem");
     expect(message).not.toContain("Falta para");
   });
 

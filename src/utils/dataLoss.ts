@@ -2,6 +2,8 @@ import type { CangeAgentKit } from "../index.js";
 import type { NormalizedField } from "../schemas/fields.js";
 import { asRecord } from "../contracts/raw-adapters.js";
 
+import type { CarryOverResult } from "./carryOver.js";
+
 /**
  * Detecção de perda de dados em move-step (read-before-write).
  *
@@ -120,6 +122,35 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
       note: `Não foi possível verificar perda de dados (segue sem bloquear): ${message}`
     };
   }
+}
+
+/**
+ * EXTRA-06 D1: o mover grava a etapa atual e o kit já reenvia o que o cartão tem nela
+ * (fonte da tela: rascunho ou última passagem). Órfão é o preenchido que ficou fora do
+ * `values` (tipo que o kit não remonta, como anexo, fórmula e ID automático).
+ */
+export function dataLossFromCarry(
+  carry: CarryOverResult,
+  values: Record<string, unknown>,
+  fields: NormalizedField[] | undefined,
+  formId: string | number
+): DataLossCheck {
+  const titles = new Map((fields ?? []).map((field) => [field.name, field.title]));
+  const orphans: OrphanField[] = [];
+  for (const name of carry.filled) {
+    if (name in values) continue;
+    const title = titles.get(name);
+    orphans.push({ fieldName: name, ...(title ? { fieldTitle: title } : {}), currentValue: carry.stored.get(name) ?? "" });
+  }
+  return {
+    checked: true,
+    orphans,
+    note:
+      orphans.length > 0
+        ? `O card tem ${orphans.length} campo(s) preenchido(s) no form ${formId} que o kit não consegue reenviar. ` +
+          "O move criará um snapshot SEM eles (perda de dados). Inclua-os no values ou confirme a perda com --allow-data-loss."
+        : "Nenhum campo preenchido seria perdido pelo move."
+  };
 }
 
 /**

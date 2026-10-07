@@ -4,7 +4,7 @@ import { CangeCliUsageError, CangeError } from "../../client/errors.js";
 import { isQueryEngineFailure } from "../../contracts/flowCards.js";
 import type { FlowAggregationItem } from "../../contracts/flowQuery.js";
 import { extractFlowSteps } from "../../contracts/payload-builder.js";
-import { asRecord, extractArray, extractCardsByFlow } from "../../contracts/raw-adapters.js";
+import { asRecord, extractArray } from "../../contracts/raw-adapters.js";
 import type { CangeAgentKit } from "../../index.js";
 import type { NormalizedField } from "../../schemas/fields.js";
 import { dropEmpty } from "../../utils/lean.js";
@@ -375,11 +375,12 @@ function rowFromV2Item(item: unknown): CardRow {
 }
 
 async function readRowsV1(kit: CangeAgentKit, flowId: string): Promise<{ rows: CardRow[]; truncated: boolean }> {
-  const result = await kit.contracts.listCardsByFlow({ flowId, isArchived: false });
-  // K3: fluxo grande no /card/by-flow vem só com a 1ª página; o `truncated` sai real.
-  const { cards, truncated } = extractCardsByFlow(result.raw);
+  // EXE-K1: fluxo grande no /card/by-flow vem em páginas de 150; segue o cursorKey + offset
+  // do back até o total (teto de 20 mil). `truncated` só quando a leitura parou antes do fim.
+  const result = await kit.contracts.listAllCardsByFlow({ flowId, isArchived: false, maxCards: PAGE_SIZE * MAX_PAGES });
+  const truncated = !result.complete;
   const rows: CardRow[] = [];
-  for (const item of cards) {
+  for (const item of result.cards) {
     const card = asRecord(item);
     if (!card) continue;
     if (card.archived === true || card.archived === "S" || card.deleted === "S") continue;

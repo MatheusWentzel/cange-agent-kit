@@ -2,12 +2,11 @@ import type { Command } from "commander";
 
 import { CangeCliUsageError, CangeError, CangeValidationError } from "../../client/errors.js";
 import type { CangeAgentKit } from "../../index.js";
-import { readCarryOver } from "../../utils/carryOver.js";
 import { valuesOf, type FormScope, type ValueIssue } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { EXIT_CODES } from "../exit-codes.js";
-import { originRequired } from "../move-required.js";
+import { notKeptWarning, originRequired, readOriginCarry } from "../move-required.js";
 import {
   addInlineValueOptions,
   authOnce,
@@ -90,7 +89,7 @@ export function registerCardMoveCommand(cardCommand: Command): void {
   annotateCommand(command, {
     mutates: true,
     envelope:
-      "{ ok, cardId, flowId, fromStepId, toStepId, written[], kept, summary, warning? }. --dry-run: { dryRun, executed:false, calls[{call, action, form, payload}], validation }",
+      "{ ok, cardId, flowId, fromStepId, toStepId, written[], kept, keptFrom?, summary, warning? }. --dry-run: { dryRun, executed:false, calls[{call, action, form, payload}], kept, keptFrom, validation }. keptFrom: rascunho (pré-resposta da etapa, o que a tela mostra) | ultima-passagem | cartao",
     fieldsLocation:
       "Origem = etapa atual do cartão. Mover exige os obrigatórios da etapa atual (faltou = exit 2 com o comando pronto); peça ao usuário o que não estiver no pedido. Campo pelo título, id ou hash, de qualquer um dos 3 formulários (etapa atual, destino, inicial). Mesma etapa = use card update-values.",
     example: 'card move --card-id 1234 --to "Agendamento" --set "Data da ligação=06/10/2026" --set "Valor do Negócio=2.500,00"'
@@ -145,7 +144,8 @@ export async function runInlineMove(
   });
 
   // Campos que o cartão já tem na etapa atual: reenviados no mover (a tela faz igual).
-  const carry = origin ? readCarryOver(card.raw, origin.formId, origin.fields) : undefined;
+  // EXTRA-06 D1: a fonte é a da tela (rascunho da etapa ou última passagem), não o GET /card.
+  const carry = origin ? await readOriginCarry(kit, card.raw, origin, cardId) : undefined;
   const originValues = origin ? valuesOf(resolved, origin.formId) : {};
   const moveValues = { ...(carry?.values ?? {}), ...originValues };
 
@@ -214,10 +214,9 @@ export async function runInlineMove(
     });
   }
 
+  const notKeptText = notKeptWarning(fromStep, carry);
   const warnings = [
-    ...(notKept.length > 0
-      ? [`Não reenviados (ficam vazios na ${stepLabel(fromStep)}): ${notKept.map((item) => item.title ?? item.name).join(", ")}.`]
-      : []),
+    ...(notKeptText ? [notKeptText] : []),
     // Obrigatório com condicional vazio não bloqueia (o kit não avalia a condicional): avisa.
     ...(required.warning ? [required.warning] : [])
   ];
@@ -233,6 +232,7 @@ export async function runInlineMove(
         to: { stepId: Number(toStep.id), name: toStep.name },
         calls,
         kept: Object.keys(carry?.values ?? {}).filter((name) => !(name in originValues)).length,
+        ...(carry ? { keptFrom: carry.source } : {}),
         validation,
         ...(warning ? { warning } : {})
       },
@@ -278,6 +278,7 @@ export async function runInlineMove(
     toStepId: Number(toStep.id),
     written,
     kept,
+    ...(carry && kept > 0 ? { keptFrom: carry.source } : {}),
     summary:
       `Cartão ${cardId} movido de ${fromStep.name ?? fromStep.id} para ${toStep.name ?? toStep.id}` +
       (written.length > 0 ? `; gravou ${fieldTitles(resolved)}.` : "."),

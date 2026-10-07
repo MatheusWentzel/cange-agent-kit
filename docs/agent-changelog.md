@@ -2,6 +2,37 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-10-07
+
+### Mover igual à tela: rascunho da etapa, obrigatório da tela e check list (E2E do lote, EXTRA-06)
+
+- **P0, perda de dado:** o kit decidia o que o cartão tem pelo `GET /card`, que não traz o rascunho da etapa
+  (form_answer com `flow_step_id` NULL: autosave da tela, automações, e o `card update-values` quando o rascunho é a
+  resposta mais recente). O `POST /card/v2/move-step` apaga o rascunho, e o que estava só nele sumia; e o mover cobrava
+  "Falta" de campo que a tela mostra preenchido (cerca de 9,8 mil cartões ativos no `cange_local`). Agora a fonte é a da
+  tela, `GET /form/pre-answer?card_id=&id_form=<form da etapa atual>` (rascunho, ou a última passagem confirmada), e
+  tudo isso é reenviado no mover. Resposta confirmada mais nova que o rascunho entra por cima. Back sem a rota (404):
+  `GET /card` como antes; outra falha da rota: não move.
+- `card move-step-with-values --payload` (e `card move-step`) que grava a etapa atual reenvia o que o cartão tem nela,
+  com o `values` por cima (antes bloqueava pedindo para o agente incluir). `--allow-data-loss` desliga o reenvio.
+  Payload que grava OUTRO formulário com rascunho só na etapa atual: bloqueia (use `card move` ou `--allow-data-loss`).
+- Saída do mover: `kept` e `keptFrom` (`rascunho` | `ultima-passagem` | `cartao`).
+- **Obrigatório = o que a tela cobra:** regra `required` do campo (`validations` do `GET /field/by-flow`), não a coluna
+  `required`. Switch nunca é cobrado (92 de 92 sem regra), check list sem regra também não (32 de 190), e campo com
+  regra e coluna 0 passa a ser cobrado. Sem a lista `validations` (back antigo), vale a coluna. Vale no mover, no
+  `card create --validate-fields` e no `--validate-fields` do `card move-step`.
+- **Rich text vazio:** `<p></p>`, `<p><br></p>` e HTML sem texto contam como vazio (imagem e tabela contam como conteúdo).
+- **Check list "exigir todos concluídos"** (`formula = '1'`): item sem marcar bloqueia o mover, como a tela. O check list
+  e a lista de itens agora são reenviados no mover (antes ficavam vazios no snapshot novo).
+
+### `cards count/sum` e `card list` no V1 com fluxo grande seguem o cursor (EXE-K1, EXE-K3)
+
+- Fluxo V1 com `isLargeData = 'S'`: o `GET /card/by-flow` manda 150 por vez com `cursorKey`. O kit parava na 1ª página
+  (`cards count` deu 150 num fluxo de 1815; `card list --engine v1` nunca mostrava o 151º). Agora segue `cursorKey` +
+  `offset` até o total (teto de 20 mil), páginas de 500. `truncated` só quando a leitura parou antes do fim (teto ou
+  cursor vencido). `card list` pede ao back só o que a página precisa e devolve `next` certo; com `--step-id` (o back
+  ignora a etapa no fluxo grande) filtra aqui e segue lendo até completar a página.
+
 ## 2026-10-06
 
 ### Mover exige os obrigatórios da etapa atual, sempre (decisão 1 do Matheus)

@@ -14,7 +14,7 @@ import {
 } from "../schemas/cards.js";
 import { toNumber } from "../schemas/common.js";
 
-import { extractArray, extractCardsByFlow, summarizeCard } from "./raw-adapters.js";
+import { asRecord, extractArray, extractCardsByFlow, summarizeCard } from "./raw-adapters.js";
 import type { CardSummary } from "./types.js";
 
 /** Fluxo de um cartão descoberto só pelo número (`GET /card/locate`). */
@@ -23,6 +23,37 @@ export interface LocatedCard {
   flowId: number;
   flowName: string | null;
 }
+
+export interface ListAllCardsByFlowInput {
+  flowId: number | string;
+  isTestModel?: boolean;
+  isArchived?: boolean;
+  isWithPreAnswer?: boolean;
+  isWithTimeTracking?: boolean;
+  /** Para de ler quando já houver tantos cartões aceitos (card list: deslocamento + limite + 1). */
+  need?: number;
+  /** Filtro local antes de contar o `need` (ex.: etapa, que o modo fluxo grande do back ignora). */
+  accept?: (summary: CardSummary) => boolean;
+  /** Teto de cartões lidos do back (padrão 20 mil, o mesmo da leitura do V2). */
+  maxCards?: number;
+}
+
+export interface ListAllCardsByFlowResult {
+  /** 1ª resposta do back; no fluxo grande, com `cards` = todos os lidos. */
+  raw: unknown;
+  /** Cartões aceitos, na ordem do back. */
+  cards: unknown[];
+  summaries: CardSummary[];
+  /** Leu o fluxo até o fim (sem fluxo grande, ou seguiu o cursor até o total). */
+  complete: boolean;
+  /** Total de cartões do fluxo segundo o back (só no fluxo grande). */
+  totalIds?: number;
+}
+
+/** Página pedida ao `/card/by-flow` no fluxo grande (o back aceita `limit`; padrão dele 150). */
+export const CARDS_BY_FLOW_PAGE_SIZE = 500;
+/** Teto da leitura do V1: 20 mil cartões (40 páginas de 500, igual ao V2). */
+export const CARDS_BY_FLOW_MAX_CARDS = 20_000;
 
 export interface CardsContracts {
   /**
@@ -40,6 +71,13 @@ export interface CardsContracts {
     raw: unknown;
     summary: CardSummary;
   }>;
+  /**
+   * EXTRA-06 D1: o que a TELA usa para preencher o formulário da etapa do cartão
+   * (`GET /form/pre-answer`): o rascunho da etapa (form_answer com `flow_step_id` NULL)
+   * ou, sem ele, a última passagem confirmada do mesmo formulário. `undefined` = o back
+   * não tem a rota (404); outro erro propaga (sem ler o rascunho, o mover não grava).
+   */
+  getPreAnswer: (input: { cardId: number | string; formId: number | string }) => Promise<{ raw: unknown } | undefined>;
   listCardsByFlow: (input: {
     flowId: number | string;
     isTestModel?: boolean;
@@ -52,6 +90,12 @@ export interface CardsContracts {
     /** Fluxo grande: o back mandou só a primeira página (há mais cartões que estes). */
     truncated?: boolean;
   }>;
+  /**
+   * EXE-K1/K3: `GET /card/by-flow` INTEIRO. Fluxo grande (`isLargeData = 'S'`) vem em
+   * páginas: segue o `cursorKey` + `offset` do back até `totalIds` ou página vazia, com
+   * teto. `complete` = leu até o fim; senão a lista é parcial (o chamador diz `truncated`).
+   */
+  listAllCardsByFlow: (input: ListAllCardsByFlowInput) => Promise<ListAllCardsByFlowResult>;
   createCard: (input: {
     idForm: number;
     flowId: number;
@@ -241,6 +285,111 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         raw,
         summary: summarizeCard(raw)
       };
+    },
+
+    async getPreAnswer(input) {
+      const cardId = Number(String(input.cardId).trim());
+      const formId = Number(String(input.formId).trim());
+      if (!Number.isInteger(cardId) || cardId <= 0 || !Number.isInteger(formId) || formId <= 0) {
+        throw new CangeValidationError("Parâmetros inválidos para getPreAnswer.", { details: input });
+      }
+      try {
+        const raw = await client.get<unknown>("/form/pre-answer", { query: { card_id: cardId, id_form: formId } });
+        return { raw };
+      } catch (error) {
+        if (error instanceof CangeApiError && error.status === 404) return undefined;
+        throw error;
+      }
+    },
+
+    async listAllCardsByFlow(input) {
+      const parsed = listCardsByFlowParamsSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new CangeValidationError("Parâmetros inválidos para listAllCardsByFlow.", {
+          details: parsed.error.format()
+        });
+      }
+      const flags = {
+        isTestModel: parsed.data.isTestModel,
+        isArchived: parsed.data.isArchived,
+        isWithPreAnswer: parsed.data.isWithPreAnswer,
+        isWithTimeTracking: parsed.data.isWithTimeTracking
+      };
+      const need = input.need !== undefined && Number.isFinite(input.need) ? Math.max(1, Math.floor(input.need)) : undefined;
+      const maxCards = input.maxCards ?? CARDS_BY_FLOW_MAX_CARDS;
+      // Sem filtro local, a 1ª página só precisa do que o pedido usa (card list: 21).
+      const firstLimit = need !== undefined && !input.accept ? Math.min(need, CARDS_BY_FLOW_PAGE_SIZE) : CARDS_BY_FLOW_PAGE_SIZE;
+
+      const first = await client.get<unknown>("/card/by-flow/", {
+        query: { flow_id: toNumber(parsed.data.flowId), ...flags, limit: firstLimit }
+      });
+
+      const read: unknown[] = [];
+      const accepted: Array<{ item: unknown; summary: CardSummary }> = [];
+      const seen = new Set<string>();
+      const take = (items: unknown[]): void => {
+        for (const item of items) {
+          const summary = summarizeCard(item);
+          const id = summary.cardId !== undefined ? String(summary.cardId) : undefined;
+          if (id !== undefined) {
+            if (seen.has(id)) continue;
+            seen.add(id);
+          }
+          read.push(item);
+          if (!input.accept || input.accept(summary)) accepted.push({ item, summary });
+        }
+      };
+      const done = (raw: unknown, complete: boolean, totalIds?: number): ListAllCardsByFlowResult => ({
+        raw,
+        cards: accepted.map((entry) => entry.item),
+        summaries: accepted.map((entry) => entry.summary),
+        complete,
+        ...(totalIds !== undefined ? { totalIds } : {})
+      });
+
+      const record = asRecord(first);
+      if (!record || record.mode !== "largeData" || !Array.isArray(record.cards)) {
+        take(extractArray(first));
+        return done(first, true);
+      }
+
+      // Fluxo grande: o back devolve a 1ª página + `cursorKey` (Redis, 180 s) e serve as
+      // seguintes por `cursorKey` + `offset`. Sem cursor (Redis fora), fica a 1ª página.
+      const totalIds = typeof record.totalIds === "number" ? record.totalIds : undefined;
+      take(record.cards);
+      const cursorKey = typeof record.cursorKey === "string" && record.cursorKey.trim() !== "" ? record.cursorKey : undefined;
+      let offset = Number(record.offset ?? record.cards.length);
+      if (!Number.isFinite(offset)) offset = record.cards.length;
+      let complete = totalIds !== undefined ? offset >= totalIds : record.cards.length === 0;
+
+      while (!complete && cursorKey && offset < maxCards && (need === undefined || accepted.length < need)) {
+        let page: Record<string, unknown> | undefined;
+        try {
+          page = asRecord(
+            await client.get<unknown>("/card/by-flow/", {
+              query: { cursorKey, offset, limit: Math.min(CARDS_BY_FLOW_PAGE_SIZE, maxCards - offset), ...flags }
+            })
+          );
+        } catch (error) {
+          // 400 = cursor vencido (TTL de 180 s no back): para aqui; a lista sai parcial (truncated).
+          if (error instanceof CangeApiError && error.status === 400) break;
+          throw error;
+        }
+        const ids = Array.isArray(page?.ids) ? page.ids : undefined;
+        const cards = Array.isArray(page?.cards) ? page.cards : [];
+        const nextOffset = Number(page?.offset);
+        if ((ids !== undefined ? ids.length : cards.length) === 0) {
+          complete = true;
+          break;
+        }
+        take(cards);
+        // Sem avanço do deslocamento, parar (nada de laço sem fim).
+        if (!Number.isFinite(nextOffset) || nextOffset <= offset) break;
+        offset = nextOffset;
+        if (totalIds !== undefined && offset >= totalIds) complete = true;
+      }
+
+      return done({ ...record, cards: read, offset }, complete, totalIds);
     },
 
     async listCardsByFlow(input) {

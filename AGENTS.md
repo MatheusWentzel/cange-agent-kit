@@ -27,7 +27,7 @@ Este projeto existe para ser a camada segura entre agentes e a API do Cange.
   ("Exibir/Esconder campo") não bloqueia, porque a tela só o exige quando a condicional exibe o campo e o kit não avalia
   condicionais: vazio, ele volta em `warning` no resultado (e na dica, quando outro obrigatório bloqueia). Se o campo
   aparece para o cartão, mande o valor com `--set` no mesmo mover.
-- Ao mover etapa, **preservar os campos já preenchidos** (read-before-move): o move grava um form_answer NOVO contendo só o que vier em `values` — campos do `form_id` da etapa não reenviados ficam vazios (perda de dados). Ler o card antes (`card get`) e incluir no `values` os campos já preenchidos, além dos obrigatórios. O kit detecta e avisa campos preenchidos ausentes do `values`; use `--allow-data-loss` para confirmar perda intencional ou `--fail-on-data-loss` para bloquear.
+- Ao mover etapa, **os campos já preenchidos são preservados pelo kit**: o move grava um form_answer NOVO só com o que vier em `values` e o back apaga o rascunho da etapa (o que a tela, as automações e o `card update-values` deixam nele). O kit lê o que o cartão tem na etapa atual pela mesma fonte da tela (`GET /form/pre-answer`: rascunho ou última passagem) e reenvia no mover, no `card move` e no `--payload` que grava a etapa atual (o `values` vence). O que não dá para reenviar (anexo, fórmula, ID automático) volta em `warning`; `--fail-on-data-loss` bloqueia. `--allow-data-loss` (só `--payload`) desliga o reenvio (perda intencional).
 - **Nunca fazer self-move** (`fromStepId === toStepId`) para "criar"/preencher um form_answer: duplica o form_answer e o snapshot vazio mais recente sobrepõe o preenchido. Para apenas atualizar values sem mover, usar `card update-values`. O kit bloqueia self-move por padrão (`--allow-self-move` força).
 - Usar `step-form --flow-id <id> --step-id <id>` para descobrir obrigatórios da etapa antes de montar payload.
 - Para marcar notificação como lida/arquivada, usar `notification read`.
@@ -132,8 +132,12 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   No mover, a mensagem termina com a regra e o comando pronto, por exemplo:
   `cange card move --card-id 55 --to "Agendamento" --set "Horas=<número>" --set "Qualificado=<Sim | Não>"`.
 - Mover com `--payload`: o kit lê o cartão e cobra a etapa ATUAL dele (fromStepId diferente da etapa real = erro).
-  O payload grava o formulário da etapa atual de novo só com o `values`: obrigatório que o cartão já tem e não veio no
-  `values` também bloqueia (ficaria vazio). O `card move` reenvia isso sozinho.
+  Gravando o formulário da etapa atual, o kit reenvia o que o cartão já tem nela (rascunho incluído), com o `values`
+  por cima, como o `card move`. Payload que grava OUTRO formulário com rascunho só na etapa atual bloqueia (o back
+  apaga o rascunho ao sair da etapa): use `card move` ou `--allow-data-loss`.
+- Obrigatório é o que a TELA cobra: regra `required` do campo (`validations`), não a coluna `required`. Switch nunca é
+  cobrado; check list sem a regra também não; rich text `<p></p>` é vazio; check list com "exigir todos concluídos"
+  (`formula = '1'`) e item sem marcar bloqueia o mover.
 - Sucesso: uma linha em `summary` (cartão, campos, etapa) e os ids.
 - Nunca mova o cartão para a própria etapa para gravar campo: o `PUT /form/answer` cria a resposta da etapa atual
   quando falta. O kit trata sozinho o 409 `STEP_FORM_ANSWER_BUSY` (1 nova tentativa) e o 422 `FIELD_FORM_MISMATCH`

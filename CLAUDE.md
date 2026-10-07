@@ -34,6 +34,9 @@ Use este repositório como camada segura para operar o Cange via CLI.
   sempre, em todo caminho de mover (com ou sem `--validate-fields`/`--dry-run`); faltou = exit 2, nada gravado, com o
   comando `card move ... --set` pronto. Igual à tela: não cobra ao voltar etapa em fluxo com "pular obrigatórios ao
   voltar" nem campo oculto no formulário; obrigatório com condicional vazio não bloqueia e volta em `warning`.
+  Obrigatório = regra `required` do campo (como a tela; switch nunca), rich text `<p></p>` é vazio e check list
+  "exigir todos concluídos" com item sem marcar bloqueia. O que o cartão tem na etapa vem do rascunho da etapa
+  (`GET /form/pre-answer`, a fonte da tela) e o mover reenvia (o back apaga o rascunho ao mover).
 - Para marcar notificação como lida/arquivada, usar `notification read`.
 - Para construir fluxos (fluxo, etapas, campos, relacionamentos), usar `cange flow-build ...` (Flow V2 Build API):
   - bodies são **strict** — não enviar chaves extras.

@@ -143,7 +143,9 @@ describe("cli parsing", () => {
         flow_step_id: 11,
         title: "Cartão de teste",
         form_answers: []
-      }
+      },
+      // EXTRA-06 D1: o que o cartão tem na etapa atual vem da pré-resposta (a fonte da tela).
+      "GET /form/pre-answer": { fields: [], formsAnswers: null }
     };
     const calledUrls: string[] = [];
     const unmocked: string[] = [];

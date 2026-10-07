@@ -1,7 +1,7 @@
 import { CangeValidationError } from "../client/errors.js";
 import type { NormalizedField } from "../schemas/fields.js";
 import { getExpectedFormatByFieldType, validateValueByFieldType } from "../utils/fieldTypeGuards.js";
-import { getRequiredFields } from "../utils/requiredFields.js";
+import { getRequiredFields, isEmptyForField, isRequiredOnScreen } from "../utils/requiredFields.js";
 import { SKELETON_NOTE, buildValuesSkeleton } from "../utils/valuesBuilder.js";
 
 import { filterFieldsByForm, type FieldsContracts } from "./fields.js";
@@ -397,8 +397,9 @@ export function validateValuesAgainstFields(input: ValidateValuesInput): Validat
   }
 
   if (input.requireRequiredFields) {
-    for (const field of fieldsInScope.filter((item) => item.required)) {
-      if (!(field.name in input.values) || isMissingValue(input.values[field.name])) {
+    // EXTRA-06 D2/D3/D4: só o que a tela cobra (regra `required`, campo visível) e o vazio da tela.
+    for (const field of fieldsInScope.filter((item) => isRequiredOnScreen(item))) {
+      if (!(field.name in input.values) || isEmptyForField(field, input.values[field.name])) {
         issues.push({
           code: "MISSING_REQUIRED",
           fieldName: field.name,
@@ -418,19 +419,6 @@ export function validateValuesAgainstFields(input: ValidateValuesInput): Validat
 
 /** Issues que informam mas não reprovam a validação (o servidor é quem decide). */
 const NON_BLOCKING_ISSUE_CODES: ReadonlySet<ValidationIssue["code"]> = new Set(["UNKNOWN_FIELD_TYPE"]);
-
-function isMissingValue(value: unknown): boolean {
-  if (value === undefined || value === null) {
-    return true;
-  }
-  if (typeof value === "string") {
-    return value.trim().length === 0;
-  }
-  if (Array.isArray(value)) {
-    return value.length === 0;
-  }
-  return false;
-}
 
 function describeValueType(value: unknown): string {
   if (Array.isArray(value)) {

@@ -3,7 +3,8 @@ import type { FlowStepSummary } from "../contracts/payload-builder.js";
 import { asRecord } from "../contracts/raw-adapters.js";
 import type { CangeAgentKit } from "../index.js";
 import type { NormalizedField } from "../schemas/fields.js";
-import { readCarryOver } from "../utils/carryOver.js";
+import { readCarryOver, readStepCarryOver, type CarryOverResult } from "../utils/carryOver.js";
+import { checkListProgress, isHiddenOnForm, requiresAllChecked } from "../utils/requiredFields.js";
 import {
   describeExpected,
   missingRequiredFields,
@@ -37,6 +38,10 @@ import { loadFlowContext, stepLabel, stepScope, type FlowContext } from "./write
  *   aviso (`warning` no resultado) e entra na dica quando outro obrigatório bloqueia.
  * - O erro diz quais campos faltam e traz o comando pronto para gravar e mover no mesmo
  *   passo: `card move --set` grava os campos da etapa atual dentro do próprio mover.
+ * - EXTRA-06 (07/10): o que o cartão TEM na etapa vem da mesma fonte da tela, a
+ *   pré-resposta (`readOriginCarry`), e é reenviado no mover; obrigatório é o que a tela
+ *   cobra (regra `required` do campo, ver `isRequiredOnScreen`); check list "exigir todos
+ *   concluídos" (`formula = '1'`) com item sem marcar bloqueia, como a tela.
  */
 
 export const MOVE_REQUIRED_RULE = "Mover exige os obrigatórios da etapa atual (regra da plataforma, igual à tela).";
@@ -180,13 +185,15 @@ export function originRequired(input: OriginRequiredInput): OriginRequiredResult
   if (skipsRequiredOnBackwardMove(input.ctx.flowRecord, input.fromStep, input.toStep)) return { issues: [] };
   const missing = missingRequiredFields(origin, input.values, input.filled);
   const { blocking, conditional } = splitByConditional(missing, input.fromStep);
+  const checklist = pendingChecklists(origin, input.fromStep, input.values);
   if (blocking.length === 0) {
-    const warning = conditionalRequiredWarning(origin, conditional);
-    return { issues: [], ...(warning ? { warning } : {}) };
+    const warning = joinWarnings(conditionalRequiredWarning(origin, conditional), checklist.warning);
+    return { issues: checklist.issues, ...(warning ? { warning } : {}) };
   }
   return {
     issues: [
       ...blocking.map((field) => missingRequiredIssue(origin, field)),
+      ...checklist.issues,
       moveRequiredHint({
         missing: blocking,
         origin,
@@ -197,8 +204,74 @@ export function originRequired(input: OriginRequiredInput): OriginRequiredResult
         ...(input.flowId !== undefined ? { flowId: input.flowId } : {}),
         ...(input.repeatSent ? { repeatSent: true } : {})
       })
-    ]
+    ],
+    ...(checklist.warning ? { warning: checklist.warning } : {})
   };
+}
+
+function joinWarnings(...warnings: Array<string | undefined>): string | undefined {
+  const list = warnings.filter((item): item is string => typeof item === "string" && item.length > 0);
+  return list.length > 0 ? list.join(" ") : undefined;
+}
+
+/**
+ * EXTRA-06 D5: check list com "exigir todos os itens concluídos" (`formula = '1'`). A tela
+ * (FormBuilder) não move com item sem marcar. Igual aos obrigatórios: campo oculto não
+ * conta e campo com condicional vira aviso (o kit não avalia a condicional).
+ */
+export function pendingChecklists(
+  origin: FormScope,
+  fromStep: FlowStepSummary,
+  values: Record<string, unknown>
+): { issues: ValueIssue[]; warning?: string } {
+  const conditionalNames = conditionalFieldNames(fromStep);
+  const issues: ValueIssue[] = [];
+  const conditional: string[] = [];
+  for (const field of origin.fields) {
+    if (!requiresAllChecked(field) || isHiddenOnForm(field)) continue;
+    const progress = checkListProgress(values[field.name]);
+    if (!progress || progress.pending === 0) continue;
+    const label = `${field.title ?? field.name} (${progress.pending} de ${progress.total} sem marcar)`;
+    if (conditionalNames.has(field.name)) {
+      conditional.push(label);
+      continue;
+    }
+    issues.push({
+      kind: "move_conflict",
+      blocking: true,
+      text:
+        `no campo ${label} existem itens a concluir na lista. A tela só move com todos os itens marcados ` +
+        "(o check list exige todos concluídos): conclua os itens ou confirme com o usuário antes de mover"
+    });
+  }
+  const warning =
+    conditional.length > 0
+      ? `Check list com itens a concluir e condicional ${inLabel(origin.label)}: ${conditional.join(", ")}. ` +
+        "A tela só exige se o campo aparece para este cartão."
+      : undefined;
+  return { issues, ...(warning ? { warning } : {}) };
+}
+
+/**
+ * EXTRA-06 D1 (P0): o que o cartão tem no formulário da etapa atual, pela mesma fonte da
+ * tela (`GET /form/pre-answer`): o rascunho da etapa ou, sem ele, a última passagem
+ * confirmada. O `GET /card` não traz o rascunho, e o mover apaga o rascunho.
+ */
+export async function readOriginCarry(
+  kit: CangeAgentKit,
+  cardRaw: unknown,
+  origin: FormScope,
+  cardId: number | string
+): Promise<CarryOverResult> {
+  const pre = await kit.contracts.getPreAnswer({ cardId, formId: origin.formId });
+  return readStepCarryOver({ cardRaw, preAnswerRaw: pre?.raw, formId: origin.formId, fields: origin.fields });
+}
+
+/** Aviso dos preenchidos que o mover não consegue reenviar (anexo, fórmula, ID automático). */
+export function notKeptWarning(step: FlowStepSummary, carry: CarryOverResult | undefined): string | undefined {
+  const notKept = carry?.notKept ?? [];
+  if (notKept.length === 0) return undefined;
+  return `Não reenviados (ficam vazios na ${stepLabel(step)}): ${notKept.map((item) => item.title ?? item.name).join(", ")}.`;
 }
 
 export interface PayloadMove {
@@ -222,23 +295,48 @@ export interface PayloadMoveCheck {
   issues: ValueIssue[];
   /** Obrigatórios com condicional vazios, quando nada bloqueia por obrigatório: aviso. */
   warning?: string;
+  /**
+   * O `values` que o mover deve mandar. Gravando a etapa atual: o que o cartão já tem
+   * nela (rascunho incluído) com o do payload por cima, como a tela. Sem `resend`, só o
+   * do payload.
+   */
+  values: Record<string, unknown>;
+  /** Campos do cartão reenviados sem estar no payload. */
+  kept: string[];
+  /** O mover grava o formulário da etapa atual. */
+  writesOrigin: boolean;
+  /** O que o cartão tem na etapa atual (fonte da tela). */
+  carry?: CarryOverResult;
+}
+
+export interface PayloadMoveOptions {
+  /**
+   * Reenviar o que o cartão já tem na etapa atual quando o payload grava esse formulário
+   * (padrão: sim, como a tela e o `card move`). false = `--allow-data-loss`.
+   */
+  resend?: boolean;
+  /** `--allow-data-loss`: aceita perder o rascunho da etapa atual ao gravar outro formulário. */
+  allowDataLoss?: boolean;
 }
 
 /**
  * Caminho do `--payload` (`card move-step-with-values` e `card move-step`): lê o fluxo e o
  * cartão e confere os obrigatórios da etapa ATUAL do cartão (não a do `fromStepId`).
  *
- * O mover pelo payload grava um formulário NOVO da etapa atual só com o `values` (o
- * `card move` reenvia sozinho o que o cartão tem; o payload, não). Então, quando o payload
- * grava a etapa atual, só conta o que está no `values`: campo preenchido no cartão e
- * ausente do `values` ficaria vazio e entra como problema próprio. Payload que grava outro
- * formulário (ex.: o do destino) não toca a etapa atual: conta o que o cartão já tem.
+ * O mover pelo payload grava um formulário NOVO só com o `values` e o back apaga o
+ * rascunho da etapa (EXTRA-06 D1). Quando o payload grava a etapa atual, o kit reenvia o
+ * que o cartão já tem nela (o rascunho que a tela mostra, com o do payload por cima) e
+ * os obrigatórios contam o resultado; com `resend: false` (`--allow-data-loss`), só conta
+ * o `values` e obrigatório preenchido fora dele é problema próprio. Payload que grava
+ * outro formulário (ex.: o do destino) não toca a etapa atual: conta o que o cartão já
+ * tem, e rascunho só da etapa atual bloqueia (o back o apaga ao sair da etapa).
  */
 export async function checkPayloadMove(
   kit: CangeAgentKit,
   payload: PayloadMove,
   values: Record<string, unknown> = payload.values,
-  preloaded?: FlowContext
+  preloaded?: FlowContext,
+  options: PayloadMoveOptions = {}
 ): Promise<PayloadMoveCheck> {
   const [ctx, card] = await Promise.all([
     preloaded ? Promise.resolve(preloaded) : loadFlowContext(kit, payload.flowId),
@@ -274,16 +372,45 @@ export async function checkPayloadMove(
   }
 
   const origin = stepScope(ctx, fromStep, 0, " (atual)");
-  if (!origin || skipsRequiredOnBackwardMove(ctx.flowRecord, fromStep, toStep)) {
-    return { ctx, card, writtenFormId, ...(origin ? { originFormId: origin.formId } : {}), issues };
+  if (!origin) {
+    return { ctx, card, writtenFormId, issues, values, kept: [], writesOrigin: false };
   }
 
   const writesOrigin = writtenFormId === origin.formId;
-  const carry = readCarryOver(card.raw, origin.formId, origin.fields);
-  const missing = missingRequiredFields(origin, writesOrigin ? values : {}, writesOrigin ? new Set() : carry.filled);
+  const carry = await readOriginCarry(kit, card.raw, origin, payload.cardId);
+  const resend = writesOrigin && options.resend !== false;
+  const sendValues = resend ? { ...carry.values, ...values } : values;
+  const kept = resend ? Object.keys(carry.values).filter((name) => !(name in values)) : [];
+  const notKept = resend ? notKeptWarning(fromStep, carry) : undefined;
+  const base = { ctx, card, writtenFormId, originFormId: origin.formId, values: sendValues, kept, writesOrigin, carry };
+
+  // Gravando outro formulário, o rascunho da etapa atual some ao sair dela (o back apaga).
+  if (!writesOrigin && carry.source === "rascunho" && !options.allowDataLoss) {
+    const draftOnly = draftOnlyFields(card.raw, origin, carry);
+    if (draftOnly.length > 0) {
+      issues.push({
+        kind: "move_conflict",
+        blocking: true,
+        text:
+          `o rascunho da ${stepLabel(fromStep)} tem ${listTitles(draftOnly)} e o mover grava outro formulário ` +
+          `(form ${writtenFormId}): ao sair da etapa o back apaga o rascunho e esses valores somem. Use ` +
+          `\`cange card move --card-id ${payload.cardId} --to ${payload.toStepId}\` (manda a etapa atual no mover, como a tela) ` +
+          "ou repita com --allow-data-loss"
+      });
+    }
+  }
+
+  if (skipsRequiredOnBackwardMove(ctx.flowRecord, fromStep, toStep)) {
+    return { ...base, issues, ...(notKept ? { warning: notKept } : {}) };
+  }
+
+  const counted = writesOrigin ? sendValues : {};
+  const filled = writesOrigin && !resend ? new Set<string>() : carry.filled;
+  const missing = missingRequiredFields(origin, counted, filled);
   const { blocking, conditional } = splitByConditional(missing, fromStep);
-  const notResent = blocking.filter((field) => carry.filled.has(field.name));
-  const empty = blocking.filter((field) => !carry.filled.has(field.name));
+  // Preenchido no cartão e fora do values (só com --allow-data-loss): motivo próprio. Mandado vazio = falta.
+  const notResent = blocking.filter((field) => carry.filled.has(field.name) && !(field.name in counted));
+  const empty = blocking.filter((field) => !notResent.includes(field));
 
   for (const field of notResent) {
     issues.push({
@@ -291,9 +418,11 @@ export async function checkPayloadMove(
       blocking: true,
       text:
         `${field.title ?? field.name} está preenchido no cartão mas não veio no values: o mover grava o formulário ` +
-        "da etapa atual de novo e ele ficaria vazio. Inclua no values (ou use `cange card move`, que reenvia o que o cartão já tem)"
+        "da etapa atual de novo e ele ficaria vazio. Inclua no values (sem --allow-data-loss o kit reenvia o que o cartão já tem)"
     });
   }
+  const checklist = pendingChecklists(origin, fromStep, writesOrigin ? sendValues : carry.values);
+  issues.push(...checklist.issues);
   if (empty.length > 0) {
     issues.push(...empty.map((field) => missingRequiredIssue(origin, field)));
     issues.push(
@@ -312,8 +441,24 @@ export async function checkPayloadMove(
     );
   }
   // Sem a dica (nada vazio sem condicional), os com condicional vão no aviso.
-  const warning = empty.length === 0 ? conditionalRequiredWarning(origin, conditional) : undefined;
-  return { ctx, card, writtenFormId, originFormId: origin.formId, issues, ...(warning ? { warning } : {}) };
+  const warning = joinWarnings(
+    notKept,
+    empty.length === 0 ? conditionalRequiredWarning(origin, conditional) : undefined,
+    checklist.warning
+  );
+  return { ...base, issues, ...(warning ? { warning } : {}) };
+}
+
+/** Campos preenchidos no rascunho da etapa com valor que as respostas confirmadas não têm. */
+function draftOnlyFields(cardRaw: unknown, origin: FormScope, carry: CarryOverResult): string[] {
+  const confirmed = readCarryOver(cardRaw, origin.formId, origin.fields);
+  const titles: string[] = [];
+  for (const [name, text] of carry.stored) {
+    if (confirmed.stored.get(name) === text) continue;
+    const field = origin.fields.find((item) => item.name === name);
+    titles.push(field?.title ?? name);
+  }
+  return titles;
 }
 
 function findStepById(steps: FlowStepSummary[], id: number | string | undefined): FlowStepSummary | undefined {

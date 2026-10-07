@@ -41,6 +41,12 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
         // O wrapper pula o login em --dry-run, mas este comando sempre lê (fluxo e cartão).
         await authOnce(kit, ensureAuth)();
 
+        // Decisão 1 (06/10): o alias também exige os obrigatórios da etapa ATUAL do cartão,
+        // sempre (lê fluxo e cartão, inclusive em --dry-run).
+        const check = await checkPayloadMove(kit, payload);
+        // EXTRA-06 D1: gravando a etapa atual, reenvia o que o cartão tem nela (o rascunho da tela).
+        payload.values = check.values;
+
         if (options.validateFields) {
           const fieldsData = await kit.contracts.getFieldsByFlow({ flowId: payload.flowId });
           const targetFields = fieldsData.fields.filter(
@@ -68,9 +74,6 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
           assertValidationResult(validation.valid, validation);
         }
 
-        // Decisão 1 (06/10): o alias também exige os obrigatórios da etapa ATUAL do cartão,
-        // sempre (lê fluxo e cartão, inclusive em --dry-run).
-        const check = await checkPayloadMove(kit, payload);
         const validation = validationSummary(check.issues);
 
         if (options.dryRun) {

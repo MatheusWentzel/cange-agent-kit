@@ -4,7 +4,7 @@ import type { CangeAgentKit } from "../../index.js";
 import type { NormalizedField } from "../../schemas/fields.js";
 import { CangeCliUsageError, CangeValidationError } from "../../client/errors.js";
 import { moveCardStepWithValuesPayloadSchema } from "../../schemas/cards.js";
-import { detectDataLoss, type DataLossCheck } from "../../utils/dataLoss.js";
+import { dataLossFromCarry, detectDataLoss, type DataLossCheck } from "../../utils/dataLoss.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { getExpectedFormatByFieldType } from "../../utils/fieldTypeGuards.js";
 import { annotateCommand } from "../command-metadata.js";
@@ -67,7 +67,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
     )
     .option(
       "--allow-data-loss",
-      "Desativa a checagem de campos preenchidos ausentes do values (perda de dados intencional)."
+      "Perda de dados intencional: não reenvia o que o cartão já tem na etapa atual e não confere campos preenchidos ausentes do values."
     )
     .option(
       "--fail-on-data-loss",
@@ -183,7 +183,13 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
 
         // Decisão 1 (06/10): os obrigatórios da etapa ATUAL do cartão, sempre (com ou sem
         // --validate-fields/--dry-run). Lê o cartão uma vez (o detector de perda reaproveita).
-        const check = await checkPayloadMove(kit, payload, finalValues, ctx);
+        // EXTRA-06 D1: gravando a etapa atual, o kit reenvia o que o cartão tem nela (o
+        // rascunho que a tela mostra) com o values por cima; --allow-data-loss desliga.
+        const check = await checkPayloadMove(kit, payload, finalValues, ctx, {
+          resend: options.allowDataLoss !== true,
+          allowDataLoss: options.allowDataLoss === true
+        });
+        finalValues = check.values;
         issues.push(...check.issues);
         // --validate-fields com o idForm de OUTRO formulário: cobra também os obrigatórios dele
         // (o da etapa atual já foi cobrado acima; sem repetir a mesma linha).
@@ -206,13 +212,17 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         // M2 — Detector de perda de dados (read-before-write). Lê o estado atual
         // do card e aponta campos preenchidos do form alvo ausentes do `values`.
         // Resiliente: nunca bloqueia por falha de leitura.
+        // Gravando a etapa atual, a régua é a fonte da tela (rascunho incluído): sobra só o
+        // que o kit não consegue reenviar. Outro formulário: o detector de sempre (GET /card).
         const dataLossCheck: DataLossCheck = options.allowDataLoss
           ? {
               checked: false,
               orphans: [],
               note: "Checagem de perda de dados desativada por --allow-data-loss."
             }
-          : await detectDataLoss({ kit, payload, targetFields, card: check.card });
+          : check.writesOrigin && check.carry
+            ? dataLossFromCarry(check.carry, finalValues, targetFields, check.writtenFormId)
+            : await detectDataLoss({ kit, payload, targetFields, card: check.card });
 
         if (dataLossCheck.orphans.length > 0 && options.failOnDataLoss) {
           throw new CangeValidationError(
@@ -223,9 +233,11 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         }
 
         // Obrigatório com condicional vazio não bloqueia (o kit não avalia a condicional): avisa.
+        const keptInfo = check.kept.length > 0 && check.carry ? { kept: check.kept.length, keptFrom: check.carry.source } : {};
         if (options.dryRun) {
           return {
             ...createDryRunResult(payload),
+            ...keptInfo,
             ...(validation ? { validation } : {}),
             ...(check.warning ? { warning: check.warning } : {}),
             dataLossCheck
@@ -234,9 +246,11 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
 
         const result = await kit.contracts.moveCardStepWithValues(payload);
         const hasOrphans = dataLossCheck.orphans.length > 0;
-        const warnings = [...(hasOrphans ? [dataLossCheck.note] : []), ...(check.warning ? [check.warning] : [])];
-        if (warnings.length === 0) return result;
-        return { ...result, warning: warnings.join(" "), ...(hasOrphans ? { dataLossCheck } : {}) };
+        // Gravando a etapa atual, os órfãos são os "Não reenviados" que já estão no check.warning.
+        const orphanNote = hasOrphans && !(check.writesOrigin && check.carry) ? [dataLossCheck.note] : [];
+        const warnings = [...orphanNote, ...(check.warning ? [check.warning] : [])];
+        if (warnings.length === 0) return { ...result, ...keptInfo };
+        return { ...result, ...keptInfo, warning: warnings.join(" "), ...(hasOrphans ? { dataLossCheck } : {}) };
       })
     );
 
@@ -244,7 +258,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
     mutates: true,
     envelope: "Com --payload: resposta do move (+ dataLossCheck). Sem --payload: igual a `card move`.",
     fieldsLocation:
-      "Prefira `card move --card-id N --to <etapa> --set ...` (1 passo). Mover exige os obrigatórios da etapa atual (sempre). Com --payload, o idForm é o form da etapa ATUAL e os values são só desse form (reenvie o que o cartão já tem).",
+      "Prefira `card move --card-id N --to <etapa> --set ...` (1 passo). Mover exige os obrigatórios da etapa atual (sempre). Com --payload, o idForm é o form da etapa ATUAL e os values são só desse form; o kit reenvia o que o cartão já tem nele (o rascunho que a tela mostra), salvo com --allow-data-loss.",
     example: 'card move-step-with-values --card-id 1234 --to "Agendamento" --set "Data da ligação=06/10/2026"'
   });
 }
