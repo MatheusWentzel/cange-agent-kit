@@ -197,8 +197,10 @@ beforeEach(() => {
   delete process.env.CANGE_CARD_FLOW_ID;
   delete process.env.CANGE_FLOW_ID;
   delete process.env[FORCE_DRY_RUN_ENV];
-  // As leituras do que a tela resolve saem a 2 por segundo no uso real; aqui, sem espera.
+  // As leituras do que a tela resolve saem no ritmo do teto do back (8 GETs por janela de 1 s) no
+  // uso real; aqui, sem espera (o ritmo real tem teste próprio em reg-f1-ritmo-mover.test.ts).
   process.env.CANGE_SCREEN_REFS_RPS = "100000";
+  delete process.env.CANGE_SCREEN_REFS_BUDGET_MS;
   stdout.length = 0;
   stderr.length = 0;
   requests.length = 0;

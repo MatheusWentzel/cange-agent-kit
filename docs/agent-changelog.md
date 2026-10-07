@@ -4,6 +4,29 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-07
 
+### Mover: leituras do que a tela resolve no ritmo do teto do back, com prazo (REG-F1)
+
+- Com o ritmo fixo de 2 leituras por segundo (fb822a2), `card move --dry-run` no cartão 921055 (43 anexos no
+  formulário da etapa) levava 22,7 s, e só 0,43 s disso era o back. A conferência automática do gate do runner (prazo
+  de 15 s) morria sem resposta e negava com "o kit não respondeu no prazo" a cada tentativa: o agente nunca conseguia
+  pedir aprovação para esse cartão (o 918594, com 30 anexos, também estourava).
+- Agora cada leitura (anexo, lista do campo de usuário, cartão conectado) sai uma por vez e só começa quando menos de 8
+  GETs do processo ainda podem cair na mesma janela do back que ela (`apiRateLimiter`, 10 GET/s por chave numa janela
+  fixa, a 11ª bloqueia por 5 minutos): os que o mover fez antes também contam, o que está em voo conta sempre e o que
+  terminou só sai da conta 1 s depois do fim. O back conta a leitura quando ela chega, e a primeira conexão chega
+  depois de sair do kit: contando pelo início, a janela do back do 921055 chegou a 10. O cliente HTTP anota o início e
+  o fim de toda tentativa de GET.
+- Medido no back local (proxy na frente do 8092): 921055 e 918594 com no máximo 8 GETs em qualquer janela de 1 s, 43
+  anexos conferidos em 5 a 7 s, mesmo resultado do fb822a2. A conferência do gate (`kitDryRun`, prazo de 15 s) responde
+  em 5,4 s no 921055 e 4,6 s no 918594, com exit conclusivo (antes: 15,0 s, sem resposta).
+- A conferência tem prazo de 8 s: a leitura que não começaria a tempo não é feita, o valor gravado vai como está (o kit
+  não afirma o que não leu, como na falha de leitura) e o campo sai no `warning` ("Não conferidos no prazo ...:
+  Documentos IRPF (13 de 43 anexos)"). Obrigatório não conferido não bloqueia. Assim o mover sempre responde dentro do
+  prazo do gate, com qualquer número de anexos.
+- `CANGE_SCREEN_REFS_RPS` agora é o máximo de GETs por janela de 1 s (default 8) e `CANGE_SCREEN_REFS_BUDGET_MS` o prazo
+  (default 8000); os dois são para teste. O token de run do agente não passa pelo teto de 10 GET/s do back (só a API
+  key passa), então o runner pode subir o `CANGE_SCREEN_REFS_RPS` no ambiente do run se quiser o mover mais rápido.
+
 ### Catálogo pelo número, link ou hash (bancada F2-F6, t06)
 
 - A t06 falhou 2 vezes (frio 5 min, 3ª repetição; quente, 1ª): depois do "sem acesso" no fluxo 316, o agente procurou
@@ -47,8 +70,8 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   usuário vazio só é recusado quando a 1ª regra gravada dele é a `required` (o `matches` do `createYupSchema`); sem
   isso a tela move com ele vazio, e o kit também. O `--set` de usuário (todas as escritas) confere o id contra a mesma
   lista e recusa o bloqueado, o leitor e quem está fora do fluxo privado. Leitura que falha (rede, 5xx) não muda nada.
-  Essas leituras saem uma por vez, a 2 por segundo, e os anexos um por um parando no primeiro que não existe: o mover
-  já faz até 8 GETs antes e o back bloqueia a chave por 5 minutos acima de 10 GET/s.
+  Essas leituras saem uma por vez, no ritmo do teto de leitura do back, e os anexos um por um parando no primeiro que
+  não existe (o ritmo e o prazo estão na entrada REG-F1, acima).
   **Decisão pendente (Matheus):** o não obrigatório que a tela descarta sai do mover (igual à tela) em vez de ir com
   aviso.
 - **R4-P2, documento e telefone:** a tela valida o formato sempre, obrigatório ou não, oculto também, sobre o valor

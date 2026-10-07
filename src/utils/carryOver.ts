@@ -130,6 +130,11 @@ export interface CarryOverResult {
    */
   unresolved: UnresolvedField[];
   /**
+   * REG-F1: referências que o kit não conferiu porque o prazo das leituras acabou (anexo, usuário,
+   * cartão conectado). O valor gravado fica como está, sem afirmar o que não leu: vira aviso.
+   */
+  unchecked?: UncheckedField[];
+  /**
    * R3-F4: destinos de vínculo cuja origem vazia no cartão vem no mover. A tela preenche no
    * blur pelo `POST /form/answers/by-register`; quem lê a pré-resposta pede e aplica com
    * `resolveByRegister`. Até lá o campo fica em `autoPending` (aviso, não bloqueio).
@@ -147,6 +152,14 @@ export interface UnresolvedField {
   emptied: boolean;
   /** Vazio na tela, mas o obrigatório da tela passa assim mesmo (o `{}` do campo de usuário). */
   passesRequired?: boolean;
+}
+
+/** Referência gravada que ficou sem conferir no prazo (REG-F1). */
+export interface UncheckedField {
+  name: string;
+  title?: string;
+  /** O que ficou sem conferir (ex.: "13 de 43 anexos"). */
+  what: string;
 }
 
 /** Pedido do autocompletar de vínculo com a origem mandada no mover (R3-F4). */

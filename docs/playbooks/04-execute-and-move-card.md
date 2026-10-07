@@ -20,6 +20,8 @@ Convenção importante:
   opção apagada) bloqueia com "está gravado no cartão, mas a tela mostra o campo vazio": pergunte ao usuário o valor
   novo e mande com `--set`. CPF/CNPJ ou telefone inválido gravado bloqueia mesmo fora do obrigatório: peça o valor
   corrigido. O `warning` lista o autocompletar que o kit não calcula e o que a tela não mostra (vai sem eles).
+  Com muitos anexos o kit pode não conferir tudo no prazo (8 s, no ritmo do teto de leitura do back): o que ficou sem
+  conferir vai como está gravado e aparece em "Não conferidos no prazo" no `warning`, sem bloquear.
 
 ## Fluxo recomendado
 

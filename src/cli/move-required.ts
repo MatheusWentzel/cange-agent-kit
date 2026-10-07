@@ -168,20 +168,31 @@ export function autoPendingWarning(
 /**
  * POP-1/R4-P1: aviso dos valores gravados que a tela não mostra (e o mover leva igual: sem eles,
  * ou só com a parte que a tela resolve). O obrigatório que ficou vazio bloqueia à parte.
+ * REG-F1: e dos que o kit não conferiu no prazo das leituras (vão como estão gravados).
  */
 export function unresolvedWarning(
   origin: FormScope,
-  carry: Pick<CarryOverResult, "unresolved"> | undefined,
+  carry: Pick<CarryOverResult, "unresolved" | "unchecked"> | undefined,
   values: Record<string, unknown>,
   blocking: ReadonlySet<string> = new Set()
 ): string | undefined {
   const list = (carry?.unresolved ?? []).filter((item) => !blocking.has(item.name) && !(item.emptied && item.name in values));
-  if (list.length === 0) return undefined;
+  const unchecked = carry?.unchecked ?? [];
+  if (list.length === 0 && unchecked.length === 0) return undefined;
   const titles = new Map(origin.fields.map((field) => [field.name, field.title ?? field.name]));
-  return (
-    `Gravados no cartão que a tela não mostra ${inLabel(origin.label)}: ` +
-    list.map((item) => `${titles.get(item.name) ?? item.title ?? item.name} (${item.reason})`).join(", ") +
-    ". O mover vai como a tela: sem esses valores (confira com o usuário se precisa mandar outro com --set)."
+  const titleOf = (item: { name: string; title?: string }): string => titles.get(item.name) ?? item.title ?? item.name;
+  return joinWarnings(
+    list.length > 0
+      ? `Gravados no cartão que a tela não mostra ${inLabel(origin.label)}: ` +
+          list.map((item) => `${titleOf(item)} (${item.reason})`).join(", ") +
+          ". O mover vai como a tela: sem esses valores (confira com o usuário se precisa mandar outro com --set)."
+      : undefined,
+    unchecked.length > 0
+      ? `Não conferidos no prazo ${inLabel(origin.label)}: ` +
+          unchecked.map((item) => `${titleOf(item)} (${item.what})`).join(", ") +
+          ". O kit lê o que a tela resolve (anexo, usuário, cartão conectado) no ritmo do teto de leitura do back e parou no " +
+          "prazo da conferência: o mover leva esses valores como estão gravados. Se a tela mostrar algum deles vazio, mande o valor com --set."
+      : undefined
   );
 }
 

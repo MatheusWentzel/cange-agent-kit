@@ -19,7 +19,7 @@ import {
   type ValueIssue
 } from "../utils/valueResolver.js";
 
-import type { Throttle } from "../utils/rateLimit.js";
+import { ReadBudgetExceededError, type Throttle } from "../utils/rateLimit.js";
 
 import { envCardId, envFlowId } from "./env-defaults.js";
 import { FLOW_FROM_CARD_HINT } from "./resource-ref.js";
@@ -117,7 +117,8 @@ export function createWriteLookups(kit: CangeAgentKit, ensureAuth: () => Promise
 /**
  * R4-P1: a lista do campo de usuário da tela (`ComboBoxUser`). Variation "2": os usuários da
  * empresa (`GET /user/by-company`, sem bloqueado); senão `GET /user/by-flow?form_id` sem o
- * leitor (`flow_user_type = 'V'`). Cache por formulário. Falha = undefined (não confere).
+ * leitor (`flow_user_type = 'V'`). Cache por formulário. Falha = undefined (não confere); o prazo
+ * do `throttle` esgotado (`ReadBudgetExceededError`) sobe para quem chamou.
  */
 export function screenUsersFor(
   kit: CangeAgentKit,
@@ -142,7 +143,9 @@ export function screenUsersFor(
         if (formId === undefined || formId === null || String(formId).trim() === "") return undefined;
         const { users } = await run(() => kit.contracts.listUsersByForm({ formId: String(formId) }));
         return new Set(users.filter((user) => user.flowUserType !== "V").map((user) => user.id));
-      } catch {
+      } catch (error) {
+        // REG-F1: o prazo do mover acabou antes da leitura; quem chamou marca o campo como não conferido.
+        if (error instanceof ReadBudgetExceededError) throw error;
         return undefined;
       }
     })();

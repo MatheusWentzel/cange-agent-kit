@@ -1,6 +1,7 @@
 import { isForceDryRun, isWriteRequest } from "../utils/forceDryRun.js";
 
 import { CangeApiError, CangeCliUsageError, type CangeHttpMethod, sanitizeSensitive } from "./errors.js";
+import { noteRead } from "./readWindow.js";
 
 export interface CangeClientConfig {
   baseUrl: string;
@@ -80,12 +81,20 @@ export function createCangeClient(config: CangeClientConfig): CangeClient {
           hasBody: bodyInit !== undefined
         });
 
-        const response = await fetchFn(url, {
-          method,
-          headers: finalHeaders,
-          body: bodyInit,
-          signal: abortController.signal
-        });
+        // REG-F1: o teto de leitura do back conta toda tentativa de GET, quando ela chega (entre o
+        // início e a resposta): o `readWindow` guarda os dois (ver `createReadWindowPacer`).
+        const readDone = method === "GET" ? noteRead() : undefined;
+        let response: globalThis.Response;
+        try {
+          response = await fetchFn(url, {
+            method,
+            headers: finalHeaders,
+            body: bodyInit,
+            signal: abortController.signal
+          });
+        } finally {
+          readDone?.();
+        }
 
         const parsedBody = await parseResponseBody(response);
         if (!response.ok) {
