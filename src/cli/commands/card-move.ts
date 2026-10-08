@@ -21,6 +21,8 @@ import {
   createWriteLookups,
   fieldTitles,
   findStep,
+  formattedInfo,
+  formattedOf,
   initScope,
   loadFlowContext,
   otherStepScopes,
@@ -248,6 +250,8 @@ export async function runInlineMove(
   // F2: o que o autocompletar da tela preencheu e vai no mover (fora o que veio no --set).
   const autocompleted = autocompletedTitles(carry, originValues);
   const autoInfo = autocompleted.length > 0 ? { autocompleted } : {};
+  // v9 (h): telefone e documento do --set já vão nos `calls[].payload.values` como a tela grava.
+  const formatted = formattedInfo(formattedOf(resolved));
 
   if (options.dryRun) {
     const validation = validationSummary(allIssues);
@@ -261,6 +265,7 @@ export async function runInlineMove(
         kept,
         ...(resent ? { keptFrom: resent.source } : {}),
         ...autoInfo,
+        ...formatted,
         validation,
         ...(warning ? { warning } : {})
       },
@@ -307,6 +312,7 @@ export async function runInlineMove(
     kept,
     ...(resent && kept > 0 ? { keptFrom: resent.source } : {}),
     ...autoInfo,
+    ...formatted,
     summary:
       `Cartão ${cardId} movido de ${fromStep.name ?? fromStep.id} para ${toStep.name ?? toStep.id}` +
       (written.length > 0 ? `; gravou ${fieldTitles(resolved)}.` : "."),

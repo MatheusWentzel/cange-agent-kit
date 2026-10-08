@@ -11,6 +11,11 @@ import {
   addInlineValueOptions,
   authOnce,
   fieldTitles,
+  fieldsForMask,
+  formattedInfo,
+  formattedOf,
+  maskPassthroughValues,
+  mayNeedScreenMask,
   needsFieldResolution,
   parseInlineValues,
   resolveRegisterValues,
@@ -69,10 +74,12 @@ export function registerRegisterUpdateCommand(registerCommand: Command): void {
             formAnswerId: Number(options.formAnswerId),
             values
           };
+          // v9 (h): telefone e documento já vão no payload como a tela grava.
+          const formatted = formattedInfo(formattedOf(resolved));
           if (options.dryRun) {
             const validation = validationSummary(issues);
             return withExitCode(
-              { ...createDryRunResult(payload), validation },
+              { ...createDryRunResult(payload), validation, ...formatted },
               validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
             );
           }
@@ -82,6 +89,7 @@ export function registerRegisterUpdateCommand(registerCommand: Command): void {
             ok: true,
             registerId: payload.registerId,
             entryId: payload.formAnswerId,
+            ...formatted,
             summary: `Entrada ${payload.formAnswerId} do cadastro ${payload.registerId}: gravou ${fieldTitles(resolved)}.`
           };
         }
@@ -95,6 +103,9 @@ export function registerRegisterUpdateCommand(registerCommand: Command): void {
         }
         const payload = parsed.data;
         const validate = options.validateFields === true;
+        let formatted: ReturnType<typeof formattedInfo> = {};
+        const payloadRegisterId =
+          options.registerId ?? (payload.registerId !== undefined ? String(payload.registerId) : undefined);
 
         if (needsFieldResolution({ ...payload.values, ...(inline ?? {}) }, validate || inline !== undefined)) {
           const registerId =
@@ -105,7 +116,7 @@ export function registerRegisterUpdateCommand(registerCommand: Command): void {
                 "Ou use o hash (name) do campo (cange fields by-register --register-id <id>)."
             );
           }
-          const { values, issues } = await resolveRegisterValues({
+          const { values, issues, resolved } = await resolveRegisterValues({
             kit,
             auth,
             registerId,
@@ -115,22 +126,42 @@ export function registerRegisterUpdateCommand(registerCommand: Command): void {
             requireRequired: validate,
             passthroughUnknown: !validate
           });
+          formatted = formattedInfo(formattedOf(resolved));
           if (options.dryRun) {
             const validation = validationSummary(issues);
             return withExitCode(
-              { ...createDryRunResult({ ...payload, values }), validation },
+              { ...createDryRunResult({ ...payload, values }), validation, ...formatted },
               validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
             );
           }
           throwIfInvalid(issues);
           payload.values = values;
+        } else if (payloadRegisterId !== undefined && mayNeedScreenMask(payload.values)) {
+          // v9 (h): sem resolução, o kit lê os campos do cadastro (1 GET) só para gravar telefone e
+          // documento como a tela grava. Sem o cadastro (nem --register-id nem registerId), segue como veio.
+          await auth();
+          const fields = await fieldsForMask(async () =>
+            (await kit.contracts.getFieldsByRegister({ registerId: payloadRegisterId })).fields
+          );
+          if (fields) {
+            const masked = maskPassthroughValues(payload.values, fields);
+            formatted = formattedInfo(masked.formatted);
+            if (options.dryRun) {
+              const validation = validationSummary(masked.issues);
+              if (!validation.valid) {
+                return withExitCode({ ...createDryRunResult(payload), validation, ...formatted }, EXIT_CODES.USAGE);
+              }
+            }
+            throwIfInvalid(masked.issues);
+            payload.values = masked.values;
+          }
         }
 
         if (options.dryRun) {
-          return createDryRunResult(payload);
+          return { ...createDryRunResult(payload), ...formatted };
         }
 
-        return kit.contracts.updateRegister(payload);
+        return { ...(await kit.contracts.updateRegister(payload)), ...formatted };
       })
     );
 

@@ -17,8 +17,11 @@ import {
   authOnce,
   createWriteLookups,
   formScope,
+  formattedInfo,
+  formattedOf,
   initScope,
   loadFlowContext,
+  maskPassthroughValues,
   mergedValues,
   needsFieldResolution,
   parseInlineValues,
@@ -143,6 +146,8 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         let validation: ReturnType<typeof validationSummary> | undefined;
         let finalValues: Record<string, unknown> = payload.values;
         const issues: ValueIssue[] = [];
+        // v9 (h): telefone e documento do payload vão como a tela grava (o rascunho reenviado não é tocado).
+        let formatted: ReturnType<typeof formattedInfo> = {};
         const resolveNeeded = needsFieldResolution(
           { ...payload.values, ...(inline ?? {}) },
           options.validateFields === true || inline !== undefined
@@ -171,6 +176,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
             passthroughUnknown: options.validateFields !== true
           });
           finalValues = mergedValues(resolution);
+          formatted = formattedInfo(formattedOf(resolution.resolved));
           issues.push(...resolution.issues);
           if (issues.some((issue) => issue.kind === "out_of_scope")) {
             issues.push({
@@ -179,6 +185,12 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
               text: `o idForm ${targetFormId} só grava ${target.label}. \`cange card move --card-id ${payload.cardId} --to ${payload.toStepId} --set "Campo=valor"\` separa os formulários sozinho`
             });
           }
+        } else {
+          // Sem resolução: os campos do fluxo já estão lidos (ctx.fields), sem GET extra.
+          const masked = maskPassthroughValues(finalValues, ctx.fields);
+          finalValues = masked.values;
+          formatted = formattedInfo(masked.formatted);
+          issues.push(...masked.issues);
         }
 
         // Decisão 1 (06/10): os obrigatórios da etapa ATUAL do cartão, sempre (com ou sem
@@ -207,7 +219,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
           validation = validationSummary(issues);
           if (!validation.valid) {
             return withExitCode(
-              { ...createDryRunResult({ ...payload, values: finalValues }), validation },
+              { ...createDryRunResult({ ...payload, values: finalValues }), validation, ...formatted },
               EXIT_CODES.USAGE
             );
           }
@@ -251,6 +263,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
           return {
             ...createDryRunResult(payload),
             ...keptInfo,
+            ...formatted,
             ...(validation ? { validation } : {}),
             ...(check.warning ? { warning: check.warning } : {}),
             dataLossCheck
@@ -262,8 +275,8 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         // Com o reenvio, os órfãos são os "Não reenviados" que já estão no check.warning.
         const orphanNote = hasOrphans && !check.writtenCarry ? [dataLossCheck.note] : [];
         const warnings = [...orphanNote, ...(check.warning ? [check.warning] : [])];
-        if (warnings.length === 0) return { ...result, ...keptInfo };
-        return { ...result, ...keptInfo, warning: warnings.join(" "), ...(hasOrphans ? { dataLossCheck } : {}) };
+        if (warnings.length === 0) return { ...result, ...keptInfo, ...formatted };
+        return { ...result, ...keptInfo, ...formatted, warning: warnings.join(" "), ...(hasOrphans ? { dataLossCheck } : {}) };
       })
     );
 

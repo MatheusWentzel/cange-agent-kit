@@ -12,6 +12,7 @@ import {
   looksLikeTitleKey,
   normalizeText,
   resolveFieldValues,
+  screenMaskOf,
   type CompanyUser,
   type FormScope,
   type ResolvedValue,
@@ -21,7 +22,7 @@ import {
 
 import { ReadBudgetExceededError, type Throttle } from "../utils/rateLimit.js";
 
-import { envCardId, envFlowId } from "./env-defaults.js";
+import { envCardId, envFlowId, envSpeakerUserId } from "./env-defaults.js";
 import { FLOW_FROM_CARD_HINT } from "./resource-ref.js";
 
 /**
@@ -94,6 +95,8 @@ export function createWriteLookups(kit: CangeAgentKit, ensureAuth: () => Promise
   let usersPromise: Promise<CompanyUser[]> | undefined;
   const screenLists = new Map<string, Promise<ReadonlySet<number> | undefined>>();
   return {
+    // v9 (C1): `eu` num campo de usuário = quem conversa com o agente.
+    speakerUserId: envSpeakerUserId,
     screenUsers(field) {
       return screenUsersFor(kit, field, screenLists, ensureAuth);
     },
@@ -335,6 +338,87 @@ export function throwIfInvalid(issues: ValueIssue[]): void {
   const summary = validationSummary(issues);
   if (!summary.valid) {
     throw new CangeValidationError(`Nada foi gravado.\n${summary.message}`, { code: "FIELD_VALIDATION" });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// v9 (h): telefone e documento gravam o que a tela grava
+// ---------------------------------------------------------------------------
+
+/** Valor que a máscara da tela mudou (sai em `formatted` no sucesso e no dry-run). */
+export interface FormattedValue {
+  field: string;
+  from: string;
+  to: string;
+}
+
+/** O que a máscara mudou nos valores resolvidos (vazio = nada). */
+export function formattedOf(resolved: ResolvedValue[]): FormattedValue[] {
+  return resolved
+    .filter((item) => item.formattedFrom !== undefined)
+    .map((item) => ({ field: item.field.title ?? item.field.name, from: item.formattedFrom!, to: String(item.value) }));
+}
+
+/** `{ formatted }` só quando a máscara mudou algo (para espalhar na saída). */
+export function formattedInfo(formatted: FormattedValue[] | undefined): { formatted?: FormattedValue[] } {
+  return formatted && formatted.length > 0 ? { formatted } : {};
+}
+
+/**
+ * Algum valor tem cara de telefone ou documento? Sem pontuação e espaço: 10 a 14 dígitos
+ * (telefone com DDD, CPF, CNPJ) ou o formato do CNPJ alfanumérico (12 letras ou dígitos e 2
+ * dígitos). Só assim o payload por arquivo sem resolução gasta o GET dos campos; o resto segue
+ * sem consulta extra, como antes.
+ */
+export function mayNeedScreenMask(values: Record<string, unknown>): boolean {
+  return Object.values(values).some((value) => {
+    if (typeof value !== "string" && typeof value !== "number") return false;
+    const bare = String(value).replace(/[\s().\-/+]/g, "");
+    return /^\d{10,14}$/.test(bare) || /^[0-9A-Za-z]{12}\d{2}$/.test(bare);
+  });
+}
+
+/**
+ * v9 (h): payload por arquivo que segue SEM resolução (chave hash, sem --validate-fields).
+ * Telefone e documento, achados pelo hash (ou id) nos campos do formulário, vão como a
+ * tela grava; valor que a tela recusa vira `issue` (exit 2, nada gravado), como no `--set`.
+ * O resto segue como veio.
+ */
+export function maskPassthroughValues(
+  values: Record<string, unknown>,
+  fields: NormalizedField[]
+): { values: Record<string, unknown>; formatted: FormattedValue[]; issues: ValueIssue[] } {
+  const out: Record<string, unknown> = { ...values };
+  const formatted: FormattedValue[] = [];
+  const issues: ValueIssue[] = [];
+  for (const [key, value] of Object.entries(values)) {
+    const plain = key.trim();
+    const field =
+      fields.find((candidate) => candidate.name === plain) ??
+      (/^\d+$/.test(plain) ? fields.find((candidate) => String(candidate.id) === plain) : undefined);
+    if (!field) continue;
+    const masked = screenMaskOf(field, value);
+    if (masked.issue) {
+      issues.push(masked.issue);
+      continue;
+    }
+    if (masked.from !== undefined) {
+      out[key] = masked.value;
+      formatted.push({ field: field.title ?? field.name, from: masked.from, to: String(masked.value) });
+    }
+  }
+  return { values: out, formatted, issues };
+}
+
+/**
+ * Campos para a máscara do payload por arquivo (1 GET). Leitura de apoio: se falhar, o
+ * payload segue como antes do v9 (o back decide), sem derrubar a escrita.
+ */
+export async function fieldsForMask(load: () => Promise<NormalizedField[]>): Promise<NormalizedField[] | undefined> {
+  try {
+    return await load();
+  } catch {
+    return undefined;
   }
 }
 

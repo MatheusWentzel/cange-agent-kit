@@ -1928,6 +1928,8 @@ describe("R4-P2: documento e telefone com a régua da tela", () => {
       "--set", "CPF3=111.444.777-35", "--set", "CPF ou CNPJ=12.ABC.345/01DE-35", "--set", "WhatsApp do Executor=(21) 98765-4321"
     ]);
     expect(process.exitCode ?? 0).toBe(0);
-    expect(ok?.calls[0].payload.values).toMatchObject({ h_cpf: "111.444.777-35", h_doc: "12.ABC.345/01DE-35", h_zap: "(21) 98765-4321" });
+    // v9 (h): o telefone vai como a tela grava (a máscara do InputPhone não põe o hífen em 11 dígitos).
+    expect(ok?.calls[0].payload.values).toMatchObject({ h_cpf: "111.444.777-35", h_doc: "12.ABC.345/01DE-35", h_zap: "(21) 987654321" });
+    expect(ok?.formatted).toEqual([{ field: "WhatsApp do Executor", from: "(21) 98765-4321", to: "(21) 987654321" }]);
   });
 });

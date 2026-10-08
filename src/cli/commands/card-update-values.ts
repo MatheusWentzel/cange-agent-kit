@@ -15,8 +15,13 @@ import {
   authOnce,
   createWriteLookups,
   fieldTitles,
+  fieldsForMask,
+  formattedInfo,
+  formattedOf,
   initScope,
   loadFlowContext,
+  maskPassthroughValues,
+  mayNeedScreenMask,
   mergedValues,
   needsFieldResolution,
   otherStepScopes,
@@ -126,10 +131,12 @@ async function runInlineMode(
   });
 
   const calls = buildCalls(resolved, forms, Number(flowId), Number(cardId));
+  // v9 (h): telefone e documento já vão nos `calls[].payload` como a tela grava.
+  const formatted = formattedInfo(formattedOf(resolved));
   if (options.dryRun) {
     const validation = validationSummary(issues);
     return withExitCode(
-      { dryRun: true, executed: false, calls, validation },
+      { dryRun: true, executed: false, calls, validation, ...formatted },
       validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
     );
   }
@@ -165,6 +172,7 @@ async function runInlineMode(
     cardId: Number(cardId),
     flowId: Number(flowId),
     updated: resolved.map((item) => item.field.title ?? item.field.name),
+    ...formatted,
     summary: `Cartão ${cardId}: gravou ${fieldTitles(resolved)}.`
   };
 }
@@ -211,6 +219,25 @@ async function runPayloadMode(
   }
   const payload = parsed.data;
   const resolveNeeded = needsFieldResolution({ ...payload.values, ...(inline ?? {}) }, options.validateFields === true || inline !== undefined);
+  let formatted: ReturnType<typeof formattedInfo> = {};
+
+  if (!resolveNeeded && mayNeedScreenMask(payload.values)) {
+    // v9 (h): sem resolução, o kit lê os campos (1 GET) só para gravar telefone e documento como a tela.
+    await auth();
+    const fields = await fieldsForMask(async () => (await kit.contracts.getFieldsByFlow({ flowId: payload.flowId })).fields);
+    if (fields) {
+      const masked = maskPassthroughValues(payload.values, fields);
+      formatted = formattedInfo(masked.formatted);
+      if (options.dryRun) {
+        const validation = validationSummary(masked.issues);
+        if (!validation.valid) {
+          return withExitCode({ ...createDryRunResult(payload), validation, ...formatted }, EXIT_CODES.USAGE);
+        }
+      }
+      throwIfInvalid(masked.issues);
+      payload.values = masked.values;
+    }
+  }
 
   if (resolveNeeded) {
     await auth();
@@ -229,10 +256,11 @@ async function runPayloadMode(
       passthroughUnknown: options.validateFields !== true
     });
     const values = mergedValues({ resolved, passthrough });
+    formatted = formattedInfo(formattedOf(resolved));
     if (options.dryRun) {
       const validation = validationSummary(issues);
       return withExitCode(
-        { ...createDryRunResult({ ...payload, values }), validation },
+        { ...createDryRunResult({ ...payload, values }), validation, ...formatted },
         validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
       );
     }
@@ -241,7 +269,7 @@ async function runPayloadMode(
   }
 
   if (options.dryRun) {
-    return createDryRunResult(payload);
+    return { ...createDryRunResult(payload), ...formatted };
   }
-  return kit.contracts.updateCardValues(payload);
+  return { ...(await kit.contracts.updateCardValues(payload)), ...formatted };
 }

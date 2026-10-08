@@ -7,7 +7,7 @@ import {
   type OptionDescriptor
 } from "./fieldTypeGuards.js";
 import { isEmptyForField, isRequiredOnScreen } from "./requiredFields.js";
-import { docTypeOf } from "./screenFormat.js";
+import { docTypeOf, hasScreenFormat, screenFormattedValue } from "./screenFormat.js";
 
 export { isHiddenOnForm } from "./requiredFields.js";
 
@@ -61,7 +61,17 @@ export interface ResolverLookups {
    * deu para ler a lista (o kit não confere).
    */
   screenUsers?: (field: NormalizedField) => Promise<ReadonlySet<number> | undefined>;
+  /**
+   * v9 (C1): quem conversa com o agente (RUNNER_SPEAKER_USER_ID), para o valor `eu` num campo
+   * de usuário. undefined = fora de conversa (o `eu` vira erro de uso). Sem a função, `eu` é
+   * um nome como outro qualquer.
+   */
+  speakerUserId?: () => number | undefined;
 }
+
+/** Erro de `eu` fora de conversa (rotina, automação ou terminal). */
+export const SPEAKER_OUTSIDE_CHAT_MESSAGE =
+  '"eu" só vale numa conversa: informe o nome, o e-mail ou o id da pessoa.';
 
 /** Tipos que a tela monta com o `ComboBoxUser` (a lista do campo vale para eles). */
 export const SCREEN_USER_TYPES = new Set(["COMBO_BOX_USER_FIELD", "REQUESTER_FIELD"]);
@@ -94,6 +104,11 @@ export interface ResolvedValue {
   field: NormalizedField;
   form: FormScope;
   value: unknown;
+  /**
+   * v9 (h): valor como veio, quando a máscara da tela o mudou (telefone e documento). O
+   * `value` já é o que a tela grava (o que o back aceita e o que a aprovação prende).
+   */
+  formattedFrom?: string;
 }
 
 export interface ResolveResult {
@@ -437,6 +452,11 @@ async function resolveUser(raw: unknown, lookups: ResolverLookups | undefined): 
   if (id !== undefined) return { ok: true, value: id };
   if (typeof raw !== "string") return { ok: false, error: "use o id, o e-mail ou o nome do usuário" };
   const text = raw.trim();
+  // v9 (C1): `eu` = quem conversa com o agente (o id vem do ambiente do processo).
+  if (lookups?.speakerUserId && text.replace(/^@/, "").toLowerCase() === "eu") {
+    const speaker = lookups.speakerUserId();
+    return speaker !== undefined ? { ok: true, value: speaker } : { ok: false, error: SPEAKER_OUTSIDE_CHAT_MESSAGE };
+  }
   const isEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(text);
 
   let users: CompanyUser[] | undefined;
@@ -792,10 +812,33 @@ export async function resolveFieldValues(input: {
       continue;
     }
 
-    resolved.push({ key, field, form, value: coerced.value });
+    // v9 (h): telefone e documento vão como a tela grava (conversa 858: o telefone sem
+    // máscara passava na conferência e o back recusava depois da aprovação).
+    const masked = screenMaskOf(field, coerced.value);
+    resolved.push({ key, field, form, value: masked.value, ...(masked.from !== undefined ? { formattedFrom: masked.from } : {}) });
   }
 
   return { resolved, issues, passthrough };
+}
+
+/**
+ * v9 (h, conversa 858 e run 1011): telefone (PHONE_FIELD) e documento (DOC_FIELD) gravam o
+ * que a TELA grava: o valor do componente depois das 2 passadas da máscara
+ * (`screenFormattedValue`: telefone "51981740992" vira "(51) 981740992", como o `InputPhone`;
+ * CPF/CNPJ pela variation, CNPJ alfanumérico em maiúscula). Idempotente: valor já no formato
+ * da tela não muda. Valor que a tela recusa volta em `issue` (o mesmo texto do `--set`) e
+ * não é mexido. Outros tipos, vazio e não texto: como vieram.
+ */
+export function screenMaskOf(field: NormalizedField, value: unknown): { value: unknown; from?: string; issue?: ValueIssue } {
+  const type = normalizeFieldType(field.type ?? "");
+  if (!hasScreenFormat(type)) return { value };
+  // Telefone ou documento como número (payload por arquivo): o campo grava texto.
+  const text = typeof value === "number" && Number.isFinite(value) ? String(value) : value;
+  if (typeof text !== "string" || text.trim() === "") return { value };
+  const issue = checkCoercedValue(field, text);
+  if (issue) return { value, issue };
+  const masked = screenFormattedValue(type, field.variation ?? field.raw?.variation, text);
+  return masked !== value && masked.trim() !== "" ? { value: masked, from: text } : { value };
 }
 
 /** Guarda final pelo tipo (mesmas regras do validate-fields de sempre). */

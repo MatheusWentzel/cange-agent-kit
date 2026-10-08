@@ -9,6 +9,11 @@ import {
   addInlineValueOptions,
   authOnce,
   createWriteLookups,
+  fieldsForMask,
+  formattedInfo,
+  formattedOf,
+  maskPassthroughValues,
+  mayNeedScreenMask,
   mergedValues,
   needsFieldResolution,
   parseInlineValues,
@@ -51,6 +56,8 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
         // P4: chaves e valores do filho pelo resolvedor único (título, id, rótulo,
         // número em texto, data), contra o formulário do filho (child.idForm).
         const inline = parseInlineValues(options);
+        // v9 (h): telefone e documento do filho vão como a tela grava.
+        let formatted: ReturnType<typeof formattedInfo> = {};
         if (needsFieldResolution({ ...child.values, ...(inline ?? {}) }, inline !== undefined)) {
           const auth = authOnce(kit, ensureAuth);
           await auth();
@@ -65,6 +72,16 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
           });
           throwIfInvalid(issues);
           child.values = mergedValues({ resolved, passthrough });
+          formatted = formattedInfo(formattedOf(resolved));
+        } else if (mayNeedScreenMask(child.values)) {
+          await authOnce(kit, ensureAuth)();
+          const fields = await fieldsForMask(async () => (await kit.contracts.getFieldsByFlow({ flowId: child.flowId })).fields);
+          if (fields) {
+            const masked = maskPassthroughValues(child.values, fields);
+            throwIfInvalid(masked.issues);
+            child.values = masked.values;
+            formatted = formattedInfo(masked.formatted);
+          }
         }
         if (/^\d+$/.test(parent.linkField)) {
           const link = await normalizeNumericValueKeys(kit, parent.flowId, { [parent.linkField]: true }, ensureAuth);
@@ -72,17 +89,20 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
         }
 
         if (options.dryRun) {
-          return createDryRunResult({
-            ...parsed.data,
-            preview: {
-              willCreateChildInFlow: child.flowId,
-              willLinkOnParentField: parent.linkField,
-              resultingChildIds: "[...existingChildIds, novoId] (REPLACE do campo multi-valor)"
-            }
-          });
+          return {
+            ...createDryRunResult({
+              ...parsed.data,
+              preview: {
+                willCreateChildInFlow: child.flowId,
+                willLinkOnParentField: parent.linkField,
+                resultingChildIds: "[...existingChildIds, novoId] (REPLACE do campo multi-valor)"
+              }
+            }),
+            ...formatted
+          };
         }
 
-        return kit.contracts.addChildCard(parsed.data);
+        return { ...(await kit.contracts.addChildCard(parsed.data)), ...formatted };
       })
     );
 }

@@ -11,6 +11,11 @@ import {
   addInlineValueOptions,
   authOnce,
   fieldTitles,
+  fieldsForMask,
+  formattedInfo,
+  formattedOf,
+  maskPassthroughValues,
+  mayNeedScreenMask,
   needsFieldResolution,
   parseInlineValues,
   resolveRegisterValues,
@@ -62,10 +67,12 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
             origin: "/cange-agent-kit",
             values
           };
+          // v9 (h): telefone e documento já vão no payload como a tela grava.
+          const formatted = formattedInfo(formattedOf(resolved));
           if (options.dryRun) {
             const validation = validationSummary(issues);
             return withExitCode(
-              { ...createDryRunResult(payload), validation },
+              { ...createDryRunResult(payload), validation, ...formatted },
               validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
             );
           }
@@ -77,6 +84,7 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
             ok: true,
             registerId: payload.registerId,
             ...(entryId !== undefined ? { entryId } : {}),
+            ...formatted,
             summary: `Entrada criada no cadastro ${options.registerId}; gravou ${fieldTitles(resolved)}.`
           };
         }
@@ -92,10 +100,11 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
         const payload = parsed.data;
         const registerId = options.registerId ?? String(payload.registerId);
         const validate = options.validateFields === true;
+        let formatted: ReturnType<typeof formattedInfo> = {};
 
         if (needsFieldResolution({ ...payload.values, ...(inline ?? {}) }, validate || inline !== undefined)) {
           // R5-KR-03 + P4: chave pelo título, id ou hash; valores convertidos para o tipo do campo.
-          const { values, issues } = await resolveRegisterValues({
+          const { values, issues, resolved } = await resolveRegisterValues({
             kit,
             auth,
             registerId,
@@ -105,22 +114,40 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
             requireRequired: validate,
             passthroughUnknown: !validate
           });
+          formatted = formattedInfo(formattedOf(resolved));
           if (options.dryRun) {
             const validation = validationSummary(issues);
             return withExitCode(
-              { ...createDryRunResult({ ...payload, values }), validation },
+              { ...createDryRunResult({ ...payload, values }), validation, ...formatted },
               validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
             );
           }
           throwIfInvalid(issues);
           payload.values = values;
+        } else if (mayNeedScreenMask(payload.values)) {
+          // v9 (h): sem resolução, o kit lê os campos do cadastro (1 GET) só para gravar telefone e
+          // documento como a tela grava.
+          await auth();
+          const fields = await fieldsForMask(async () => (await kit.contracts.getFieldsByRegister({ registerId })).fields);
+          if (fields) {
+            const masked = maskPassthroughValues(payload.values, fields);
+            formatted = formattedInfo(masked.formatted);
+            if (options.dryRun) {
+              const validation = validationSummary(masked.issues);
+              if (!validation.valid) {
+                return withExitCode({ ...createDryRunResult(payload), validation, ...formatted }, EXIT_CODES.USAGE);
+              }
+            }
+            throwIfInvalid(masked.issues);
+            payload.values = masked.values;
+          }
         }
 
         if (options.dryRun) {
-          return createDryRunResult(payload);
+          return { ...createDryRunResult(payload), ...formatted };
         }
 
-        return kit.contracts.createRegister(payload);
+        return { ...(await kit.contracts.createRegister(payload)), ...formatted };
       })
     );
 

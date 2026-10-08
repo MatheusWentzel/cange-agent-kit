@@ -31,8 +31,13 @@ import {
   authOnce as authOnceShared,
   createWriteLookups,
   fieldTitles,
+  fieldsForMask,
+  formattedInfo,
+  formattedOf,
   initScope,
   loadFlowContext,
+  maskPassthroughValues,
+  mayNeedScreenMask,
   mergedValues,
   needsFieldResolution,
   otherStepScopes,
@@ -41,6 +46,7 @@ import {
   scopesFromFields,
   throwIfInvalid,
   validationSummary,
+  type FormattedValue,
   type InlineValueOptions
 } from "../write-support.js";
 
@@ -150,11 +156,11 @@ export function registerCardCreateCommand(cardCommand: Command): void {
             const item = items[0]!;
             if (item.validation) {
               return withExitCode(
-                { ...createDryRunResult(item.payload), validation: item.validation },
+                { ...createDryRunResult(item.payload), validation: item.validation, ...formattedInfo(item.formatted) },
                 item.validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
               );
             }
-            return createDryRunResult(item.payload);
+            return { ...createDryRunResult(item.payload), ...formattedInfo(item.formatted) };
           }
           return createDryRunResult({
             batch: true,
@@ -164,7 +170,8 @@ export function registerCardCreateCommand(cardCommand: Command): void {
             payloads: items.map((item) => ({
               payload: item.source,
               flowId: item.payload.flowId,
-              idForm: item.payload.idForm
+              idForm: item.payload.idForm,
+              ...formattedInfo(item.formatted)
             }))
           });
         }
@@ -186,13 +193,14 @@ export function registerCardCreateCommand(cardCommand: Command): void {
             }
           );
           if (options.full) {
-            return result;
+            return { ...result, ...formattedInfo(item.formatted) };
           }
           // A saída default é ENXUTA — o envelope completo (raw de dezenas de
           // KB) inundava o contexto do agente. --full devolve tudo.
           return {
             ...toCreatedCard(result),
-            ...(item.translatedKeys.length > 0 ? { translatedKeys: item.translatedKeys } : {})
+            ...(item.translatedKeys.length > 0 ? { translatedKeys: item.translatedKeys } : {}),
+            ...formattedInfo(item.formatted)
           };
         }
 
@@ -256,6 +264,7 @@ async function runInlineCreate(
     lookups: createWriteLookups(kit, auth)
   });
   const values = valuesOf(resolved);
+  const formatted = formattedOf(resolved);
   const allIssues =
     options.validateFields || options.dryRun ? [...issues, ...findMissingRequired(init, values)] : issues;
   const payload: CreateCardPayload = {
@@ -268,7 +277,7 @@ async function runInlineCreate(
   if (options.dryRun) {
     const validation = validationSummary(allIssues);
     return withExitCode(
-      { ...createDryRunResult(payload), validation },
+      { ...createDryRunResult(payload), validation, ...formattedInfo(formatted) },
       validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
     );
   }
@@ -278,11 +287,12 @@ async function runInlineCreate(
     () => kit.contracts.createCard(payload).catch(rethrowWithVerifyHint),
     { maxRetries: parseMaxRetries(options.maxRetries), shouldRetry: isRateLimitError }
   );
-  if (options.full) return result;
+  if (options.full) return { ...result, ...formattedInfo(formatted) };
   const created = toCreatedCard(result);
   return {
     ok: true,
     ...created,
+    ...formattedInfo(formatted),
     summary:
       `Cartão ${String(created.cardId)} criado no fluxo ${ctx.flowName ?? options.flowId}` +
       (resolved.length > 0 ? `; gravou ${fieldTitles(resolved)}.` : ".")
@@ -296,6 +306,8 @@ interface BatchItem {
   translatedKeys: Array<{ from: string; to: string; title?: string }>;
   /** Só no dry-run de 1 card com resolução: resultado da validação. */
   validation?: ReturnType<typeof validationSummary>;
+  /** v9 (h): telefone e documento que a máscara da tela mudou. */
+  formatted?: FormattedValue[];
 }
 
 interface CreatedCard {
@@ -477,7 +489,25 @@ async function loadItem(
   const payload = parsed.data;
   const merged = { ...payload.values, ...(options.inline ?? {}) };
   if (!needsFieldResolution(merged, options.validateFields || options.inline !== undefined)) {
-    return { source, payload, translatedKeys: [] };
+    // v9 (h): sem resolução, o kit ainda lê os campos (1 GET por fluxo, em cache no lote) para
+    // gravar telefone e documento como a tela grava.
+    if (!mayNeedScreenMask(payload.values)) return { source, payload, translatedKeys: [] };
+    await options.ensureAuth();
+    const fields = await fieldsForMask(async () => (await deps.fields(payload.flowId)).fields);
+    if (!fields) return { source, payload, translatedKeys: [] };
+    const masked = maskPassthroughValues(payload.values, fields);
+    const maskValidation = validationSummary(masked.issues);
+    if (!maskValidation.valid && !(single && options.dryRun)) {
+      throwIfInvalid(masked.issues);
+    }
+    payload.values = masked.values;
+    return {
+      source,
+      payload,
+      translatedKeys: [],
+      ...formattedInfo(masked.formatted),
+      ...(single && !maskValidation.valid ? { validation: maskValidation } : {})
+    };
   }
 
   // A resolução consulta a API; em --dry-run o CLI pula a autenticação global.
@@ -518,7 +548,7 @@ async function loadItem(
   const translatedKeys = resolved
     .filter((item) => item.key !== item.field.name)
     .map((item) => ({ from: item.key, to: item.field.name, ...(item.field.title ? { title: item.field.title } : {}) }));
-  return { source, payload, translatedKeys, ...(single ? { validation } : {}) };
+  return { source, payload, translatedKeys, ...formattedInfo(formattedOf(resolved)), ...(single ? { validation } : {}) };
 }
 
 /**
@@ -555,7 +585,7 @@ interface BatchSummary {
   failed: number;
   notAttempted: number;
   cardIds: unknown[];
-  cards: Array<{ payload: string } & CreatedCard>;
+  cards: Array<{ payload: string; formatted?: FormattedValue[] } & CreatedCard>;
   failures?: Array<{ payload: string; attempts: number; error: string; status?: number; retryAfterSeconds?: number }>;
   notAttemptedPayloads?: string[];
   aborted?: BatchReport<CreatedCard>["aborted"];
@@ -614,7 +644,7 @@ function buildBatchSummary(
         failures.push({ payload: source, attempts: result.attempts, error: `${CREATED_WITHOUT_ID}.` });
         continue;
       }
-      cards.push({ payload: source, ...result.value });
+      cards.push({ payload: source, ...result.value, ...formattedInfo(items[result.index]?.formatted) });
       continue;
     }
     if (!result.attempted) {
