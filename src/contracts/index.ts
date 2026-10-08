@@ -102,6 +102,9 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     listCompanyUsers: users.listCompanyUsers,
     // R4-P1: a lista do campo de usuário da tela (GET /user/by-flow?form_id).
     listUsersByForm: users.listUsersByForm,
+    // v9 (g): o seletor de responsável do cartão (GET /user/by-flow?id_flow) e as etiquetas do fluxo.
+    listUsersByFlow: users.listUsersByFlow,
+    listFlowTags: cards.listFlowTags,
     // POP-1 (revisão 4): os cartões conectados que o combo da tela carrega (POST, mas LEITURA).
     getCardsByIds: cards.getCardsByIds,
     // POP-2 (revisão 4): o autocompletar da tela ao abrir o cartão (POST, mas LEITURA).
@@ -123,6 +126,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     moveCardStep: cards.moveCardStep,
     moveCardStepWithValues: cards.moveCardStepWithValues,
     addCardLabel: cards.addCardLabel,
+    removeCardLabel: cards.removeCardLabel,
     addChildCard: cards.addChildCard,
     readNotification: notifications.readNotification,
     createCardComment: comments.createCardComment,

@@ -7,7 +7,7 @@ import { createDryRunResult } from "../../utils/dryRun.js";
 import { normalizeText, type CompanyUser } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
-import { envFlowId } from "../env-defaults.js";
+import { SPEAKER_OUTSIDE_CHAT_MESSAGE, envFlowId, envSpeakerUserId, isSpeakerRef } from "../env-defaults.js";
 import { readPayloadFile } from "../helpers.js";
 import { authOnce } from "../write-support.js";
 
@@ -34,7 +34,7 @@ export function registerCardCommentCreateCommand(commentCommand: Command): void 
     .option("--text <texto>", "Texto do comentário (markdown)")
     .option(
       "--mention <usuario>",
-      "Menciona e notifica (repetível): id, e-mail ou nome do usuário. Vira @[Nome](id) no texto e entra em `mentions`",
+      'Menciona e notifica (repetível): id, e-mail ou nome do usuário ("eu" = quem conversa com o agente). Vira @[Nome](id) no texto e entra em `mentions`',
       collectRepeatable
     )
     .option("--payload <path>", "AVANÇADO: arquivo JSON {cardId, flowId?, description, mentions?}")
@@ -127,7 +127,16 @@ export async function resolveMentions(kit: CangeAgentKit, refs: string[]): Promi
   const problems: string[] = [];
   for (const ref of refs) {
     const text = ref.trim().replace(/^@/, "");
-    const asId = /^#?\d+$/.test(text) ? Number(text.replace(/^#/, "")) : undefined;
+    // v9 (C1): `eu` = quem conversa com o agente (RUNNER_SPEAKER_USER_ID, só em conversa).
+    let speaker: number | undefined;
+    if (isSpeakerRef(text)) {
+      speaker = envSpeakerUserId();
+      if (speaker === undefined) {
+        problems.push(SPEAKER_OUTSIDE_CHAT_MESSAGE.replace(/\.$/, ""));
+        continue;
+      }
+    }
+    const asId = speaker ?? (/^#?\d+$/.test(text) ? Number(text.replace(/^#/, "")) : undefined);
     if (!users) {
       if (asId !== undefined) {
         out.push({ id: asId });

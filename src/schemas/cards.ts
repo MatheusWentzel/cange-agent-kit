@@ -13,8 +13,9 @@ export const updateCardPayloadSchema = z
   .object({
     flowId: coercedIdSchema,
     cardId: coercedIdSchema,
-    userId: coercedIdSchema.optional(),
-    dtDue: z.string().optional(),
+    // v9 (g): `null` limpa (responsável e vencimento), como a tela manda no PUT /card.
+    userId: coercedIdSchema.nullable().optional(),
+    dtDue: z.string().nullable().optional(),
     flowTagId: coercedIdSchema.optional(),
     complete: z.enum(["S", "N"]).optional(),
     archived: z.enum(["S", "N"]).optional()

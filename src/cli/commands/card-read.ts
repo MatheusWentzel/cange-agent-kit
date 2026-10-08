@@ -9,6 +9,7 @@ import {
   mapWithThrottle,
   retryAfterMs
 } from "../../utils/rateLimit.js";
+import { cardStateOf, dueLabel } from "../../utils/cardState.js";
 import { dropEmpty, htmlToMarkdown, looksLikeHtml, type OutputProfile } from "../../utils/lean.js";
 import { listFieldTitles, matchFieldsByKey } from "../../utils/valueResolver.js";
 import type { NormalizedField } from "../../schemas/fields.js";
@@ -203,7 +204,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
 
   annotateCommand(command, {
     envelope:
-      "Enxuto (padrão): { cardId, title, flowId, flowName, stepId, stepName, dueDate?, completedAt?, responsibleName?, archived, complete, fields: [{id, title, value} | {id, title, cards: [{cardId, label}]} | {id, title, entries: [{entryId, label}]}] } (rich text em markdown; valor acima de 600 caracteres sai cortado com a dica do --fields; --fields \"<título>\" traz só esses campos, inteiros; --field-ids devolve o valor original). " +
+      "Enxuto (padrão): { cardId, title, flowId, flowName, stepId, stepName, due (\"27/10/2026 00:00\", hora de Brasília, ou null), completedAt?, responsible ({id, name} ou null), tags ([{id, name}], sem etiqueta = []), archived, complete, fields: [{id, title, value} | {id, title, cards: [{cardId, label}]} | {id, title, entries: [{entryId, label}]}] } (rich text em markdown; valor acima de 600 caracteres sai cortado com a dica do --fields; --fields \"<título>\" traz só esses campos, inteiros; --field-ids devolve o valor original). " +
       "Com --full: { cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? } — com --card-ids: { count, ok, errors, notAttempted?, aborted?, cards: [<mesmo shape>; card que falhou vira {cardId, error}] }. Lote parcial sai com exit code 5; lote em que NADA foi lido sai com a categoria do erro (ex.: 4). Em 429 o lote PARA e o restante volta como notAttempted.",
     fieldsLocation:
       "fieldValues: chave = field id, valor = texto legível (multi-valor vira array). links: vínculos COMBO_BOX_FLOW_FIELD — [{cardId, label}] (acha os FILHOS de um pai). registerLinks: COMBO_BOX_REGISTER_FIELD — [{entryId, label}] (o entryId pronto p/ usar em campo de register de outro card)",
@@ -220,7 +221,7 @@ function buildLeanRead(
   const s = result.summary as Record<string, unknown>;
   const extracted = extractValuesAndLinks(result.raw);
   if (profile === "lean") {
-    return buildAgentRead(s, extracted, request);
+    return buildAgentRead(s, extracted, request, result.raw);
   }
   const requestedFieldIds = request?.ids ?? [];
 
@@ -275,7 +276,8 @@ function buildLeanRead(
 function buildAgentRead(
   s: Record<string, unknown>,
   extracted: ExtractedCard,
-  request: FieldRequest | undefined
+  request: FieldRequest | undefined,
+  raw: unknown
 ): Record<string, unknown> {
   const values: Record<string, unknown> =
     extracted.fieldValues ?? ((s.fieldValues ?? s.fields ?? {}) as Record<string, unknown>);
@@ -314,6 +316,10 @@ function buildAgentRead(
     return entry;
   });
 
+  // v9 (g, conversas 857 e runs 1125/1126): vencimento, responsável e etiquetas SEMPRE
+  // presentes (null e [] querem dizer vazio), para o agente não confundir vazio com não lido.
+  // O dropEmpty não tira null nem [] no primeiro nível.
+  const state = cardStateOf(raw);
   return {
     cardId: s.cardId ?? s.id_card,
     title: s.title,
@@ -322,10 +328,10 @@ function buildAgentRead(
     stepId: s.currentStepId ?? s.step_id,
     stepName: s.stepName,
     createdAt: s.createdAt,
-    dueDate: s.dueDate,
+    due: state.due === null ? null : dueLabel(state.due),
     completedAt: s.completedAt,
-    responsibleUserId: s.responsibleUserId,
-    responsibleName: s.responsibleName,
+    responsible: state.responsible,
+    tags: state.tags,
     archived: s.archived,
     complete: s.complete,
     fields

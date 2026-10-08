@@ -108,7 +108,22 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   Mover exige os obrigatórios da etapa atual: mande-os no mesmo comando com `--set`; se não estiverem no pedido,
   pergunte ao usuário antes de mover.
 - Comentar e mencionar: `cange comment create --card-id <id> --text "<texto>" [--mention <id|e-mail|nome>]...`
-  (a menção vai em `mentions`, que gera a notificação, E vira `@[Nome](id)` no texto).
+  (a menção vai em `mentions`, que gera a notificação, E vira `@[Nome](id)` no texto). `--mention eu` = quem conversa
+  com o agente (só numa conversa).
+- Vencimento, responsável e etiqueta (desde 08/10/2026): `cange card update --card-id <id> --due 27/10/2026`,
+  `--responsible eu` (ou id, e-mail, nome; `ninguém` tira) e `--add-tag "Quente"` / `--remove-tag "Quente"`.
+  - `--due`: dd/mm/aaaa, dd/mm/aaaa HH:MM, dd/mm (a próxima ocorrência), aaaa-mm-dd [HH:MM], hoje, amanhã; sem hora =
+    00:00, hora de Brasília (como o seletor da tela); `limpar` tira o vencimento.
+  - `--responsible`: só quem a tela deixa escolher no fluxo (sem leitor); `eu` = quem conversa com o agente, só numa
+    conversa (fora dela, exit 2). Nome ambíguo ou fora da lista: exit 2 com os candidatos, nada gravado.
+  - Vencimento e responsável vão juntos num comando só (uma gravação, uma aprovação). Etiqueta é outra permissão
+    (Vincular/rotular): uma etiqueta por comando, nunca junto com vencimento ou responsável (exit 2 com os comandos
+    prontos). O kit não cria etiqueta: a que não existe no fluxo dá exit 2 com a lista das que existem.
+  - O que já está igual não grava (`unchanged`; tudo igual = `noop`, exit 0). `--dry-run` mostra o plano em `calls[]`
+    (`PUT /card` = card_update; `POST`/`DELETE /flow-tag/card` = card_link).
+  - `card update --payload` com `flowTagId` dá exit 2: o Cange ignora esse campo no PUT /card (era sucesso falso).
+- Ler vencimento, responsável e etiquetas: `cange card read --card-id <id>` traz sempre `due` ("27/10/2026 00:00" ou
+  null), `responsible` ({id, name} ou null) e `tags` ([{id, name}], sem etiqueta = []).
 - Cadastro: `cange register create --register-id <id> --set ...` e
   `cange register update --register-id <id> --form-answer-id <entrada> --set ...`.
 - Valores inline: `--set "Campo=valor"` (repetível, o primeiro `=` separa) ou `--values-json '{"Campo": valor}'`.
@@ -118,8 +133,13 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   listando as opções (use o id).
 - Valor como na tela: número e moeda em texto ("2500", "2.500,00", "R$ 2.500,00", "2500.5"; "2.500" é ambíguo e dá
   erro), percentual "90%", data "06/10/2026" ou ISO, opção pelo rótulo, checkbox "A, B", interruptor sim/não,
-  usuário por id, e-mail ou nome (único na empresa), cadastro por id, lista de ids ou nome da entrada (busca no
-  cadastro; 0 ou 2+ resultados = erro com os candidatos).
+  usuário por id, e-mail ou nome (único na empresa; `eu` = quem conversa com o agente), cadastro por id, lista de ids
+  ou nome da entrada (busca no cadastro; 0 ou 2+ resultados = erro com os candidatos).
+- Telefone e documento gravam o que a TELA grava (desde 08/10/2026): o kit aplica a máscara do campo antes de gravar
+  ("51981740992" vira "(51) 981740992"; CPF "123.456.789-09"; CNPJ "11.222.333/0001-81", alfanumérico em maiúscula) em
+  toda escrita (`--set` e `--payload`, criar, gravar campos, mover, filho e cadastro). Valor já no formato da tela não
+  muda; o que a máscara mudou sai em `formatted` ([{field, from, to}]) e o `--dry-run` já mostra o valor final. O que
+  o cartão já tinha e o mover reenvia vai como estava.
 - `card move`: cada campo é procurado na etapa atual, no destino e no formulário inicial e vai para a chamada certa
   (o back aceita UM formulário por chamada): inicial = `PUT /form/answer` antes; etapa atual = no próprio mover (com os
   campos que o cartão já tem nessa etapa, para nada sumir); destino = `PUT /form/answer` depois. No caso comum é UMA
@@ -164,7 +184,8 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   No `access request` o recurso é um que você NÃO acessa, então link e hash não resolvem: ache o id pelo nome
   (`cange catalog --q <nome>`) e peça com ele.
 - `register entries` e `register get` aceitam `--register` (como o `access request`). `card update` aceita
-  `--validate-fields` sem efeito (ele não grava `values`; para campos use `card update-values`).
+  `--validate-fields` sem efeito (ele não grava `values`; para campos use `card update-values`) e, como os outros
+  comandos de cartão, descobre o fluxo pelo número do cartão.
 - Comando inexistente responde com a sugestão: `cange search` aponta `register entries --search` e `catalog --q`;
   `register-entries` vira `register entries`. Exit `2` como todo erro de uso.
 

@@ -521,7 +521,7 @@ function toRecordArray(value: unknown): Record<string, unknown>[] {
   return value.map(asRecord).filter(isDefined);
 }
 
-function extractCardRecord(raw: unknown): Record<string, unknown> | undefined {
+export function extractCardRecord(raw: unknown): Record<string, unknown> | undefined {
   const direct = asRecord(raw);
   if (direct && looksLikeCardRecord(direct)) {
     return direct;

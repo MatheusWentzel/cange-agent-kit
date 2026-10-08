@@ -24,6 +24,13 @@ export interface LocatedCard {
   flowName: string | null;
 }
 
+/** Etiqueta de um fluxo (`flow_tag`). */
+export interface FlowTagSummary {
+  id: number;
+  name: string;
+  color?: string;
+}
+
 export interface ListAllCardsByFlowInput {
   flowId: number | string;
   isTestModel?: boolean;
@@ -133,8 +140,10 @@ export interface CardsContracts {
   updateCard: (input: {
     flowId: number;
     cardId: number;
-    userId?: number;
-    dtDue?: string;
+    /** `null` tira o responsável. */
+    userId?: number | null;
+    /** "aaaa-mm-dd HH:MM" (hora de parede, como a tela); `null` tira o vencimento. */
+    dtDue?: string | null;
     flowTagId?: number;
     complete?: "S" | "N";
     archived?: "S" | "N";
@@ -174,6 +183,17 @@ export interface CardsContracts {
     cardId: number;
     flowTagId: number;
   }) => Promise<{ raw: unknown }>;
+  /**
+   * v9 (g): tira a etiqueta do cartão (`DELETE /flow-tag/card?flow_id&card_id&flow_tag_id`,
+   * pela query, como a rota do back lê e a tela manda).
+   */
+  removeCardLabel: (input: {
+    flowId: number;
+    cardId: number;
+    flowTagId: number;
+  }) => Promise<{ raw: unknown }>;
+  /** v9 (g): as etiquetas do fluxo (`GET /flow-tag/by-flow?flow_id`), as que a tela oferece. Leitura. */
+  listFlowTags: (input: { flowId: number | string }) => Promise<{ raw: unknown; tags: FlowTagSummary[] }>;
   getCardRelationship: (input: {
     flowId: number | string;
     cardId: number | string;
@@ -637,6 +657,42 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         }
       });
       return { raw };
+    },
+
+    async removeCardLabel(input) {
+      const parsed = addCardLabelPayloadSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new CangeValidationError("Payload inválido para removeCardLabel.", {
+          details: parsed.error.format()
+        });
+      }
+
+      const raw = await client.delete<unknown>("/flow-tag/card", {
+        query: {
+          flow_id: parsed.data.flowId,
+          card_id: parsed.data.cardId,
+          flow_tag_id: parsed.data.flowTagId
+        }
+      });
+      return { raw };
+    },
+
+    async listFlowTags(input) {
+      const flowId = Number(String(input.flowId).trim());
+      if (!Number.isInteger(flowId) || flowId <= 0) {
+        throw new CangeValidationError("flowId inválido para listFlowTags.", { details: { flowId: input.flowId } });
+      }
+      const raw = await client.get<unknown>("/flow-tag/by-flow", { query: { flow_id: flowId } });
+      const tags: FlowTagSummary[] = [];
+      for (const item of extractArray(raw)) {
+        const record = asRecord(item);
+        if (!record) continue;
+        const id = Number(record.id_flow_tag ?? record.id);
+        const name = typeof record.description === "string" ? record.description.trim() : "";
+        if (!Number.isInteger(id) || id <= 0 || name === "") continue;
+        tags.push({ id, name, ...(typeof record.color === "string" ? { color: record.color } : {}) });
+      }
+      return { raw, tags };
     },
 
     async getCardRelationship(input) {

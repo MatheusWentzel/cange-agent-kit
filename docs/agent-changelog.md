@@ -2,6 +2,37 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-10-08
+
+### Vencimento, responsável e etiqueta em 1 comando; telefone e documento como a tela grava (v9, bloco 1)
+
+- Conversa 857 (run 1119): mudar o vencimento custou 18 passos e bateu o teto, porque o `card update` exigia arquivo e
+  `flowId`. Agora: `cange card update --card-id <id> --due 27/10/2026`, `--responsible eu|<id|e-mail|nome>|ninguém`,
+  `--add-tag "<etiqueta>"` ou `--remove-tag "<etiqueta>"`. Sem `--flow-id`, o fluxo vem do cartão.
+  - `--due`: dd/mm/aaaa [HH:MM], dd/mm (próxima ocorrência), aaaa-mm-dd [HH:MM], aaaa-mm-ddTHH:MM, hoje, amanhã;
+    `limpar`, `sem` ou "" tiram. Sem hora = 00:00, hora de parede de Brasília (o que a tela manda no PUT /card).
+  - `--responsible`: a lista do seletor da tela (`GET /user/by-flow?id_flow`, sem leitor). `eu` = RUNNER_SPEAKER_USER_ID
+    (só do ambiente do processo; fora de conversa, exit 2). Vale também em `comment create --mention eu` e em campo de
+    usuário no `--set`.
+  - Etiqueta: pelo nome (sem acento e caixa) ou id, em `GET /flow-tag/by-flow`; o kit nunca cria. Uma por comando e
+    nunca junto com vencimento ou responsável (é outra permissão, card_link): exit 2 com os comandos prontos.
+  - 1 GET /card antes: o que já está igual não grava (`unchanged`; tudo igual = `noop`, exit 0). Vencimento e
+    responsável juntos = 1 `PUT /card`. Etiqueta = `POST /flow-tag/card` ou `DELETE /flow-tag/card?flow_id&card_id&flow_tag_id`.
+  - `--dry-run` (e CANGE_FORCE_DRY_RUN): `{ dryRun, executed:false, cardId, flowId, calls[{call, action, payload}],
+    unchanged, noop?, validation }` com action `card_update` (PUT) ou `card_link` (etiqueta), só GETs.
+  - `--payload` com `flowTagId` agora é exit 2 (o PUT /card ignora o campo e devolvia sucesso falso).
+- `card read` enxuto: `dueDate`, `responsibleUserId` e `responsibleName` deram lugar a `due` ("27/10/2026 00:00", ISO
+  com Z convertido para Brasília), `responsible` ({id, name}) e `tags` ([{id, name}]), SEMPRE presentes (null e [] =
+  vazio). Runs 1125/1126 diziam que o "Vencimento" não existia. `--full` e `card list` não mudam.
+- Conversa 858 e run 1011: telefone sem máscara passava na conferência do gate, a pessoa aprovava e o back recusava
+  ("(XX) XXXX-XXXX"), pedindo 2ª aprovação; o mesmo com CPF/CNPJ. Agora todo valor de PHONE_FIELD ou DOC_FIELD que a
+  tela aceita é gravado com a máscara da tela (as 2 passadas do componente: "51981740992" vira "(51) 981740992", como
+  o `InputPhone`, que não põe hífen em 11 dígitos; CPF/CNPJ pela variation, alfanumérico em maiúscula), em card create
+  (inline, payload e lote), update-values, move, move-step-with-values, add-child e register create/update.
+  Idempotente; o valor final já aparece no `--dry-run` (é o que o gate confere e a aprovação prende) e o que mudou sai
+  em `formatted` ([{field, from, to}]). O rascunho reenviado no mover não é tocado. No `--payload` sem resolução, o kit
+  lê os campos (1 GET) só quando algum valor tem cara de telefone ou documento; valor desses que a tela recusa dá exit 2.
+
 ## 2026-10-07
 
 ### Mover: leituras do que a tela resolve no ritmo do teto do back, com prazo (REG-F1)
