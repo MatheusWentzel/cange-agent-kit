@@ -15,6 +15,11 @@ export interface CangeErrorContext {
    * no JSON do erro, depois dos outros; a mensagem do back fica intacta.
    */
   hint?: string;
+  /**
+   * v9 (run 1131): o comando pronto que o agente quis dizer, quando há um só
+   * (erro de uso do commander). Sai como `suggestion` no JSON do erro.
+   */
+  suggestion?: string;
 }
 
 interface CangeErrorSerialized {
@@ -27,6 +32,7 @@ interface CangeErrorSerialized {
   retryAfterSeconds?: number;
   details?: unknown;
   hint?: string;
+  suggestion?: string;
 }
 
 export class CangeError extends Error {
@@ -37,6 +43,7 @@ export class CangeError extends Error {
   public readonly code?: string;
   public readonly retryAfterSeconds?: number;
   public readonly hint?: string;
+  public readonly suggestion?: string;
 
   public constructor(message: string, context: CangeErrorContext = {}) {
     super(message, context.cause ? { cause: context.cause } : undefined);
@@ -48,6 +55,7 @@ export class CangeError extends Error {
     this.code = context.code;
     this.retryAfterSeconds = context.retryAfterSeconds;
     this.hint = context.hint;
+    this.suggestion = context.suggestion;
   }
 
   public toJSON(): CangeErrorSerialized {
@@ -59,6 +67,7 @@ export class CangeError extends Error {
     if (this.retryAfterSeconds !== undefined) out.retryAfterSeconds = this.retryAfterSeconds;
     if (this.details !== undefined) out.details = this.details;
     if (this.hint !== undefined) out.hint = this.hint;
+    if (this.suggestion !== undefined) out.suggestion = this.suggestion;
     return out;
   }
 }
@@ -67,6 +76,59 @@ export class CangeApiError extends CangeError {}
 export class CangeAuthError extends CangeError {}
 export class CangeValidationError extends CangeError {}
 export class CangeCliUsageError extends CangeError {}
+
+/** Ferramenta de API do agente (`agent_tool type='api'`) que o back disparou. */
+export interface CangeToolRef {
+  id: number;
+  name: string | null;
+}
+
+/**
+ * v9 (conversa 859, runs 1128/1129/1133): o invoke da ferramenta de API respondeu
+ * `success:false` (o serviço externo recusou ou não respondeu). Antes saía em
+ * stdout com exit 0, o passo aparecia como concluído e o agente inventava outra
+ * fonte. Agora é erro próprio, com exit 6 (`EXIT_CODES.TOOL_FAILED`), separado do
+ * 4 (erro do próprio Cange ou de rede até ele).
+ */
+export class CangeToolCallError extends CangeError {
+  public readonly tool: CangeToolRef;
+  public readonly upstreamStatus: number | null;
+  public readonly host: string | null;
+  public readonly durationMs?: number;
+
+  public constructor(
+    message: string,
+    input: {
+      tool: CangeToolRef;
+      status: number | null;
+      host: string | null;
+      durationMs?: number;
+      details?: unknown;
+      hint?: string;
+    }
+  ) {
+    super(message, { code: "TOOL_CALL_FAILED", details: input.details, hint: input.hint });
+    this.tool = input.tool;
+    this.upstreamStatus = input.status;
+    this.host = input.host;
+    this.durationMs = input.durationMs;
+  }
+
+  public override toJSON(): CangeErrorSerialized {
+    const out: Record<string, unknown> = {
+      name: this.name,
+      code: this.code,
+      message: this.message,
+      tool: this.tool,
+      status: this.upstreamStatus,
+      host: this.host
+    };
+    if (this.durationMs !== undefined) out.durationMs = this.durationMs;
+    if (this.details !== undefined) out.details = this.details;
+    if (this.hint !== undefined) out.hint = this.hint;
+    return out as unknown as CangeErrorSerialized;
+  }
+}
 
 const SENSITIVE_KEYS = ["token", "apikey", "authorization", "access_token"];
 

@@ -86,6 +86,14 @@ calcular com python/jq sobre a saída do kit, ler o cadastro inteiro e repetir o
   (`totalCount` no card list, `total` nos outros) e `next` = o comando pronto da página seguinte (`--cursor`). `--limit` /
   `--page-size` mudam o tamanho. `register entries` não traz mais o `raw` e corta valor longo em 600 caracteres.
   `--full` mantém o formato de antes (lista inteira, com `raw`).
+- **Cadastro sem ambiguidade (desde 08/10/2026, v9):** `register entries` traz `fieldTitles` (todos os campos do
+  cadastro, na ordem do formulário, uma vez no topo): campo que está em `fieldTitles` e não aparece na entrada está
+  VAZIO nela. `--fields "Razão social,CNPJ/CPF"` (título sem acento e caixa, id ou hash) traz em cada entrada
+  exatamente esses campos, na ordem, com `null` quando vazio. `--entry-id 6507` lê uma entrada só, com todos os campos
+  (`null` = vazio): `{ registerId, entry: {id, title, fields} }`; o cadastro sai da entrada (`--register-id` opcional;
+  divergente = exit 2 "A entrada 6507 é do cadastro 183, não do 203."), corte de 600 salvo com `--fields`, e não
+  combina com `--search`/`--cursor`. Os valores passam pela mesma checagem de acesso da lista (sem acesso = o 404 com
+  o `access request` pronto). `register entry` é o mesmo comando.
 - **`map` resumido:** `startFields` (formulário de criação) e `steps[{id, name, fields}]`; campo = `{id, title, type,
   required? (só quando obrigatório), options? (rótulos, até 8) | optionsCount?, linksToFlowId?, registerId?}`. A lista
   longa de opções está em `cange fields by-flow` / `step-form`; o `formId` de cada campo, em `map --full`.
@@ -188,6 +196,18 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   comandos de cartão, descobre o fluxo pelo número do cartão.
 - Comando inexistente responde com a sugestão: `cange search` aponta `register entries --search` e `catalog --q`;
   `register-entries` vira `register entries`. Exit `2` como todo erro de uso.
+- **Erros de uso ensinam o comando certo (desde 08/10/2026, v9, run 1131):** JSON `{ name: "CangeCliUsageError",
+  message, code: "commander.<x>", suggestion? }`; `suggestion` traz o comando pronto quando há um só.
+  - Valor solto: `register entries 183` responde `Valor solto "183" em cange register entries: este comando não recebe
+    valor sem opção.` + `Você quis dizer: cange register entries --register-id 183` (número, `#N` ou link vão para a 1a
+    opção de id do comando: --card-id, --register-id, --flow-id, --entry-id, --form-answer-id; sem nenhuma, a lista de
+    opções).
+  - Opção que o comando não tem: `cange map não tem a opção --register-id.` + a opção parecida do mesmo comando
+    (edição, ou sinônimo: --register/--register-id, --card/--card-id, --flow/--flow-id, --entry/--entry-id,
+    --q/--query/--search) como comando pronto; sem parecida, `Opções: ...` e `Quem aceita --register-id: cange register
+    get, ...` (até 4).
+  - Comando inexistente também sugere o único irmão que começa igual (4 letras ou mais). `register entry` virou apelido
+    de `register entries`.
 
 ## Acesso do agente a fluxos e cadastros (desde 02/10/2026, só com token de run)
 
@@ -264,7 +284,13 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
 - Use `--output json` quando o resultado for consumido por automação.
 - **Não precisa de `--silent`**: o stdout já sai limpo (banner do pnpm silenciado no `.npmrc`). Sem `--output`, o modo é json em pipe e pretty em terminal.
 - **stdout = só o dado; stderr = logs/avisos/erros.** `... 2>/dev/null | jq .` funciona em qualquer leitura.
-- Exit codes por categoria: `0` ok · `2` uso/validação · `3` auth · `4` rede/API · `5` **lote parcial** · `1` inesperado.
+- Exit codes por categoria: `0` ok · `2` uso/validação · `3` auth · `4` rede/API · `5` **lote parcial** · `6` **ferramenta de API falhou** · `1` inesperado.
+- **Exit `6` = `cange tool call` com `success:false`** (desde 08/10/2026, v9, conversa 859): o serviço externo recusou ou
+  não respondeu. stderr: `{ name: "CangeToolCallError", code: "TOOL_CALL_FAILED", message: "A ferramenta de API
+  \"Consulta CNPJ\" (#12) falhou: o serviço respondeu 503 em brasilapi.com.br.", tool: {id, name}, status, host,
+  durationMs, details, hint }` (sem status: "o serviço não respondeu a tempo (host)." ou "não foi possível conectar em
+  host."). Conte como falha na resposta; não busque o dado em outra fonte por conta própria; só vale tentar outra
+  ferramenta de API com a mesma finalidade, uma vez. Erro do próprio Cange no invoke (403, 404, 422) continua exit `4`.
 - **Exit `5` = a operação em lote saiu INCOMPLETA.** Use só os ids que o resumo devolveu, reprocesse o que está em `failures`/`notAttemptedPayloads` e reporte a tarefa como parcial se não fechar. Nunca deduza id que não foi retornado.
 
 ## Criação/leitura em lote (rate limit)

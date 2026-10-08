@@ -98,11 +98,25 @@ function quoteArg(arg: string): string {
   return /^[\w@%+=:,./<>-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, "'\\''")}'`;
 }
 
+/** Mensagem de erro de uso e, quando há um só, o comando pronto (`suggestion` no JSON). */
+export interface UsageExplanation {
+  message: string;
+  suggestion?: string;
+}
+
+/** Teto do comando pronto ecoado de volta (o argv inteiro pode trazer um texto longo). */
+const MAX_SUGGESTION = 400;
+
 /**
  * Sugestão (1 a 2 linhas) para o comando desconhecido em `argv` (o `process.argv`
  * inteiro). `undefined` quando o argv não tem comando desconhecido.
  */
 export function suggestForUnknownCommand(program: Command, argv: readonly string[]): string | undefined {
+  return explainUnknownCommand(program, argv)?.message;
+}
+
+/** {@link suggestForUnknownCommand} com o comando pronto separado em `suggestion`. */
+export function explainUnknownCommand(program: Command, argv: readonly string[]): UsageExplanation | undefined {
   const tokens = argv.slice(2);
   let current = program;
   for (let index = 0; index < tokens.length; index += 1) {
@@ -125,21 +139,40 @@ export function suggestForUnknownCommand(program: Command, argv: readonly string
     const where = current === program ? "" : ` em cange ${commandPath(current)}`;
     const first = `Comando "${token}" não existe${where}.`;
     if (SEARCH_WORDS.has(token.toLowerCase())) {
-      return `${first}\n${SEARCH_SUGGESTION}`;
+      return { message: `${first}\n${SEARCH_SUGGESTION}` };
     }
-    const replacement = replacementFor(program, current, token.toLowerCase());
-    if (!replacement) return `${first}\n${DISCOVERY_HINT}`;
+    const replacement = replacementFor(program, current, token.toLowerCase()) ?? siblingByPrefix(current, token.toLowerCase());
+    if (!replacement) return { message: `${first}\n${DISCOVERY_HINT}` };
     const before = tokens.slice(0, index);
     const after = tokens.slice(index + 1);
     const echo = [...before, replacement, ...after].map((arg, position) =>
       position === before.length ? arg : quoteArg(arg)
     );
     const full = `cange ${echo.join(" ")}`;
-    const suggestion =
-      full.length <= MAX_ARGS_ECHO ? full : `cange ${[...before.map(quoteArg), replacement].join(" ")} ...`;
-    return `${first}\nVocê quis dizer: ${suggestion}`;
+    if (full.length <= MAX_ARGS_ECHO) {
+      return { message: `${first}\nVocê quis dizer: ${full}`, suggestion: full };
+    }
+    const short = `cange ${[...before.map(quoteArg), replacement].join(" ")} ...`;
+    return { message: `${first}\nVocê quis dizer: ${short}` };
   }
   return undefined;
+}
+
+function commonPrefixLength(a: string, b: string): number {
+  let length = 0;
+  while (length < a.length && length < b.length && a[length] === b[length]) length += 1;
+  return length;
+}
+
+/** Mínimo de letras em comum no começo para sugerir o irmão (`entry` → `entries`). */
+const MIN_COMMON_PREFIX = 4;
+
+/** v9 (run 1131): o ÚNICO subcomando do nível que começa igual (4 letras ou mais). */
+function siblingByPrefix(current: Command, word: string): string | undefined {
+  const hits = subcommands(current).filter((child) =>
+    [child.name(), ...child.aliases()].some((name) => commonPrefixLength(word, name.toLowerCase()) >= MIN_COMMON_PREFIX)
+  );
+  return hits.length === 1 ? hits[0]!.name() : undefined;
 }
 
 function commandPath(command: Command): string {
@@ -150,4 +183,269 @@ function commandPath(command: Command): string {
     cursor = cursor.parent;
   }
   return names.join(" ");
+}
+
+function cangePath(command: Command): string {
+  const path = commandPath(command);
+  return path ? `cange ${path}` : "cange";
+}
+
+// ---------------------------------------------------------------------------
+// v9 (run 1131): valor solto e opção que o comando não tem ensinam o comando certo.
+// Antes: "too many arguments for 'entries'" e "unknown option '--register-id'" com
+// a rota genérica de discovery; o agente gastou 6 passos (manifest, jq) para achar
+// `--register-id` e o `register entries` certo.
+// ---------------------------------------------------------------------------
+
+/** Opção conhecida no comando ou num ancestral (as globais, como --output, ficam no programa). */
+function findOptionUp(command: Command, token: string): Option | undefined {
+  let cursor: Command | null = command;
+  while (cursor) {
+    const option = findOption(cursor, token);
+    if (option) return option;
+    cursor = cursor.parent;
+  }
+  return undefined;
+}
+
+interface ArgvWalk {
+  /** argv sem `node` e o script. */
+  tokens: string[];
+  /** O comando final que o argv chama. */
+  command: Command;
+  /** Como o comando final foi digitado (nome ou apelido). */
+  typedName?: string;
+  /** Valores sem opção, com a posição em `tokens`. */
+  operands: Array<{ index: number; value: string }>;
+}
+
+/** Percorre o argv como o commander: desce nos subcomandos e separa valores de opções. */
+function walkArgv(program: Command, argv: readonly string[]): ArgvWalk {
+  const tokens = argv.slice(2);
+  let current = program;
+  let typedName: string | undefined;
+  const operands: Array<{ index: number; value: string }> = [];
+  let literal = false;
+  for (let index = 0; index < tokens.length; index += 1) {
+    const token = tokens[index]!;
+    if (literal) {
+      operands.push({ index, value: token });
+      continue;
+    }
+    if (token === "--") {
+      literal = true;
+      continue;
+    }
+    if (token.length > 1 && token.startsWith("-")) {
+      if (token.includes("=")) continue;
+      const option = findOptionUp(current, token);
+      if (!option) continue;
+      if (option.variadic) {
+        while (index + 1 < tokens.length && !tokens[index + 1]!.startsWith("-")) index += 1;
+      } else if (option.required) {
+        index += 1;
+      } else if (option.optional && index + 1 < tokens.length && !tokens[index + 1]!.startsWith("-")) {
+        index += 1;
+      }
+      continue;
+    }
+    if (operands.length === 0 && subcommands(current).length > 0) {
+      const next = findSubcommand(current, token);
+      if (next) {
+        current = next;
+        typedName = token;
+        continue;
+      }
+    }
+    operands.push({ index, value: token });
+  }
+  return { tokens, command: current, typedName, operands };
+}
+
+function declaresLong(command: Command, long: string): boolean {
+  return command.options.some((option) => option.long === long);
+}
+
+/** Até 12 opções do comando, para quando não há um comando pronto. */
+const MAX_OPTIONS_LISTED = 12;
+
+function optionsLine(command: Command): string {
+  const longs = command.options.map((option) => option.long).filter((long): long is string => Boolean(long));
+  if (longs.length === 0) return `${cangePath(command)} não tem opções.`;
+  const shown = longs.slice(0, MAX_OPTIONS_LISTED).join(", ");
+  return `Opções: ${shown}${longs.length > MAX_OPTIONS_LISTED ? ", ..." : ""}`;
+}
+
+/** O argv refeito como comando pronto; `undefined` quando fica longo demais para ecoar. */
+function readyCommand(tokens: string[]): string | undefined {
+  const full = `cange ${tokens.map(quoteArg).join(" ")}`;
+  return full.length <= MAX_SUGGESTION ? full : undefined;
+}
+
+/** Ordem das opções de id que recebem um valor solto (`register entries 183`). */
+export const ID_OPTION_ORDER: readonly string[] = [
+  "--card-id",
+  "--register-id",
+  "--flow-id",
+  "--entry-id",
+  "--form-answer-id"
+];
+
+const POSITIVE_ID_RE = /^#?[1-9]\d*$/;
+
+function looksLikeId(value: string): boolean {
+  if (POSITIVE_ID_RE.test(value)) return true;
+  return /^[a-z][a-z0-9+.-]*:\/\//i.test(value) || /(^|\.)cange\.me(\/|$)/i.test(value);
+}
+
+/**
+ * A opção de id que recebe o valor solto: a 1a que o comando declara, na ordem
+ * de {@link ID_OPTION_ORDER}. Chamado pelo apelido (`register entry 6507`), vale
+ * primeiro a opção do apelido (`--entry-id`).
+ */
+function idOptionFor(walk: ArgvWalk): string | undefined {
+  const { command, typedName } = walk;
+  const order = [...ID_OPTION_ORDER];
+  if (typedName && typedName !== command.name()) {
+    const own = `--${typedName}-id`;
+    if (declaresLong(command, own)) order.unshift(own);
+  }
+  return order.find((long) => declaresLong(command, long));
+}
+
+/** Valor solto (`commander.excessArguments`): o comando pronto com a opção de id, ou as opções. */
+export function explainExcessArguments(program: Command, argv: readonly string[]): UsageExplanation | undefined {
+  const walk = walkArgv(program, argv);
+  const { command } = walk;
+  const declared = command.registeredArguments;
+  if (declared.some((argument) => argument.variadic)) return undefined;
+  const stray = walk.operands.slice(declared.length);
+  if (stray.length === 0) return undefined;
+
+  const quoted = stray.map((item) => `"${item.value}"`).join(", ");
+  const head = stray.length === 1 ? `Valor solto ${quoted}` : `Valores soltos ${quoted}`;
+  const names = declared.map((argument) => `<${argument.name()}>`).join(" ");
+  const rule =
+    declared.length === 0
+      ? "este comando não recebe valor sem opção."
+      : `este comando recebe só ${declared.length === 1 ? "1 valor" : `${declared.length} valores`} sem opção (${names}).`;
+  const first = `${head} em ${cangePath(command)}: ${rule}`;
+
+  if (stray.length === 1 && looksLikeId(stray[0]!.value)) {
+    const idOption = idOptionFor(walk);
+    const alreadyGiven =
+      idOption !== undefined && walk.tokens.some((token) => token === idOption || token.startsWith(`${idOption}=`));
+    if (idOption && !alreadyGiven) {
+      const value = stray[0]!.value.replace(/^#(?=\d)/, "");
+      const tokens = [...walk.tokens];
+      tokens.splice(stray[0]!.index, 1, idOption, value);
+      const suggestion = readyCommand(tokens);
+      if (suggestion) return { message: `${first}\nVocê quis dizer: ${suggestion}`, suggestion };
+      return { message: `${first}\nUse ${idOption} ${quoteArg(value)} no lugar do valor solto.` };
+    }
+  }
+  return { message: `${first}\n${optionsLine(command)}` };
+}
+
+/** Sinônimos de opção (os dois sentidos): o que o agente digita × o que o comando tem. */
+const OPTION_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
+  "--register": ["--register-id"],
+  "--register-id": ["--register"],
+  "--card": ["--card-id"],
+  "--card-id": ["--card"],
+  "--flow": ["--flow-id"],
+  "--flow-id": ["--flow"],
+  "--entry": ["--entry-id"],
+  "--entry-id": ["--entry"],
+  "--q": ["--search"],
+  "--query": ["--search", "--q"],
+  "--search": ["--q"]
+};
+
+/** A opção certa: sinônimo que o comando declara, senão a única perto o bastante (edição). */
+function optionReplacement(command: Command, flag: string): string | undefined {
+  for (const synonym of OPTION_SYNONYMS[flag] ?? []) {
+    if (declaresLong(command, synonym)) return synonym;
+  }
+  if (!flag.startsWith("--")) return undefined;
+  const word = flag.slice(2);
+  const limit = Math.max(1, Math.floor(word.length / 4));
+  let best: string | undefined;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  let tie = false;
+  for (const option of command.options) {
+    if (!option.long) continue;
+    const distance = editDistance(word, option.long.slice(2));
+    if (distance < bestDistance) {
+      best = option.long;
+      bestDistance = distance;
+      tie = false;
+    } else if (distance === bestDistance) {
+      tie = true;
+    }
+  }
+  return best !== undefined && !tie && bestDistance <= limit ? best : undefined;
+}
+
+/** Comandos da árvore que declaram a opção (para "Quem aceita"). */
+function commandsDeclaring(program: Command, flag: string): Command[] {
+  const out: Command[] = [];
+  const visit = (command: Command): void => {
+    for (const child of subcommands(command)) {
+      if (declaresLong(child, flag) && !out.includes(child)) out.push(child);
+      visit(child);
+    }
+  };
+  visit(program);
+  return out;
+}
+
+/** Até 4 comandos em "Quem aceita --x". */
+const MAX_OWNERS_LISTED = 4;
+
+/** Opção que o comando não tem (`commander.unknownOption`). */
+export function explainUnknownOption(program: Command, argv: readonly string[], flag: string): UsageExplanation {
+  const walk = walkArgv(program, argv);
+  const { command } = walk;
+  const first = `${cangePath(command)} não tem a opção ${flag}.`;
+
+  const replacement = optionReplacement(command, flag);
+  const index = walk.tokens.findIndex((token) => token === flag || token.startsWith(`${flag}=`));
+  if (replacement && index >= 0) {
+    const tokens = [...walk.tokens];
+    tokens[index] = `${replacement}${tokens[index]!.slice(flag.length)}`;
+    const suggestion = readyCommand(tokens);
+    if (suggestion) return { message: `${first}\nVocê quis dizer: ${suggestion}`, suggestion };
+    return { message: `${first}\nUse ${replacement} no lugar de ${flag}.` };
+  }
+
+  const lines = [first, optionsLine(command)];
+  const owners = commandsDeclaring(program, flag)
+    .filter((owner) => owner !== command)
+    .slice(0, MAX_OWNERS_LISTED);
+  if (owners.length > 0) lines.push(`Quem aceita ${flag}: ${owners.map(cangePath).join(", ")}`);
+  return { message: lines.join("\n") };
+}
+
+/**
+ * O commander cobra a opção obrigatória ANTES de olhar as desconhecidas: com
+ * `fields by-register --register 183` ele diz só "required option '--register-id'".
+ * Se o argv tem uma opção desconhecida que é sinônimo ou quase a opção certa, a
+ * explicação é a da opção desconhecida (com o comando pronto).
+ */
+export function explainMissingMandatory(program: Command, argv: readonly string[]): UsageExplanation | undefined {
+  const walk = walkArgv(program, argv);
+  for (const token of walk.tokens) {
+    if (!token.startsWith("--") || token === "--") continue;
+    const flag = token.split("=")[0]!;
+    if (findOptionUp(walk.command, flag)) continue;
+    if (optionReplacement(walk.command, flag)) return explainUnknownOption(program, argv, flag);
+  }
+  return undefined;
+}
+
+/** A opção do texto do commander: "error: unknown option '--x'". */
+export function unknownOptionFlag(message: string): string | undefined {
+  // `--entry=6507` chega inteiro no texto do commander: a opção é o que vem antes do "=".
+  return /unknown option '([^']+)'/.exec(message)?.[1]?.split("=")[0];
 }

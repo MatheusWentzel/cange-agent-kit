@@ -54,6 +54,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getFlow: flows.getFlow,
     getRegister: registers.getRegister,
     getRegisterEntries: registerQuery.getRegisterEntries,
+    getRegisterEntry: registerQuery.getRegisterEntry,
+    locateRegisterEntry: registerQuery.locateRegisterEntry,
     getRegisterEngineStatus: registerQuery.getRegisterEngineStatus,
     getFieldsByFlow: fields.getFieldsByFlow,
     getFieldsByRegister: fields.getFieldsByRegister,

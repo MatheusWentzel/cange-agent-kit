@@ -96,6 +96,19 @@ export const JOURNEYS: Journey[] = [
       "Confirme o id/tipo do field com `fields by-flow`/`step-form` ANTES de gravar."
   },
   {
+    id: "vencimento_responsavel_etiqueta",
+    title: "Mudar vencimento, responsável ou etiqueta de um cartão",
+    when: "o pedido é trocar a data de vencimento, quem é o responsável ou pôr/tirar uma etiqueta do cartão",
+    steps: [
+      "cange card update --card-id <c> --due 27/10/2026 (aceita dd/mm/aaaa com hora opcional, dd/mm, hoje, amanhã; `limpar` tira o vencimento).",
+      "cange card update --card-id <c> --responsible <nome|e-mail|id|eu> (`ninguém` tira). Vencimento e responsável podem ir no mesmo comando.",
+      "cange card update --card-id <c> --add-tag \"<etiqueta>\" (ou --remove-tag; uma etiqueta por comando, sempre separado do vencimento e do responsável).",
+      "cange card read --card-id <c> (para conferir: due, responsible e tags sempre vêm, null ou [] quando vazio)."
+    ],
+    pitfall:
+      "Não monte payload nem procure o fluxo: o comando acha o fluxo pelo cartão. O kit não cria etiqueta; se ela não existe, a mensagem lista as do fluxo."
+  },
+  {
     id: "comentar",
     title: "Entregar um resultado/comentário no card",
     when: "concluiu a análise e precisa registrar o resultado no card",
@@ -172,8 +185,11 @@ export const JOURNEYS: Journey[] = [
     when: "listar registros (clientes, produtos, fornecedores…)",
     steps: [
       "cange my-registers — ache o cadastro e seu id.",
-      "cange register entries --register-id <r> — lê as entradas (roteia engine v1/v2 sozinho; use `--search` para filtrar)."
-    ]
+      "cange register entries --register-id <r> — lê as entradas (roteia engine v1/v2 sozinho; use `--search` para filtrar). `fieldTitles` lista todos os campos do cadastro: campo que não aparece na entrada está VAZIO.",
+      "cange register entries --register-id <r> --fields \"<título>,<título>\" (só esses campos, na ordem, null quando vazio).",
+      "cange register entries --entry-id <id> (uma entrada com todos os campos, null = vazio; o cadastro sai da entrada)."
+    ],
+    pitfall: "O valor solto não vira id: `register entries 183` é erro; use --register-id 183 (ou --entry-id para uma entrada)."
   }
 ];
 
@@ -182,7 +198,7 @@ export const GOLDEN_RULES: string[] = [
   "Comece pelo MAPA: `cange map` dá flows + etapas + campos + vínculos em 1 chamada — não reconstrua o ambiente na unha.",
   "Ler card: `cange card read --fields \"<títulos>\"` com só os campos que precisa (ou `card read` inteiro, enxuto); `card get` (com raw pesado) só quando precisar da estrutura crua. Não releia o mesmo cartão sem motivo.",
   "Contar ou somar: `cange cards count` / `cange cards sum` (não python/jq sobre a lista). Listas vêm em páginas de 20 com `total` e `next`.",
-  "Toda MUTAÇÃO (comment/update/move/add-child) usa `--payload <arquivo.json>` — caminho de ARQUIVO, NUNCA JSON inline. Leitura usa flags diretas.",
+  "MUTAÇÃO com `--payload` recebe o CAMINHO de um arquivo .json, NUNCA JSON inline. Vencimento, responsável e etiqueta não precisam de arquivo: `card update --card-id <c> --due|--responsible|--add-tag`. Leitura usa flags diretas.",
   "Em `values`, a chave é o `id`/`name` do field (de `fields by-flow`/`step-form`), e o valor de um campo de opção é o CÓDIGO (`value`), não o texto.",
   "Ler texto de campo: use `valueString`; `value` costuma ser só o código da opção.",
   "Registro ativo vs deletado: olhe o campo `deleted` (\"N\"/\"S\"), não `dt_deleted`.",
@@ -199,7 +215,8 @@ export const GOTCHAS: string[] = [
   "Todo comando com exit != 0 vira 'ação que falhou' no log da execução. Antes de ler um arquivo que pode não existir, use `[ -f <path> ] && cat <path> || echo ausente` — não `cat` direto.",
   "Exit 5 é SUCESSO PARCIAL de lote (parte processada, parte não) — não é sucesso nem falha total: leia o resumo em stdout e reprocesse o que faltou antes de concluir a tarefa.",
   "Kit SEMPRE, MCP NUNCA: use o CLI `cange` (autentica como você). Nunca use um conector MCP do Cange — ele autentica como outro usuário e quebra fila/auditoria.",
-  "Se um comando falhar com `unknown command`/`required option`, PARE e consulte `cange manifest --output json` ou `cange guide` — não tente às cegas.",
+  "Erro de uso (exit 2) com `suggestion` (\"Você quis dizer: cange ...\"): rode o comando sugerido. Sem sugestão, a mensagem lista as opções do comando; só então consulte `cange <comando> --help` ou `cange manifest --output json`. Não tente às cegas.",
+  "Exit 6 = a ferramenta de API (`cange tool call`) falhou: o serviço externo recusou ou não respondeu. Conte como falha na resposta, com o nome e o motivo. Não busque o dado em outra fonte (site, outra API) por conta própria; só vale tentar outra ferramenta de API cadastrada com a mesma finalidade, uma vez.",
   "Antes de encerrar, ENTREGUE o resultado no card (`cange comment create` e/ou escrita de campos). Enquanto não entregar, a tarefa NÃO está concluída."
 ];
 

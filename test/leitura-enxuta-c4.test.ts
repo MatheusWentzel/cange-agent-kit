@@ -408,6 +408,8 @@ describe("listagens: página padrão menor, total e próxima página", () => {
       total: 120,
       count: 1,
       next: "cange register entries --register-id 175 --cursor n2",
+      // v9 (run 1131): os títulos do cadastro, uma vez no topo (campo que falta na entrada está vazio).
+      fieldTitles: ["Nome"],
       entries: [{ id: 7, title: "ACME", fields: { Nome: "ACME Ltda" } }]
     });
     expect(requests.find((request) => request.path === "/register/v2/query")?.body).toMatchObject({ page_size: 20 });

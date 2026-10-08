@@ -4,6 +4,33 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-08
 
+### Erros de uso que ensinam, cadastro sem ambiguidade e falha da ferramenta de API com exit 6 (v9, bloco 2)
+
+- Run 1131: `register entries 183` (exit 2, "too many arguments"), `register entry` ("Comando não existe") e
+  `map --register-id` ("unknown option") custaram 6 passos de manifest e jq até achar o comando. Agora:
+  - valor solto: `Valor solto "183" em cange register entries: este comando não recebe valor sem opção.` +
+    `Você quis dizer: cange register entries --register-id 183` (número, `#N` ou link vão para a 1a opção de id que o
+    comando declara: --card-id, --register-id, --flow-id, --entry-id, --form-answer-id; chamado pelo apelido, a do
+    apelido primeiro; sem nenhuma, `Opções: ...`);
+  - opção desconhecida: `cange map não tem a opção --register-id.` + a opção parecida do mesmo comando (distância de
+    edição até max(1, tamanho/4) ou sinônimo --register/--register-id, --card/--card-id, --flow/--flow-id,
+    --entry/--entry-id, --q/--query/--search) como comando pronto; senão `Opções: ...` e `Quem aceita --x: ...` (até 4);
+  - comando desconhecido também sugere o único irmão com 4 letras ou mais em comum no começo;
+  - o comando pronto sai também em `suggestion` no JSON do erro (só quando há um só).
+- `register entry` é apelido de `register entries`. `register entries` ganhou `fieldTitles` (todos os campos do
+  cadastro, na ordem do formulário: campo que não aparece na entrada está vazio), `--fields "<títulos>"` (exatamente
+  esses, na ordem, null = vazio) e `--entry-id <id>` (uma entrada com todos os campos; o cadastro é descoberto pela
+  entrada com `GET /form/answer` e os valores vêm por `GET /register/v2/query-single` ou pela lista v1, a mesma
+  checagem de acesso da listagem). O corte de 600 caracteres agora aponta para `--entry-id <id> --fields "<campo>"`.
+- Conversa 859 (runs 1128, 1129, 1133): `tool call` com `success:false` saía em stdout com exit 0, o passo aparecia
+  como concluído e o agente buscou o CNPJ em sites que ninguém cadastrou. Agora é exit 6 (`EXIT_CODES.TOOL_FAILED`,
+  `CangeToolCallError`), stderr com `message` ("A ferramenta de API \"Consulta CNPJ\" (#12) falhou: o serviço
+  respondeu 503 em brasilapi.com.br."), `tool`, `status`, `host`, `durationMs`, `details` e `hint`. Usa
+  `tool`/`upstream_status`/`host` do back quando vierem; sem eles, o status sai de "status code NNN" em
+  `error.details.message`, depois `error.message`, depois `statusCode`, e o host do `resolvedUrl`.
+- `cange guide` (e o manifest): jornada nova para vencimento, responsável e etiqueta; leitura de cadastro com
+  `fieldTitles`, `--fields` e `--entry-id`; armadilhas novas para o `suggestion` dos erros de uso e para o exit 6.
+
 ### Vencimento, responsável e etiqueta em 1 comando; telefone e documento como a tela grava (v9, bloco 1)
 
 - Conversa 857 (run 1119): mudar o vencimento custou 18 passos e bateu o teto, porque o `card update` exigia arquivo e

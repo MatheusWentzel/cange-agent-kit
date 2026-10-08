@@ -40,9 +40,18 @@ Estáveis e distintos — roteie retry/correção pelo code, sem parsear a mensa
 | 3 | autenticação (credenciais ausentes/inválidas) |
 | 4 | rede ou API do Cange |
 | 5 | **sucesso PARCIAL em lote** (parte processada, parte não) |
+| 6 | **ferramenta de API falhou** (`cange tool call` com `success:false`: o serviço externo recusou ou não respondeu) |
 
-Comando/flag desconhecido retorna a mensagem + a rota de discovery
-(`cange manifest` / `cange <grupo> --help`) e exit `2`.
+Erro de uso (exit `2`) ensina o comando certo: valor solto (`register entries 183`)
+e opção que o comando não tem viram `Você quis dizer: cange ...`, com o comando pronto
+também no campo `suggestion` do JSON; sem um comando só, a mensagem lista as opções do
+comando e quem aceita a opção. Sem nada disso, a rota de discovery
+(`cange manifest` / `cange <grupo> --help`).
+
+> **Exit 6 não é erro do Cange.** O Cange disparou a ferramenta e o serviço externo
+> falhou; a mensagem diz o nome, o status e o host. Conte como falha na resposta e não
+> busque o dado em outra fonte por conta própria (só vale outra ferramenta de API com a
+> mesma finalidade, uma vez). Erro do próprio Cange no invoke continua exit `4`.
 
 > **Exit 5 nunca é "deu certo".** Ele sai de operações em lote (`card create`
 > com `--payload-dir`/`--payloads`, `card read --card-ids`) quando parte dos

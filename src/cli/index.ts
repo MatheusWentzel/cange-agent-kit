@@ -6,7 +6,15 @@ import { Command } from "commander";
 
 import { CangeCliUsageError } from "../client/errors.js";
 import { createCliPrinter } from "../utils/output.js";
-import { DISCOVERY_HINT, suggestForUnknownCommand } from "./command-suggest.js";
+import {
+  DISCOVERY_HINT,
+  explainExcessArguments,
+  explainMissingMandatory,
+  explainUnknownCommand,
+  explainUnknownOption,
+  unknownOptionFlag,
+  type UsageExplanation
+} from "./command-suggest.js";
 import { exitCodeForError } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
 import { registerArtifactPublishCommand } from "./commands/artifact-publish.js";
@@ -284,16 +292,15 @@ const DISCOVERY_ERROR_CODES = new Set([
 
 export function normalizeCliError(error: unknown, program?: Command, argv?: readonly string[]): Error {
   if (isCommanderError(error)) {
-    // P7: comando desconhecido responde com a sugestão mais provável (1 a 2 linhas).
-    const suggestion =
-      error.code === "commander.unknownCommand" && program && argv
-        ? suggestForUnknownCommand(program, argv)
-        : undefined;
-    // Item 1: anexa a rota de discovery à mensagem de comando/flag inválidos.
+    const explained = program && argv ? explainUsageError(error, program, argv) : undefined;
+    // Item 1: sem explicação própria, anexa a rota de discovery à mensagem de comando/flag inválidos.
     const message =
-      suggestion ??
+      explained?.message ??
       (DISCOVERY_ERROR_CODES.has(error.code) ? `${error.message}\n${DISCOVERY_HINT}` : error.message);
-    return new CangeCliUsageError(message, { code: error.code });
+    return new CangeCliUsageError(message, {
+      code: error.code,
+      ...(explained?.suggestion ? { suggestion: explained.suggestion } : {})
+    });
   }
   if (error instanceof Error) {
     return error;
@@ -301,6 +308,30 @@ export function normalizeCliError(error: unknown, program?: Command, argv?: read
   return new CangeCliUsageError("Falha ao executar CLI.", {
     details: error
   });
+}
+
+/**
+ * P7: comando desconhecido responde com a sugestão mais provável (1 a 2 linhas).
+ * v9 (run 1131): valor solto e opção que o comando não tem também ensinam o
+ * comando certo; quando há um só, ele sai pronto em `suggestion`.
+ */
+function explainUsageError(
+  error: { code: string; message: string },
+  program: Command,
+  argv: readonly string[]
+): UsageExplanation | undefined {
+  try {
+    if (error.code === "commander.unknownCommand") return explainUnknownCommand(program, argv);
+    if (error.code === "commander.excessArguments") return explainExcessArguments(program, argv);
+    if (error.code === "commander.unknownOption") {
+      const flag = unknownOptionFlag(error.message);
+      return flag ? explainUnknownOption(program, argv, flag) : undefined;
+    }
+    if (error.code === "commander.missingMandatoryOptionValue") return explainMissingMandatory(program, argv);
+  } catch {
+    // A explicação é ajuda: se falhar, vale a mensagem do commander com a rota de discovery.
+  }
+  return undefined;
 }
 
 /**
