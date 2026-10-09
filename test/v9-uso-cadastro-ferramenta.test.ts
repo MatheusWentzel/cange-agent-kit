@@ -396,10 +396,23 @@ describe("erros de uso que devolvem o comando certo", () => {
     expect((await usage(["register", "get", link])).suggestion).toBe(`cange register get --register-id ${link}`);
   });
 
-  it("valor solto que não é id, ou com a opção já dada: lista as opções, sem comando pronto", async () => {
-    const list = await usage(["register", "entries", "list", "--register-id", "183"]);
+  it("run 1131, palavra de ação solta: `register entries list` vira o comando sem a palavra", async () => {
+    expect(await usage(["register", "entries", "list", "--register-id", "183", "--search", "Zagonel"])).toEqual({
+      name: "CangeCliUsageError",
+      message:
+        'Valor solto "list" em cange register entries: este comando não recebe valor sem opção.\n' +
+        "Você quis dizer: cange register entries --register-id 183 --search Zagonel",
+      code: "commander.excessArguments",
+      suggestion: "cange register entries --register-id 183 --search Zagonel"
+    });
+    expect((await usage(["card", "read", "GET", "--card-id", "5"])).suggestion).toBe("cange card read --card-id 5");
+    expect(requests).toHaveLength(0);
+  });
+
+  it("valor solto que não é id nem palavra de ação, ou com a opção já dada: lista as opções, sem comando pronto", async () => {
+    const list = await usage(["register", "entries", "corp", "--register-id", "183", "--search", "acme"]);
     expect(list.message).toBe(
-      'Valor solto "list" em cange register entries: este comando não recebe valor sem opção.\n' +
+      'Valor solto "corp" em cange register entries: este comando não recebe valor sem opção.\n' +
         "Opções: --register-id, --register, --id-register, --search, --fields, --entry-id, --page-size, --cursor, --q"
     );
     expect(list).not.toHaveProperty("suggestion");

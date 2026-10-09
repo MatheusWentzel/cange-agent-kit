@@ -313,6 +313,13 @@ function idOptionFor(walk: ArgvWalk): string | undefined {
   return order.find((long) => declaresLong(command, long));
 }
 
+/**
+ * Palavras de ação que o agente cola por analogia com outras CLIs (`register entries list`,
+ * `card get`). Tirar a palavra deixa o comando certo; com outro valor solto (ex.: o resto de
+ * um `--search acme corp` sem aspas) tirar mudaria o pedido, então ali só saem as opções.
+ */
+const STRAY_VERBS: ReadonlySet<string> = new Set(["list", "ls", "get", "read", "show", "view", "all", "listar", "ler", "ver", "mostrar"]);
+
 /** Valor solto (`commander.excessArguments`): o comando pronto com a opção de id, ou as opções. */
 export function explainExcessArguments(program: Command, argv: readonly string[]): UsageExplanation | undefined {
   const walk = walkArgv(program, argv);
@@ -343,6 +350,12 @@ export function explainExcessArguments(program: Command, argv: readonly string[]
       if (suggestion) return { message: `${first}\nVocê quis dizer: ${suggestion}`, suggestion };
       return { message: `${first}\nUse ${idOption} ${quoteArg(value)} no lugar do valor solto.` };
     }
+  }
+  if (stray.length === 1 && STRAY_VERBS.has(stray[0]!.value.toLowerCase())) {
+    const tokens = [...walk.tokens];
+    tokens.splice(stray[0]!.index, 1);
+    const suggestion = readyCommand(tokens);
+    if (suggestion) return { message: `${first}\nVocê quis dizer: ${suggestion}`, suggestion };
   }
   return { message: `${first}\n${optionsLine(command)}` };
 }
