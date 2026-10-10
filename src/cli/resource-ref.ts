@@ -13,8 +13,8 @@ import { envCardId, envFlowId } from "./env-defaults.js";
  *
  *  - número (`7946`, `#7946`) passa direto;
  *  - URL do Cange (`https://app.cange.me/register/<hash>`, `.../flow/<hash>/card/<id>`,
- *    `cange://card/<id>?flow=<id>`, ou só o caminho `/flow/<hash>`): extrai o id
- *    ou o hash do recurso pedido;
+ *    `cange://card/<id>?flow=<id>`, `cange://register/<id>/entry/<id>`, ou só o
+ *    caminho `/flow/<hash>`): extrai o id ou o hash do recurso pedido;
  *  - hash (fluxo e cadastro): resolvido para o id por `GET /flow?hash=` e
  *    `GET /register?hash=` (as mesmas rotas que a tela usa). Sem acesso ou hash
  *    inexistente: erro de uso em 1 linha dizendo onde achar o id numérico.
@@ -29,6 +29,11 @@ export interface CangeLinkParts {
   flow?: ResourceRef;
   register?: ResourceRef;
   cardId?: string;
+  /**
+   * Entrada (form answer) de cadastro: a menção do chat `cange://register/<id>/entry/<id>`
+   * e o link da tela `…/register/<hash>/register/<id>`.
+   */
+  entryId?: string;
 }
 
 const NOUN: Record<ResourceKind, string> = { flow: "fluxo", register: "cadastro", card: "cartão" };
@@ -98,7 +103,7 @@ export function parseCangeLink(raw: string): CangeLinkParts | undefined {
   const parts: CangeLinkParts = {};
   const segments = url.pathname.split("/").filter(Boolean);
 
-  // Menção do chat: cange://card/<id>?flow=<id>
+  // Menção do chat: cange://card/<id>?flow=<id> e cange://register/<id>/entry/<id>
   if (url.protocol === "cange:") {
     segments.unshift(url.hostname);
   }
@@ -109,6 +114,14 @@ export function parseCangeLink(raw: string): CangeLinkParts | undefined {
 
   const register = resourceInPath(segments, "register");
   if (register.ref) parts.register = register.ref;
+  if (
+    register.ref &&
+    (register.origin === "entry" || register.origin === "register") &&
+    register.id &&
+    POSITIVE_INT_RE.test(register.id)
+  ) {
+    parts.entryId = register.id;
+  }
 
   if (!parts.cardId) {
     const cardIndex = segments.indexOf("card");

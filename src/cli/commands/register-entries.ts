@@ -10,6 +10,7 @@ import { matchFieldsByKey } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, type CliCommandContext } from "../context.js";
 import { addSearchSynonyms } from "../helpers.js";
+import { parseCangeLink } from "../resource-ref.js";
 
 interface RegisterEntriesOptions {
   idRegister?: string;
@@ -137,14 +138,30 @@ async function loadRegisterFields(
   }
 }
 
-function parseEntryId(raw: string): string {
-  const value = raw.trim().replace(/^#/, "");
+/**
+ * O valor de `--entry-id`: número (`6507`, `#6507`) ou o link da entrada, a menção do
+ * chat `cange://register/<cadastro>/entry/<entrada>` ou o link da tela
+ * `…/register/<hash>/register/<entrada>`. O link com o id numérico do cadastro também
+ * diz o cadastro (o kit não precisa localizar a entrada).
+ */
+export function parseEntryRef(raw: string): { entryId: string; registerId?: string } {
+  const text = String(raw ?? "").trim();
+  const link = parseCangeLink(text);
+  if (link) {
+    if (!link.entryId) {
+      throw new CangeCliUsageError(
+        "--entry-id: o link não traz uma entrada de cadastro (cange://register/<cadastro>/entry/<entrada> ou …/register/<hash>/register/<entrada>). Use o número da entrada (o id de cada item em cange register entries)."
+      );
+    }
+    return { entryId: link.entryId, ...(link.register?.kind === "id" ? { registerId: link.register.id } : {}) };
+  }
+  const value = text.replace(/^#/, "");
   if (!/^[1-9]\d*$/.test(value)) {
     throw new CangeCliUsageError(
-      `--entry-id precisa do número da entrada (recebido: ${raw.trim() || "vazio"}). O número é o id de cada item em cange register entries.`
+      `--entry-id precisa do número da entrada (recebido: ${text || "vazio"}). O número é o id de cada item em cange register entries.`
     );
   }
-  return value;
+  return { entryId: value };
 }
 
 export function registerRegisterEntriesCommand(registerCommand: Command): void {
@@ -164,7 +181,7 @@ export function registerRegisterEntriesCommand(registerCommand: Command): void {
     )
     .option(
       "--entry-id <id>",
-      "Uma entrada só, pelo número, com TODOS os campos (vazio = null). O cadastro é descoberto pela entrada; --register-id é opcional"
+      "Uma entrada só, pelo número ou pelo link (cange://register/<cadastro>/entry/<entrada>), com TODOS os campos (vazio = null). O cadastro é descoberto pela entrada; --register-id é opcional"
     )
     .option(
       "--page-size <n>",
@@ -291,8 +308,12 @@ async function readOneEntry(
   if (options.cursor !== undefined) {
     throw new CangeCliUsageError("Use --entry-id sozinho ou --cursor, não os dois.");
   }
-  const entryId = parseEntryId(options.entryId ?? "");
-  const given = options.idRegister;
+  const entryRef = parseEntryRef(options.entryId ?? "");
+  const entryId = entryRef.entryId;
+  // A menção do chat traz o cadastro: vale como --register-id quando ele não veio.
+  const given = options.idRegister ?? entryRef.registerId;
+  // O pedido de acesso (hint do 404) usa o cadastro do link.
+  if (options.idRegister === undefined && entryRef.registerId !== undefined) options.registerId = entryRef.registerId;
 
   let registerId = given;
   if (registerId === undefined) {

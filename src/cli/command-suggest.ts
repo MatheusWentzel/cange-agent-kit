@@ -1,5 +1,7 @@
 import type { Command, Option } from "commander";
 
+import { parseCangeLink } from "./resource-ref.js";
+
 /**
  * P7 (05/10, card #1367450): comando ou subcomando que não existe responde com a
  * sugestão mais provável, em 1 a 2 linhas, em vez do erro seco do commander.
@@ -303,9 +305,12 @@ function looksLikeId(value: string): boolean {
  * de {@link ID_OPTION_ORDER}. Chamado pelo apelido (`register entry 6507`), vale
  * primeiro a opção do apelido (`--entry-id`).
  */
-function idOptionFor(walk: ArgvWalk): string | undefined {
+function idOptionFor(walk: ArgvWalk, value?: string): string | undefined {
   const { command, typedName } = walk;
   const order = [...ID_OPTION_ORDER];
+  // O link de uma ENTRADA de cadastro (a menção do chat cange://register/<id>/entry/<id>)
+  // vai para --entry-id, não para o --register-id (que leria o cadastro inteiro).
+  if (value !== undefined && parseCangeLink(value)?.entryId !== undefined) order.unshift("--entry-id");
   if (typedName && typedName !== command.name()) {
     const own = `--${typedName}-id`;
     if (declaresLong(command, own)) order.unshift(own);
@@ -339,7 +344,7 @@ export function explainExcessArguments(program: Command, argv: readonly string[]
   const first = `${head} em ${cangePath(command)}: ${rule}`;
 
   if (stray.length === 1 && looksLikeId(stray[0]!.value)) {
-    const idOption = idOptionFor(walk);
+    const idOption = idOptionFor(walk, stray[0]!.value);
     const alreadyGiven =
       idOption !== undefined && walk.tokens.some((token) => token === idOption || token.startsWith(`${idOption}=`));
     if (idOption && !alreadyGiven) {

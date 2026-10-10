@@ -93,7 +93,9 @@ calcular com python/jq sobre a saída do kit, ler o cadastro inteiro e repetir o
   (`null` = vazio): `{ registerId, entry: {id, title, fields} }`; o cadastro sai da entrada (`--register-id` opcional;
   divergente = exit 2 "A entrada 6507 é do cadastro 183, não do 203."), corte de 600 salvo com `--fields`, e não
   combina com `--search`/`--cursor`. Os valores passam pela mesma checagem de acesso da lista (sem acesso = o 404 com
-  o `access request` pronto). `register entry` é o mesmo comando.
+  o `access request` pronto). `register entry` é o mesmo comando. `--entry-id` aceita também o link da entrada: a
+  menção do chat `cange://register/<cadastro>/entry/<entrada>` (o cadastro vem junto) e o link da tela
+  `…/register/<hash>/register/<entrada>` (desde 10/10/2026).
 - **`map` resumido:** `startFields` (formulário de criação) e `steps[{id, name, fields}]`; campo = `{id, title, type,
   required? (só quando obrigatório), options? (rótulos, até 8) | optionsCount?, linksToFlowId?, registerId?}`. A lista
   longa de opções está em `cange fields by-flow` / `step-form`; o `formId` de cada campo, em `map --full`.
