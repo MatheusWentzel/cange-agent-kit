@@ -2,6 +2,59 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-10-10
+
+### Revisão do Alex antes da subida do lote de Agentes de IA (v9)
+
+Mudanças de comportamento desta rodada (CLI):
+
+- K-01: `--payload` converte SEMPRE, com ou sem `--validate-fields`, em `card create`, `card update-values`,
+  `card move-step-with-values`, `register create` e `register update`. O gate confere com `--dry-run --validate-fields`
+  e a execução real vem sem a flag: antes só a flag convertia (rótulo de opção, dd/mm/aaaa, R$, nome de usuário,
+  entrada de cadastro), e a aprovação mostrava "2" enquanto o PUT gravava "Aprovado". Agora o `values` gravado é o mesmo
+  com e sem a flag; ela só acrescenta a validação (chave desconhecida vira erro, obrigatórios, idForm). Custo: o payload
+  só com hash passa a ler os campos (1 GET; no lote, 1 por fluxo). `register update --payload` sem o cadastro (nem
+  `--register-id` nem `registerId`) agora é exit 2: sem os campos não dá para converter. O `card add-child` segue como
+  antes (sem `--validate-fields`, converte só com chave de título/id ou inline).
+- K-02: busca por nome só aceita igualdade (sem acento e caixa) ou início de palavra, em `card update --responsible`,
+  `--add-tag`/`--remove-tag`, campo de usuário no `--set`/payload e `comment create --mention`; entrada de cadastro, só
+  título exato ou prefixo (antes, 1 resultado da busca era gravado mesmo sem o título bater). Mais de um candidato ou
+  trecho no meio do nome ("Ana" em "Luciana Souza") = exit 2 com os candidatos e o comando pronto (`suggestion` quando
+  há um só), nada gravado. Bot de agente (`user.type` "AG") só pelo nome exato ou pelo id.
+- K-03: todo GET do cliente HTTP (e cada nova tentativa) passa pelo teto de leitura do processo, 7 por janela de 1 s
+  (o back bloqueia a chave por 5 minutos na 11ª leitura no mesmo segundo; a folga é para o processo vizinho: gate e
+  execução real). Só a admissão é serial; os GETs admitidos seguem em paralelo. `CANGE_READS_PER_SECOND` ajusta o teto.
+- K-04: escrita com valor que contém o marcador da leitura enxuta (`…(cortado:`, de `card read` e `register entries`)
+  é recusada com exit 2: era um pedaço do valor e apagaria o resto do campo.
+- K-05: `card update --due dd/mm` sem ano que já passou neste ano (ou 29/02 fora de ano bissexto) é exit 2 pedindo o
+  ano, com o comando do ano seguinte em `suggestion`. Antes ia para o ano seguinte sem aviso. Data futura (ou hoje) sem
+  ano continua no ano corrente.
+- K-09: falha ao ler os campos para a máscara de telefone/documento (`card add-child` sem resolução) não é mais
+  engolida: na execução real, exit 4 (`FIELDS_READ_FAILED`), nada gravado; em dry-run segue sem a máscara, com `warning`.
+- Receita `anexo`: DOCX sai com `unzip -p "<arquivo>.docx" word/document.xml | perl -pe 's/<\/w:p>/\n/g; s/<[^>]+>//g'`
+  (Linux do runner e Mac), no lugar do `textutil` (só macOS).
+
+Para quem usa o kit como biblioteca (K-06/K-07; mudanças deste lote v9 inteiro):
+
+- `validateValuesAgainstFields` ficou mais rígido: DOC_FIELD confere o tipo pela variation (CPF/CNPJ) e o dígito
+  verificador; PHONE_FIELD exige telefone com DDD, 10 ou 11 dígitos. Valor que passava antes pode virar `issue`.
+- Obrigatórios (`validateValuesAgainstFields`, `findMissingRequired`, `missingRequiredFields`) seguem
+  `isRequiredOnScreen`: a regra `required` do campo e visível no formulário, como a tela (campo oculto não é cobrado;
+  switch nunca; rich text `<p></p>` é vazio).
+- `updateCardValues` (`PUT /form/answer`) refaz 1 vez com o `expected_form_id` quando o back responde 422
+  `FIELD_FORM_MISMATCH` (e 1 vez, depois de ~1 s, no 409 `STEP_FORM_ANSWER_BUSY`). Quem tratava esse 422 por conta
+  própria agora recebe sucesso ou o erro da 2ª tentativa.
+- `fetchFlowCards` (e o `listAllCardsByFlow` do V1) segue o cursor do fluxo grande até 20 mil cartões
+  (`CARDS_BY_FLOW_MAX_CARDS`), em vez de parar na 1ª página. Erro 4xx do V2 não cai mais no V1 (só falha de rede ou
+  5xx caem): o erro do V2 sobe para quem chamou.
+- `card read` enxuto: `dueDate`, `responsibleUserId` e `responsibleName` deram lugar a `due`, `responsible` ({id, name})
+  e `tags` ([{id, name}]), sempre presentes (null e [] = vazio).
+- `CompanyUserSummary` e `FlowUserSummary` (e o `CompanyUser` do resolvedor) ganharam `userType` (`user.type`).
+- `fieldsForMask(load, { dryRun })` mudou de assinatura: devolve `{ fields?, warning? }` e lança na execução real.
+- Novos exports: `pickByName`, `isAgentUser`, `AGENT_USER_TYPE`, `TRUNCATED_VALUE_MARKER`, `truncatedValueIssues`
+  (`utils/valueResolver`), `DEFAULT_READS_PER_SECOND` e `readsPerSecond` (`client/http`). `parseDueInput` pode devolver
+  `{ kind: "needs_year" }` (`DueNeedsYear`).
+
 ## 2026-10-08
 
 ### Erros de uso que ensinam, cadastro sem ambiguidade e falha da ferramenta de API com exit 6 (v9, bloco 2)

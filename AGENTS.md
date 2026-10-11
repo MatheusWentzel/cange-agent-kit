@@ -122,10 +122,12 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   com o agente (só numa conversa).
 - Vencimento, responsável e etiqueta (desde 08/10/2026): `cange card update --card-id <id> --due 27/10/2026`,
   `--responsible eu` (ou id, e-mail, nome; `ninguém` tira) e `--add-tag "Quente"` / `--remove-tag "Quente"`.
-  - `--due`: dd/mm/aaaa, dd/mm/aaaa HH:MM, dd/mm (a próxima ocorrência), aaaa-mm-dd [HH:MM], hoje, amanhã; sem hora =
-    00:00, hora de Brasília (como o seletor da tela); `limpar` tira o vencimento.
+  - `--due`: dd/mm/aaaa, dd/mm/aaaa HH:MM, dd/mm (só data deste ano que ainda não passou; já passou = exit 2 pedindo o
+    ano, com o comando pronto), aaaa-mm-dd [HH:MM], hoje, amanhã; sem hora = 00:00, hora de Brasília (como o seletor da
+    tela); `limpar` tira o vencimento.
   - `--responsible`: só quem a tela deixa escolher no fluxo (sem leitor); `eu` = quem conversa com o agente, só numa
-    conversa (fora dela, exit 2). Nome ambíguo ou fora da lista: exit 2 com os candidatos, nada gravado.
+    conversa (fora dela, exit 2). Nome exato ou início de palavra; trecho no meio do nome, nome ambíguo ou fora da
+    lista: exit 2 com os candidatos e o comando pronto, nada gravado. Bot de agente só pelo nome exato ou id.
   - Vencimento e responsável vão juntos num comando só (uma gravação, uma aprovação). Etiqueta é outra permissão
     (Vincular/rotular): uma etiqueta por comando, nunca junto com vencimento ou responsável (exit 2 com os comandos
     prontos). O kit não cria etiqueta: a que não existe no fluxo dá exit 2 com a lista das que existem.
