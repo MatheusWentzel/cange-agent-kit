@@ -13,8 +13,6 @@ import {
   fieldsForMask,
   formattedInfo,
   formattedOf,
-  maskPassthroughValues,
-  mayNeedScreenMask,
   mergedValues,
   needsFieldResolution,
   parseInlineValues,
@@ -60,37 +58,35 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
         // v9 (h): telefone e documento do filho vão como a tela grava.
         let formatted: ReturnType<typeof formattedInfo> = {};
         let maskWarning: string | undefined;
-        if (needsFieldResolution({ ...child.values, ...(inline ?? {}) }, inline !== undefined)) {
+        const merged = { ...child.values, ...(inline ?? {}) };
+        if (Object.keys(merged).length > 0) {
+          // N-3 (2ª rodada do Alex): o payload é convertido SEMPRE, como nos outros 5 comandos
+          // (K-01): o rótulo de opção, a data dd/mm/aaaa e o nome de usuário num payload só de hash
+          // iam crus para o back. Custo: 1 GET dos campos do fluxo filho.
           const auth = authOnce(kit, ensureAuth);
           await auth();
-          const { fields } = await kit.contracts.getFieldsByFlow({ flowId: child.flowId });
-          const { target, others } = scopesFromFields(fields, child.idForm);
-          const { resolved, issues, passthrough } = await resolveLayers({
-            layers: [child.values, inline],
-            forms: [{ ...target, label: "formulário do card filho" }],
-            outOfScope: others,
-            lookups: createWriteLookups(kit, auth),
-            passthroughUnknown: true
-          });
-          throwIfInvalid(issues);
-          child.values = mergedValues({ resolved, passthrough });
-          formatted = formattedInfo(formattedOf(resolved));
-        } else {
-          // K-04: sem resolução também não grava o texto cortado da leitura enxuta.
-          throwIfInvalid(truncatedValueIssues(child.values));
-          if (mayNeedScreenMask(child.values)) {
-            await authOnce(kit, ensureAuth)();
-            const { fields, warning } = await fieldsForMask(
-              async () => (await kit.contracts.getFieldsByFlow({ flowId: child.flowId })).fields,
-              { dryRun: options.dryRun === true }
-            );
-            maskWarning = warning;
-            if (fields) {
-              const masked = maskPassthroughValues(child.values, fields);
-              throwIfInvalid(masked.issues);
-              child.values = masked.values;
-              formatted = formattedInfo(masked.formatted);
-            }
+          const load = async () => (await kit.contracts.getFieldsByFlow({ flowId: child.flowId })).fields;
+          // Chave de título/id (ou inline) só se resolve com os campos: a falha de leitura sobe como
+          // antes. Só hash: K-09 (execução real falha fechado; dry-run segue sem converter, com aviso).
+          const loaded = needsFieldResolution(merged, inline !== undefined)
+            ? { fields: await load() }
+            : await fieldsForMask(load, { dryRun: options.dryRun === true });
+          maskWarning = loaded.warning;
+          if (loaded.fields) {
+            const { target, others } = scopesFromFields(loaded.fields, child.idForm);
+            const { resolved, issues, passthrough } = await resolveLayers({
+              layers: [child.values, inline],
+              forms: [{ ...target, label: "formulário do card filho" }],
+              outOfScope: others,
+              lookups: createWriteLookups(kit, auth),
+              passthroughUnknown: true
+            });
+            throwIfInvalid(issues);
+            child.values = mergedValues({ resolved, passthrough });
+            formatted = formattedInfo(formattedOf(resolved));
+          } else {
+            // K-04: sem os campos também não grava o texto cortado da leitura enxuta.
+            throwIfInvalid(truncatedValueIssues(child.values));
           }
         }
         if (/^\d+$/.test(parent.linkField)) {

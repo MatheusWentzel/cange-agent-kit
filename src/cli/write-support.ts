@@ -13,7 +13,6 @@ import {
   normalizeText,
   REGISTER_ENTRY_SEARCH_PAGE,
   resolveFieldValues,
-  screenMaskOf,
   truncatedValueIssues,
   type CompanyUser,
   type FormScope,
@@ -87,9 +86,9 @@ export function parseInlineValues(options: InlineValueOptions): Record<string, u
 }
 
 /**
- * O payload (arquivo) precisa da estrutura de campos? Hash e chave técnica passam direto.
- * Só o `card add-child` ainda decide assim: os comandos com --validate-fields convertem o
- * payload sempre (K-01), para o gate e a execução real gravarem o mesmo valor.
+ * O payload (arquivo) tem chave que só se acha com os campos (id ou título)? Todos os comandos
+ * convertem o payload sempre (K-01; o `card add-child` desde a N-3); aqui o `card add-child`
+ * decide só como trata a falha de leitura dos campos (K-09 vale para o payload só de hash).
  */
 export function needsFieldResolution(values: Record<string, unknown>, force: boolean): boolean {
   if (force) return true;
@@ -381,57 +380,11 @@ export function formattedInfo(formatted: FormattedValue[] | undefined): { format
 }
 
 /**
- * Algum valor tem cara de telefone ou documento? Sem pontuação e espaço: 10 a 14 dígitos
- * (telefone com DDD, CPF, CNPJ) ou o formato do CNPJ alfanumérico (12 letras ou dígitos e 2
- * dígitos). Só assim o payload por arquivo sem resolução gasta o GET dos campos; o resto segue
- * sem consulta extra, como antes.
- */
-export function mayNeedScreenMask(values: Record<string, unknown>): boolean {
-  return Object.values(values).some((value) => {
-    if (typeof value !== "string" && typeof value !== "number") return false;
-    const bare = String(value).replace(/[\s().\-/+]/g, "");
-    return /^\d{10,14}$/.test(bare) || /^[0-9A-Za-z]{12}\d{2}$/.test(bare);
-  });
-}
-
-/**
- * v9 (h): payload por arquivo que segue SEM resolução (hoje só o `card add-child`; os 5
- * comandos com --payload e --validate-fields convertem sempre, K-01).
- * Telefone e documento, achados pelo hash (ou id) nos campos do formulário, vão como a
- * tela grava; valor que a tela recusa vira `issue` (exit 2, nada gravado), como no `--set`.
- * O resto segue como veio.
- */
-export function maskPassthroughValues(
-  values: Record<string, unknown>,
-  fields: NormalizedField[]
-): { values: Record<string, unknown>; formatted: FormattedValue[]; issues: ValueIssue[] } {
-  const out: Record<string, unknown> = { ...values };
-  const formatted: FormattedValue[] = [];
-  const issues: ValueIssue[] = [];
-  for (const [key, value] of Object.entries(values)) {
-    const plain = key.trim();
-    const field =
-      fields.find((candidate) => candidate.name === plain) ??
-      (/^\d+$/.test(plain) ? fields.find((candidate) => String(candidate.id) === plain) : undefined);
-    if (!field) continue;
-    const masked = screenMaskOf(field, value);
-    if (masked.issue) {
-      issues.push(masked.issue);
-      continue;
-    }
-    if (masked.from !== undefined) {
-      out[key] = masked.value;
-      formatted.push({ field: field.title ?? field.name, from: masked.from, to: String(masked.value) });
-    }
-  }
-  return { values: out, formatted, issues };
-}
-
-/**
- * Campos para a máscara do payload por arquivo (1 GET).
- * K-09: na execução real, falha FECHADO: sem os campos, o telefone e o documento iriam sem a
- * máscara da tela, diferente do que a conferência mostrou; erro claro e nada gravado. Em
- * dry-run segue sem a máscara, com `warning` (a execução real vai ler de novo).
+ * Campos para converter o payload só de hash do `card add-child` (1 GET).
+ * K-09: na execução real, falha FECHADO: sem os campos, os valores (telefone e documento sem a
+ * máscara, rótulo, data) iriam sem a conversão da tela, diferente do que a conferência mostrou;
+ * erro claro e nada gravado. Em dry-run segue sem converter, com `warning` (a execução real vai
+ * ler de novo).
  */
 export async function fieldsForMask(
   load: () => Promise<NormalizedField[]>,
@@ -443,11 +396,11 @@ export async function fieldsForMask(
     const reason = error instanceof Error ? error.message : String(error);
     if (options.dryRun) {
       return {
-        warning: `Não deu para ler os campos do formulário (${reason}): telefone e documento aparecem sem a máscara da tela. A execução real lê de novo e não grava se falhar.`
+        warning: `Não deu para ler os campos do formulário (${reason}): os valores aparecem como vieram, sem a conversão (rótulo, data) e sem a máscara da tela (telefone, documento). A execução real lê de novo e não grava se falhar.`
       };
     }
     throw new CangeApiError(
-      `Não deu para ler os campos do formulário para gravar telefone e documento como a tela (${reason}). Nada foi gravado; tente de novo.`,
+      `Não deu para ler os campos do formulário para converter os valores como a tela (${reason}). Nada foi gravado; tente de novo.`,
       {
         code: "FIELDS_READ_FAILED",
         cause: error,

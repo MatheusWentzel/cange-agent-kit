@@ -185,4 +185,19 @@ describe("K-01: --payload converte sempre (gate e execução real gravam o mesmo
     expect(requests.filter((request) => request.method !== "GET")).toHaveLength(0);
     expect(stderr.join("")).toContain("--register-id");
   });
+
+  it("card add-child com payload só de hash (N-3): converte como os outros 5", async () => {
+    const file = await payloadFile({
+      child: { flowId: 316, idForm: 900, origin: "/cange-agent-kit", values: rawValues("i") },
+      parent: { flowId: 316, cardId: 55, idForm: 900, linkField: "h_link" }
+    });
+    const dry = await run(["card", "add-child", "--payload", file, "--dry-run"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(dry!.payload.child.values).toEqual(expectedValues("i"));
+    requests.length = 0;
+    await run(["card", "add-child", "--payload", file]);
+    expect(process.exitCode ?? 0).toBe(0);
+    const create = requests.find((request) => request.method === "POST" && request.path === "/form/new-answer");
+    expect(create!.body?.values).toEqual(expectedValues("i"));
+  });
 });
