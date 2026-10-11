@@ -1,4 +1,5 @@
 import { isForceDryRun, isWriteRequest } from "../utils/forceDryRun.js";
+import { createReadWindowPacer, type Throttle } from "../utils/rateLimit.js";
 
 import { CangeApiError, CangeCliUsageError, type CangeHttpMethod, sanitizeSensitive } from "./errors.js";
 import { noteRead } from "./readWindow.js";
@@ -36,6 +37,38 @@ export interface CangeClient {
   getAccessToken(): string | undefined;
 }
 
+/**
+ * K-03 (code review do Alex, lote v9): o back permite 10 GET por segundo por chave e a 11ª
+ * bloqueia a chave por 5 minutos. Antes só a conferência do `screen-refs` passava pelo pacer;
+ * agora TODO GET do cliente (e cada nova tentativa) entra pelo `createReadWindowPacer`, com
+ * teto de 7 por janela de 1 s: sobra folga para o processo vizinho (a conferência do gate roda
+ * num processo e a execução real logo depois, em outro, com a mesma chave).
+ *
+ * O pacer é do processo (o teto é por chave e o histórico de leituras, `readWindow`, também):
+ * ele só serializa a ADMISSÃO de cada GET (esperar vaga e anotar o início); as leituras
+ * admitidas seguem em paralelo e contam como em voo até a resposta.
+ * `CANGE_READS_PER_SECOND` ajusta o teto (os testes sobem para não esperar o relógio).
+ */
+export const DEFAULT_READS_PER_SECOND = 7;
+
+const readPacers = new Map<number, Throttle>();
+
+export function readsPerSecond(): number {
+  const raw = Number(process.env.CANGE_READS_PER_SECOND);
+  return Number.isFinite(raw) && raw >= 1 ? Math.trunc(raw) : DEFAULT_READS_PER_SECOND;
+}
+
+/** Espera a vaga de um GET no teto do processo e anota o início; devolve quem anota o fim. */
+function admitRead(): Promise<(endAt?: number) => void> {
+  const limit = readsPerSecond();
+  let pacer = readPacers.get(limit);
+  if (!pacer) {
+    pacer = createReadWindowPacer({ maxPerWindow: limit });
+    readPacers.set(limit, pacer);
+  }
+  return pacer.run(async () => noteRead());
+}
+
 export function createCangeClient(config: CangeClientConfig): CangeClient {
   let accessToken = config.accessToken;
   const fetchFn = config.fetchFn ?? globalThis.fetch;
@@ -69,6 +102,11 @@ export function createCangeClient(config: CangeClientConfig): CangeClient {
     const effectiveTimeout = options.timeoutMs ?? timeoutMs;
 
     for (let attempt = 0; ; attempt += 1) {
+      // REG-F1: o teto de leitura do back conta toda tentativa de GET, quando ela chega (entre o
+      // início e a resposta): o `readWindow` guarda os dois (ver `createReadWindowPacer`).
+      // K-03: e cada tentativa só sai quando cabe no teto do processo (`admitRead`), antes do
+      // relógio do timeout (a espera na fila não conta como lentidão da API).
+      const readDone = method === "GET" ? await admitRead() : undefined;
       const abortController = new AbortController();
       const timeout = setTimeout(() => abortController.abort(), effectiveTimeout);
 
@@ -81,9 +119,6 @@ export function createCangeClient(config: CangeClientConfig): CangeClient {
           hasBody: bodyInit !== undefined
         });
 
-        // REG-F1: o teto de leitura do back conta toda tentativa de GET, quando ela chega (entre o
-        // início e a resposta): o `readWindow` guarda os dois (ver `createReadWindowPacer`).
-        const readDone = method === "GET" ? noteRead() : undefined;
         let response: globalThis.Response;
         try {
           response = await fetchFn(url, {

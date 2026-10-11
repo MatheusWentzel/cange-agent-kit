@@ -8,6 +8,14 @@ import { afterEach } from "vitest";
  */
 const escaped: string[] = [];
 
+/**
+ * K-03: todo GET do cliente passa pelo teto de leitura do processo (7 por segundo, relógio real).
+ * Com o fetch mockado, as dezenas de GETs de um arquivo de teste esperariam o relógio (e os testes
+ * com relógio falso travariam): aqui o teto sobe. O teste do teto (`k03-teto-leitura`) tira a
+ * variável e confere o padrão de 7.
+ */
+process.env.CANGE_READS_PER_SECOND ??= "1000";
+
 globalThis.fetch = (async (input: unknown, init?: { method?: string }) => {
   const call = `${(init?.method ?? "GET").toUpperCase()} ${String(input)}`;
   escaped.push(call);
