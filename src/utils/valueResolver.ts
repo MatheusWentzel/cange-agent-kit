@@ -1044,8 +1044,14 @@ export function formatValueIssues(issues: ValueIssue[]): string {
  */
 export const TRUNCATED_VALUE_MARKER = "…(cortado:";
 
+/**
+ * N-4 (2ª rodada do Alex): o agente que copia o valor às vezes troca a reticência "…" por três
+ * pontos ASCII ("...(cortado:") ou perde o começo; o miolo `(cortado:` basta para recusar.
+ */
+const TRUNCATED_MARKER_CORE = "(cortado:";
+
 function hasTruncatedMarker(value: unknown, depth = 0): boolean {
-  if (typeof value === "string") return value.includes(TRUNCATED_VALUE_MARKER);
+  if (typeof value === "string") return value.includes(TRUNCATED_MARKER_CORE);
   if (depth > 4 || value === null || typeof value !== "object") return false;
   return Object.values(value as Record<string, unknown>).some((item) => hasTruncatedMarker(item, depth + 1));
 }

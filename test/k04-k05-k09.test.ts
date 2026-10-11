@@ -119,6 +119,24 @@ describe("K-04: texto cortado da leitura enxuta não é gravado", () => {
     expect(writes()).toEqual([]);
   });
 
+  it.each([
+    ["três pontos ASCII", "Cliente pediu revisão...(cortado: use --fields \"Observação\" para ler inteiro)"],
+    ["só o miolo", "Cliente pediu revisão (cortado: 1200 caracteres)"]
+  ])("N-4: variante do marcador (%s) também é recusada", async (_label, value) => {
+    const file = await payloadFile({ idForm: 900, flowId: 316, cardId: 55, values: { h_obs: value } });
+    await run(["card", "update-values", "--payload", file]);
+    expect(process.exitCode).toBe(2);
+    expect(writes()).toEqual([]);
+  });
+
+  it("N-4: card move-step (deprecated) recusa o marcador antes de ler qualquer coisa", async () => {
+    const file = await payloadFile({ flowId: 316, cardId: 55, fromStepId: 1, toStepId: 1, idForm: 901, values: { h_obs: CUT } });
+    await run(["card", "move-step", "--payload", file]);
+    expect(process.exitCode).toBe(2);
+    expect(requests).toEqual([]);
+    expect(String(JSON.parse(stderr.join("").slice(stderr.join("").indexOf("{"))).message)).toContain("cortado");
+  });
+
   it("card add-child sem resolução (só hash): também recusa", async () => {
     const file = await payloadFile({
       child: { flowId: 316, idForm: 900, origin: "/x", values: { h_obs: CUT } },

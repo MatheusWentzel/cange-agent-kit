@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import { CangeValidationError } from "../../client/errors.js";
 import { moveCardStepPayloadSchema } from "../../schemas/cards.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
+import { truncatedValueIssues } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { EXIT_CODES } from "../exit-codes.js";
@@ -43,6 +44,8 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
           });
         }
         const payload = parsed.data;
+        // K-04/N-4: o alias também recusa o texto cortado da leitura enxuta (antes de ler qualquer coisa).
+        throwIfInvalid(truncatedValueIssues(payload.values));
         // O wrapper pula o login em --dry-run, mas este comando sempre lê (fluxo e cartão).
         await authOnce(kit, ensureAuth)();
 
