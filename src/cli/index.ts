@@ -6,6 +6,15 @@ import { Command } from "commander";
 
 import { CangeCliUsageError } from "../client/errors.js";
 import { createCliPrinter } from "../utils/output.js";
+import {
+  DISCOVERY_HINT,
+  explainExcessArguments,
+  explainMissingMandatory,
+  explainUnknownCommand,
+  explainUnknownOption,
+  unknownOptionFlag,
+  type UsageExplanation
+} from "./command-suggest.js";
 import { exitCodeForError } from "./exit-codes.js";
 import { resolveOutputMode } from "./output-mode.js";
 import { registerArtifactPublishCommand } from "./commands/artifact-publish.js";
@@ -26,10 +35,12 @@ import { registerCardCommentListCommand } from "./commands/card-comment-list.js"
 import { registerCardCreateCommand } from "./commands/card-create.js";
 import { registerCardGetCommand } from "./commands/card-get.js";
 import { registerCardReadCommand } from "./commands/card-read.js";
+import { registerCardMoveCommand } from "./commands/card-move.js";
 import { registerCardMoveStepCommand } from "./commands/card-move-step.js";
 import { registerCardMoveStepWithValuesCommand } from "./commands/card-move-step-with-values.js";
 import { registerCardUpdateCommand } from "./commands/card-update.js";
 import { registerCardUpdateValuesCommand } from "./commands/card-update-values.js";
+import { registerCardsAggregateCommands } from "./commands/cards-aggregate.js";
 import { registerCardsListCommand } from "./commands/cards-list.js";
 import { registerFieldsByFlowCommand } from "./commands/fields-by-flow.js";
 import { registerFieldsByRegisterCommand } from "./commands/fields-by-register.js";
@@ -77,6 +88,11 @@ export function createProgram(): Command {
       "--full",
       "Formato COMPLETO de antes (JSON indentado, campos internos e vazios); o padrão é a saída enxuta. " +
         "O mesmo que CANGE_OUTPUT_PROFILE=full"
+    )
+    .option(
+      "--format <formato>",
+      "EXPERIMENTAL: json (padrão) | toon. toon imprime as LISTAS (card list, register entries, my-flows, catalog, " +
+        "cards count/sum) como tabela: cabeçalho uma vez e uma linha por item. O mesmo que CANGE_OUTPUT_FORMAT=toon"
     );
 
   registerAuthCommand(program);
@@ -120,9 +136,19 @@ export function createProgram(): Command {
   registerCardUpdateValuesCommand(cardCommand);
   registerCardMoveStepCommand(cardCommand);
   registerCardMoveStepWithValuesCommand(cardCommand);
+  // P5 (05/10): mover em 1 passo (origem = etapa atual, destino por nome ou id).
+  registerCardMoveCommand(cardCommand);
   registerCardAddLabelCommand(cardCommand);
   registerCardRelationshipCommand(cardCommand);
   registerCardAddChildCommand(cardCommand);
+  // C4 (06/10): contar e somar no kit (no lugar de python/jq sobre a lista).
+  registerCardsAggregateCommands(cardCommand);
+
+  const cardsCommand = program
+    .command("cards")
+    .description("Cartões de um fluxo: cards count (contar), cards sum (somar) e cards list (o mesmo que card list)");
+  registerCardsAggregateCommands(cardsCommand);
+  registerCardsListCommand(cardsCommand);
 
   const commentCommand = program.command("comment").description("Operações de comentário");
   registerCardCommentListCommand(commentCommand);
@@ -186,9 +212,6 @@ export function createProgram(): Command {
   return program;
 }
 
-const DISCOVERY_HINT =
-  "Descubra os comandos disponíveis: `cange manifest --output json` (fonte de verdade) " +
-  "ou `cange <grupo> --help`.";
 
 export async function runCli(argv = process.argv): Promise<void> {
   // EPIPE = o consumidor do pipe fechou/morreu (`cange … | head`, ou um
@@ -221,7 +244,7 @@ export async function runCli(argv = process.argv): Promise<void> {
 
     // Item 2/3: erro vai para stderr; stdout permanece limpo. Printer TTY-aware.
     const printer = createCliPrinter(resolveOutputMode(undefined));
-    const normalized = normalizeCliError(error);
+    const normalized = normalizeCliError(error, program, argv);
     printer.printError(normalized);
     process.exitCode = exitCodeForError(normalized);
   }
@@ -267,13 +290,17 @@ const DISCOVERY_ERROR_CODES = new Set([
   "commander.optionMissingArgument"
 ]);
 
-function normalizeCliError(error: unknown): Error {
+export function normalizeCliError(error: unknown, program?: Command, argv?: readonly string[]): Error {
   if (isCommanderError(error)) {
-    // Item 1: anexa a rota de discovery à mensagem de comando/flag inválidos.
-    const message = DISCOVERY_ERROR_CODES.has(error.code)
-      ? `${error.message}\n${DISCOVERY_HINT}`
-      : error.message;
-    return new CangeCliUsageError(message, { code: error.code });
+    const explained = program && argv ? explainUsageError(error, program, argv) : undefined;
+    // Item 1: sem explicação própria, anexa a rota de discovery à mensagem de comando/flag inválidos.
+    const message =
+      explained?.message ??
+      (DISCOVERY_ERROR_CODES.has(error.code) ? `${error.message}\n${DISCOVERY_HINT}` : error.message);
+    return new CangeCliUsageError(message, {
+      code: error.code,
+      ...(explained?.suggestion ? { suggestion: explained.suggestion } : {})
+    });
   }
   if (error instanceof Error) {
     return error;
@@ -281,6 +308,30 @@ function normalizeCliError(error: unknown): Error {
   return new CangeCliUsageError("Falha ao executar CLI.", {
     details: error
   });
+}
+
+/**
+ * P7: comando desconhecido responde com a sugestão mais provável (1 a 2 linhas).
+ * v9 (run 1131): valor solto e opção que o comando não tem também ensinam o
+ * comando certo; quando há um só, ele sai pronto em `suggestion`.
+ */
+function explainUsageError(
+  error: { code: string; message: string },
+  program: Command,
+  argv: readonly string[]
+): UsageExplanation | undefined {
+  try {
+    if (error.code === "commander.unknownCommand") return explainUnknownCommand(program, argv);
+    if (error.code === "commander.excessArguments") return explainExcessArguments(program, argv);
+    if (error.code === "commander.unknownOption") {
+      const flag = unknownOptionFlag(error.message);
+      return flag ? explainUnknownOption(program, argv, flag) : undefined;
+    }
+    if (error.code === "commander.missingMandatoryOptionValue") return explainMissingMandatory(program, argv);
+  } catch {
+    // A explicação é ajuda: se falhar, vale a mensagem do commander com a rota de discovery.
+  }
+  return undefined;
 }
 
 /**

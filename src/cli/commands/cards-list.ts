@@ -1,14 +1,15 @@
 import type { Command } from "commander";
 
 import { CangeCliUsageError } from "../../client/errors.js";
-import type { FlowQueryEngineChoice } from "../../contracts/flowCards.js";
+import { readV1Page, type FlowQueryEngineChoice } from "../../contracts/flowCards.js";
 import { extractFlowSteps } from "../../contracts/payload-builder.js";
 import type { CardSummary } from "../../contracts/types.js";
 import type { CangeAgentKit } from "../../index.js";
 import { dropEmpty } from "../../utils/lean.js";
+import { listOutput } from "../../utils/toon.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
-import { parseOptionalBoolean } from "../helpers.js";
+import { addSearchSynonyms, parseOptionalBoolean } from "../helpers.js";
 
 interface CardsListOptions {
   flowId: string;
@@ -20,6 +21,30 @@ interface CardsListOptions {
   limit?: string;
   engine?: string;
   viewId?: string;
+  search?: string;
+  cursor?: string;
+}
+
+/** C4: página padrão do enxuto (antes vinham todos os cartões do fluxo). */
+export const CARD_LIST_DEFAULT_LIMIT = 20;
+
+/**
+ * Comando pronto da página seguinte (o agente copia, não monta). Página do V1 leva
+ * `--engine v1` e os `--with-*`: o cursor dela é deslocamento e não serve ao V2 (K2).
+ */
+function nextPageCommand(options: CardsListOptions, cursor: string, engine?: string): string {
+  const parts = ["cange card list", `--flow-id ${options.flowId}`];
+  if (engine === "v1") parts.push("--engine v1");
+  if (options.withPreAnswer) parts.push(`--with-pre-answer ${options.withPreAnswer}`);
+  if (options.withTimeTracking) parts.push(`--with-time-tracking ${options.withTimeTracking}`);
+  if (options.testModel) parts.push(`--test-model ${options.testModel}`);
+  if (options.stepId) parts.push(`--step-id ${options.stepId}`);
+  if (options.viewId) parts.push(`--view-id ${options.viewId}`);
+  if (options.search) parts.push(`--search ${JSON.stringify(options.search)}`);
+  if (options.archived) parts.push(`--archived ${options.archived}`);
+  if (options.limit) parts.push(`--limit ${options.limit}`);
+  parts.push(`--cursor ${cursor}`);
+  return parts.join(" ");
 }
 
 function parseEngine(value: string | undefined): FlowQueryEngineChoice {
@@ -57,12 +82,17 @@ export function registerCardsListCommand(cardCommand: Command): void {
     .option("--step-id <id>", "Filtra cartões por etapa atual")
     .option("--view-id <id>", "ID de uma visualização salva (aplica filtros/colunas/ordenação dela)")
     .option("--engine <engine>", "Motor de query: auto (default) | v1 | v2", "auto")
-    .option("--limit <n>", "Limita quantidade de cartões retornados")
+    .option(
+      "--limit <n>",
+      `Cartões por página (enxuto: padrão ${CARD_LIST_DEFAULT_LIMIT}; --full: todos). Para CONTAR ou SOMAR use \`cange cards count\`/\`cards sum\`, não a lista`
+    )
+    .option("--cursor <cursor>", "Página seguinte: o `--cursor` que veio em `next` na chamada anterior")
+    .option("--search <texto>", "Busca textual em todos os campos do fluxo (motor V2; --q é sinônimo)")
     .action(
       createCommandAction(async ({ kit, profile }, options: CardsListOptions) => {
         const lean = profile === "lean";
         const engine = parseEngine(options.engine);
-        const limit = parseLimit(options.limit);
+        const limit = parseLimit(options.limit) ?? (lean ? CARD_LIST_DEFAULT_LIMIT : undefined);
         const isArchived = parseOptionalBoolean(options.archived);
         const withPreAnswer = parseOptionalBoolean(options.withPreAnswer);
         const withTimeTracking = parseOptionalBoolean(options.withTimeTracking);
@@ -73,36 +103,38 @@ export function registerCardsListCommand(cardCommand: Command): void {
         // usuário forçou V2 ou pediu uma view (que só o V2 resolve).
         const usesV1Enrichment =
           withPreAnswer === true || withTimeTracking === true || testModel === true;
-        const forceLegacyV1 = usesV1Enrichment && engine !== "v2" && !options.viewId;
+        const search = options.search?.trim() || undefined;
+        const forceLegacyV1 = usesV1Enrichment && engine !== "v2" && !options.viewId && !search;
 
         if (forceLegacyV1) {
-          const result = await kit.contracts.listCardsByFlow({
+          // EXE-K3: segue o cursor do fluxo grande (antes parava nos 150 da 1ª página).
+          const page = await readV1Page(kit.contracts, {
             flowId: options.flowId,
-            isArchived,
-            isWithPreAnswer: withPreAnswer,
-            isWithTimeTracking: withTimeTracking,
-            isTestModel: testModel
+            ...(isArchived !== undefined ? { isArchived } : {}),
+            ...(withPreAnswer !== undefined ? { isWithPreAnswer: withPreAnswer } : {}),
+            ...(withTimeTracking !== undefined ? { isWithTimeTracking: withTimeTracking } : {}),
+            ...(testModel !== undefined ? { isTestModel: testModel } : {}),
+            ...(options.stepId ? { flowStepId: options.stepId } : {}),
+            ...(limit !== undefined ? { limit } : {}),
+            ...(lean && options.cursor !== undefined ? { cursor: options.cursor } : {})
           });
 
-          let summaries = result.summaries;
-          if (options.stepId) {
-            summaries = summaries.filter(
-              (item) => String(item.currentStepId ?? item.step_id ?? "") === options.stepId
+          if (lean) {
+            return listOutput(
+              dropEmpty({
+                engine: "v1",
+                flowId: Number(options.flowId),
+                total: page.summaries.length,
+                totalCount: page.totalCount,
+                // K5: igual ao V2, o V1 diz que há mais além do `next`.
+                truncated: page.truncated,
+                next: page.nextCursor ? nextPageCommand(options, page.nextCursor, "v1") : undefined,
+                summaries: await leanCardSummaries(kit, options.flowId, page.summaries)
+              }),
+              "summaries"
             );
           }
-          if (limit !== undefined) {
-            summaries = summaries.slice(0, limit);
-          }
-
-          if (lean) {
-            return dropEmpty({
-              engine: "v1",
-              flowId: Number(options.flowId),
-              total: summaries.length,
-              summaries: await leanCardSummaries(kit, options.flowId, summaries)
-            });
-          }
-          return { engine: "v1", raw: result.raw, summaries, total: summaries.length };
+          return { engine: "v1", raw: page.raw, summaries: page.summaries, total: page.summaries.length, truncated: page.truncated };
         }
 
         const result = await kit.contracts.fetchFlowCards({
@@ -110,21 +142,28 @@ export function registerCardsListCommand(cardCommand: Command): void {
           engine,
           flowViewId: options.viewId,
           flowStepId: options.stepId,
+          // P7: busca sem view varre todos os campos do fluxo (igual ao flow query).
+          ...(search ? { search, searchFieldScope: options.viewId ? undefined : ("flow" as const) } : {}),
           isArchived,
           limit,
           // Rodada 5: título real (sem view o V2 devolvia "(Sem título)").
-          ...(lean ? { ensureCardTitle: true } : {})
+          ...(lean ? { ensureCardTitle: true, paginate: true } : {}),
+          ...(lean && options.cursor ? { cursor: options.cursor } : {})
         });
 
         if (lean) {
-          return dropEmpty({
-            engine: result.engine,
-            flowId: Number(options.flowId),
-            total: result.total,
-            totalCount: result.totalCount,
-            truncated: result.truncated,
-            summaries: await leanCardSummaries(kit, options.flowId, result.summaries)
-          });
+          return listOutput(
+            dropEmpty({
+              engine: result.engine,
+              flowId: Number(options.flowId),
+              total: result.total,
+              totalCount: result.totalCount,
+              truncated: result.truncated,
+              next: result.nextCursor ? nextPageCommand(options, result.nextCursor, result.engine) : undefined,
+              summaries: await leanCardSummaries(kit, options.flowId, result.summaries)
+            }),
+            "summaries"
+          );
         }
         return {
           engine: result.engine,
@@ -138,10 +177,11 @@ export function registerCardsListCommand(cardCommand: Command): void {
         };
       })
     );
+  addSearchSynonyms(command, "search");
 
   annotateCommand(command, {
     envelope:
-      "Enxuto (padrão): { engine, flowId, total, totalCount, truncated, summaries[{cardId, title (real), currentStepId, stepName, responsibleUserId, responsibleName, dueDate, completedAt, complete, archived}] }. " +
+      `Enxuto (padrão): ${CARD_LIST_DEFAULT_LIMIT} por página: { engine, flowId, total (nesta página), totalCount (todos que casam), truncated, next? (comando pronto da página seguinte, com --cursor), summaries[{cardId, title (real), currentStepId, stepName, responsibleUserId, responsibleName, dueDate, completedAt, complete, archived}] }. ` +
       "Com --full, V2: { engine, total, totalCount, truncated, summaries[], executionStats }; " +
       "V1 (com --with-*): { engine, raw, summaries[], total }",
     fieldsLocation:

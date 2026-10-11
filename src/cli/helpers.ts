@@ -1,3 +1,5 @@
+import type { Command } from "commander";
+
 import { CangeCliUsageError, CangeValidationError } from "../client/errors.js";
 import { readJsonFile } from "../utils/files.js";
 
@@ -132,4 +134,35 @@ function translateNumericKeys(
     }
   }
   return { values: out, translatedKeys };
+}
+
+const SEARCH_FLAGS = { q: "--q", search: "--search", name: "--name" } as const;
+export type SearchAttribute = keyof typeof SEARCH_FLAGS;
+
+/**
+ * P7 (05/10): `--q` e `--search` são sinônimos em TODA listagem com busca (o
+ * `catalog` usava `--q` e o `register entries` usava `--search`; o agente trocava).
+ * Registra os sinônimos que o comando ainda não tem e, antes da ação, copia o
+ * valor do sinônimo para a opção principal (`primary`), que é a que o comando lê.
+ */
+export function addSearchSynonyms(
+  command: Command,
+  primary: SearchAttribute,
+  synonyms: readonly SearchAttribute[] = (["q", "search"] as const).filter((item) => item !== primary)
+): Command {
+  for (const synonym of synonyms) {
+    if (command.options.some((option) => option.attributeName() === synonym)) continue;
+    command.option(`${SEARCH_FLAGS[synonym]} <texto>`, `Sinônimo de ${SEARCH_FLAGS[primary]}`);
+  }
+  command.hook("preAction", (_hooked, actionCommand) => {
+    const values = actionCommand.opts<Record<string, unknown>>();
+    if (values[primary] !== undefined) return;
+    for (const synonym of synonyms) {
+      if (values[synonym] !== undefined) {
+        actionCommand.setOptionValue(primary, values[synonym]);
+        return;
+      }
+    }
+  });
+  return command;
 }

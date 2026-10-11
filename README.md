@@ -231,6 +231,8 @@ Diferença importante:
 - `card update-values` altera respostas dinâmicas do formulário (`values`)
 - `card move-step` move de etapa sem enviar respostas
 - `card move-step-with-values` move de etapa enviando `idForm + values`
+- Todo mover exige os obrigatórios da etapa atual do cartão, sempre (regra da plataforma). Caminho curto, que grava e
+  move no mesmo passo: `card move --card-id <id> --to "<etapa>" --set "Campo=valor"`.
 
 ### Criação em lote (`--payload-dir` / `--payloads`)
 

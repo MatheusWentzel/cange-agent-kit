@@ -26,7 +26,7 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
       "   NUNCA baixe com curl na URL do blob (Azure): dá 404 ou 403.",
       "2) PDF ou DOCX: NUNCA use `Read` no arquivo binário (vira base64 e explode o contexto; 1,5 MB num run real).",
       "   Extraia o TEXTO primeiro e leia o .txt:",
-      `   - docx: \`textutil -convert txt <arquivo>.docx -output ${RUN_FOLDER}/doc.txt\``,
+      `   - docx: \`unzip -p "<arquivo>.docx" word/document.xml | perl -pe 's/<\\/w:p>/\\n/g; s/<[^>]+>//g' > ${RUN_FOLDER}/doc.txt\``,
       `   - pdf: \`pdftotext <arquivo>.pdf ${RUN_FOLDER}/doc.txt\` (sem pdftotext: \`python3 -c "import pypdf; ..."\`)`,
       "3) Planilha (xlsx/csv): leia com python3 e imprima só o resumo que a tarefa pede, nunca o arquivo inteiro."
     ]
@@ -34,40 +34,60 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
   comentar: {
     title: "Comentar num cartão (só com \"Comentar\" liberado)",
     lines: [
-      "Comando: `cange comment create --payload <caminho.json>`. O grupo é `comment` e o subcomando é `create`:",
-      "não existe `cange comment` sozinho nem `cange card comment`.",
-      "`--payload` é SEMPRE um caminho de arquivo .json, nunca JSON inline.",
-      "Shape do arquivo: `{ \"cardId\": <id>, \"flowId\": <id>, \"description\": \"<texto em markdown>\", \"mentions\": [] }`.",
-      `1) Grave \`${RUN_FOLDER}/comentario-20260930-1432.json\` (nome único por ação, com data e hora).`,
-      `2) Em OUTRO comando, sozinho: \`cange comment create --payload ${RUN_FOLDER}/comentario-20260930-1432.json\`.`
+      "Um comando só, sem arquivo: `cange comment create --card-id <id> --text \"<texto em markdown>\"`.",
+      "O grupo é `comment` e o subcomando é `create`: não existe `cange comment` sozinho nem `cange card comment`.",
+      "Não precisa do fluxo: sem `--flow-id`, o kit descobre pelo número do cartão (a saída mostra em `resolved`).",
+      "Para avisar alguém, use `--mention` (receita `mencionar`).",
+      "Avançado: `--payload <arquivo.json>` com `{ \"cardId\": <id>, \"description\": \"...\", \"mentions\": [] }` continua valendo."
+    ]
+  },
+  mencionar: {
+    title: "Mencionar alguém num comentário (a pessoa recebe a notificação)",
+    lines: [
+      "`cange comment create --card-id <id> --text \"Proposta pronta, @Ana confere?\" --mention \"Ana Souza\"`",
+      "`--mention` aceita id, e-mail ou nome do usuário e é repetível (uma pessoa por flag).",
+      "O kit faz as duas coisas que a tela faz: manda o id em `mentions` (gera a notificação) e marca `@[Nome](id)` no texto.",
+      "Se o texto já tem `@Ana`, ele vira a marcação; se não tem, a marcação entra no começo do texto.",
+      "Nome ambíguo ou inexistente: o comando não grava e lista os candidatos (use o e-mail ou o id).",
+      "Confira antes, se quiser: o mesmo comando com `--dry-run` mostra o texto e os `mentions` resolvidos."
     ]
   },
   "criar-card": {
     title: "Criar um cartão num fluxo (só com \"Criar card\" liberado)",
     lines: [
       "1) Fluxo: pelo id que você já tem, ou `cange my-flows` e escolha pelo nome (ambíguo: pergunte).",
-      "2) `cange map --flow-id <id>`: use o `formInitId` do fluxo e os campos com `formId` igual a ele. A chave de cada",
-      "   valor é o `id` numérico do campo, como texto (o kit traduz para o campo certo), ou o `name` (hash, no `map --full`).",
-      `3) Grave \`${RUN_FOLDER}/novo-card-20260930-1432.json\` (nome único) com`,
-      "   `{ \"flowId\": <id>, \"idForm\": <formInitId>, \"origin\": \"agente\", \"values\": { \"<id-do-campo>\": \"<valor>\" } }`.",
-      `4) Confira: \`cange card create --payload ${RUN_FOLDER}/novo-card-20260930-1432.json --dry-run --validate-fields\`.`,
-      "   Campo obrigatório sem valor: grave o arquivo corrigido e confira de novo.",
-      `5) Só então, sozinho: \`cange card create --payload ${RUN_FOLDER}/novo-card-20260930-1432.json --validate-fields\` (devolve o cardId).`
+      "2) Um comando só, sem arquivo: `cange card create --flow-id <id> --set \"Título=Pedido ACME\" --set \"Valor=R$ 2.500,00\"`.",
+      "   O campo pode ser o TÍTULO (como aparece na tela, sem diferença de maiúscula ou acento), o id ou o hash.",
+      "   O valor vai como você leria: número \"2.500,00\", data \"06/10/2026\", opção pelo rótulo, usuário pelo e-mail,",
+      "   cadastro pelo nome da entrada. O kit converte e, se algo não servir, diz tudo de uma vez sem gravar (exit 2).",
+      "3) Quer conferir antes? O mesmo comando com `--dry-run` mostra o payload resolvido e os obrigatórios que faltam.",
+      "Avançado: `--payload <arquivo.json>` continua valendo (e `--payload-dir` para lote de 2+ cartões)."
     ]
   },
   "mover-card": {
     title: "Mover um cartão de etapa (só com \"Mover card\" liberado)",
     lines: [
-      "1) Leia o cartão (`cange card read`) para saber a etapa ATUAL.",
-      "2) `cange map --flow-id <id>`: da etapa de destino pegue o id (`steps[].id`) e o form (`steps[].formId`, que é o",
-      "   `idForm` do mover).",
-      `3) Grave \`${RUN_FOLDER}/mover-card-20260930-1432.json\` com`,
-      "   `{ \"cardId\": <id>, \"flowId\": <id>, \"fromStepId\": <etapa atual>, \"toStepId\": <etapa destino>, \"idForm\": <formId da etapa destino>, \"values\": {} }`",
-      "   (os nomes são `fromStepId` e `toStepId`; `stepId` sozinho não funciona; sem `idForm` a conferência falha).",
-      "4) Confira: `cange card move-step-with-values --payload <arquivo> --dry-run --validate-fields`. Se ela responder",
-      "   \"Nenhum field encontrado para o idForm\" com `values` {}, a etapa de destino não tem campos: confira de novo só",
-      "   com `--dry-run` (sem `--validate-fields`).",
-      "5) Rode o mesmo comando sem o `--dry-run` (e sem `--validate-fields` quando a etapa de destino não tem campos)."
+      "Um comando só: `cange card move --card-id <id> --to \"<etapa de destino>\" [--set \"Campo=valor\"]`.",
+      "- A origem é a etapa ATUAL do cartão (o kit lê); o destino vai pelo nome ou pelo id da etapa.",
+      "- Mover exige os obrigatórios da etapa atual (regra da plataforma, igual à tela). Mande-os no MESMO comando com",
+      "  `--set`; se não estão no pedido, pergunte ao usuário (não invente). Faltou: nada é gravado (exit 2) e a",
+      "  mensagem diz quais campos e traz o comando pronto com os `--set` que faltam.",
+      "- `--set` aceita campo da etapa atual, da etapa de destino ou do formulário inicial: o kit manda cada um para",
+      "  o lugar certo e reenvia o que o cartão já tem na etapa atual (nada some).",
+      "- Quer conferir antes? O mesmo comando com `--dry-run` mostra as chamadas e o que falta, sem gravar.",
+      "- Só gravar campos, sem mover: `cange card update-values --card-id <id> --set \"Campo=valor\"`.",
+      "  Nunca mova o cartão para a própria etapa para gravar campo.",
+      "Avançado: `cange card move-step-with-values --payload <arquivo>` (idForm = form da etapa ATUAL)."
+    ]
+  },
+  "gravar-campos": {
+    title: "Gravar campos de um cartão sem mover (só com \"Atualizar card\" liberado)",
+    lines: [
+      "`cange card update-values --card-id <id> --set \"Valor do Negócio=2.500,00\" --set \"Data da ligação=06/10/2026\"`",
+      "- O campo pode ser o título, o id ou o hash; o kit acha o formulário (etapa atual ou inicial) pelo campo.",
+      "- Valor como na tela: número com vírgula, data dd/mm/aaaa, opção pelo rótulo, usuário pelo e-mail ou nome,",
+      "  cadastro pelo nome da entrada (ou a lista de ids).",
+      "- Vários campos de uma vez: `--values-json '{\"Valor do Negócio\": \"2.500,00\", \"Etapa\": \"Fechado\"}'`."
     ]
   },
   "publicar-artefato": {
@@ -79,6 +99,42 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
       `   - no chat sem cartão em foco: o mesmo comando SEM \`--card-id\` (o kit usa a conversa).`,
       "3) Republicar o mesmo `--type` no mesmo dono vira NOVA VERSÃO do mesmo artefato. Antes, confira com o MESMO",
       "   comando e `--dry-run`: aviso em `warnings` = aquele trecho NÃO entrou."
+    ]
+  },
+  "cadastro-por-nome": {
+    title: "Achar uma entrada de cadastro pelo nome (ex.: o cliente ACME no cadastro Clientes)",
+    lines: [
+      "1) Id do cadastro: use o da sua cabeça ou do pedido. Link do Cange ou hash servem direto em `--register-id`",
+      "   (o kit troca pelo id). Sem nada: `cange my-registers --q <nome do cadastro>`.",
+      "2) `cange register entries --register-id <id> --search <parte do nome>` (`--q` é sinônimo de `--search`).",
+      "   Busque por uma parte curta do nome; veio muita coisa: refine o texto ou use `--page-size 50`.",
+      "3) O `id` de cada item em `entries` é o id da entrada. Para gravar num campo de cadastro do cartão, o `--set`",
+      "   aceita o nome da entrada (`--set \"Cliente=ACME\"`, o kit busca e recusa se casar com 0 ou 2+) ou o id.",
+      "4) 404 ou \"sem acesso\": o erro traz `hint` com o `cange access request` pronto (tipo e id do comando); siga-o.",
+      "   Sem o id: `cange catalog --type register --q <nome do cadastro>` e, com access \"não\",",
+      "   `cange access request --register <id> --reason \"<para que precisa>\"`. Não existe `cange search`."
+    ]
+  },
+  "contar-somar": {
+    title: "Contar ou somar cartões de um fluxo (sem python)",
+    lines: [
+      "Contar: `cange cards count --flow-id <id> [--by etapa | --by campo:\"<título>\"] [--where \"<campo>=<valor>\"]`.",
+      "Somar: `cange cards sum --flow-id <id> --field \"<título do campo numérico>\" [--by etapa] [--where ...]`.",
+      "- Saída: `{total, groups:[{key, count}]}` (no sum: `{total, cards, groups:[{key, sum}]}`). Só cartões ativos (não arquivados",
+      "  nem excluídos) e só os que você enxerga.",
+      "- `--where` repete (todos valem): `--where \"Prioridade=Alta\" --where \"etapa=Em execução\"`; `!=` nega; valor vazio = `(vazio)`.",
+      "- Campo pelo título (sem diferença de maiúscula ou acento), id ou hash; título repetido = erro com os ids (use o id).",
+      "NÃO liste os cartões para contar ou somar com python/jq: a lista vem em páginas de 20 e o cálculo na mão erra e custa caro."
+    ]
+  },
+  "ler-campos": {
+    title: "Ler só os campos que precisa de um cartão",
+    lines: [
+      "`cange card read --card-id <id> --fields \"Valor do Negócio,Data da ligação\"`: só esses campos, com o valor inteiro e legível.",
+      "- Campo pelo título (sem diferença de maiúscula ou acento), id ou hash, separados por vírgula. Vale no lote (`--card-ids`).",
+      "- Sem `--fields` vem o cartão inteiro e valor acima de 600 caracteres sai cortado com a dica `use --fields \"<campo>\"`.",
+      "- Para REESCREVER um rich text, leia o original (HTML) com `--field-ids <id>`; o `--fields` devolve markdown.",
+      "- Já leu o cartão neste run? Use o que tem; não leia de novo sem motivo (cada leitura volta ao contexto em todo turno)."
     ]
   }
 });
@@ -108,7 +164,7 @@ export function renderRecipe(name: string, env: Record<string, string | undefine
 export function registerRecipeCommand(program: Command): void {
   const command = program
     .command("recipe")
-    .description("Receita pronta de uma ação sob demanda (anexo, comentar, criar-card, mover-card, publicar-artefato)")
+    .description(`Receita pronta de uma ação sob demanda (${recipeNames().join(", ")})`)
     .argument("[nome]", `Nome da receita: ${recipeNames().join(" | ")}`)
     .action(
       createCommandAction(

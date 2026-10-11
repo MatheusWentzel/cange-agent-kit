@@ -40,9 +40,18 @@ Estáveis e distintos — roteie retry/correção pelo code, sem parsear a mensa
 | 3 | autenticação (credenciais ausentes/inválidas) |
 | 4 | rede ou API do Cange |
 | 5 | **sucesso PARCIAL em lote** (parte processada, parte não) |
+| 6 | **ferramenta de API falhou** (`cange tool call` com `success:false`: o serviço externo recusou ou não respondeu) |
 
-Comando/flag desconhecido retorna a mensagem + a rota de discovery
-(`cange manifest` / `cange <grupo> --help`) e exit `2`.
+Erro de uso (exit `2`) ensina o comando certo: valor solto (`register entries 183`)
+e opção que o comando não tem viram `Você quis dizer: cange ...`, com o comando pronto
+também no campo `suggestion` do JSON; sem um comando só, a mensagem lista as opções do
+comando e quem aceita a opção. Sem nada disso, a rota de discovery
+(`cange manifest` / `cange <grupo> --help`).
+
+> **Exit 6 não é erro do Cange.** O Cange disparou a ferramenta e o serviço externo
+> falhou; a mensagem diz o nome, o status e o host. Conte como falha na resposta e não
+> busque o dado em outra fonte por conta própria (só vale outra ferramenta de API com a
+> mesma finalidade, uma vez). Erro do próprio Cange no invoke continua exit `4`.
 
 > **Exit 5 nunca é "deu certo".** Ele sai de operações em lote (`card create`
 > com `--payload-dir`/`--payloads`, `card read --card-ids`) quando parte dos
@@ -132,7 +141,7 @@ Convenção (também exposta em `manifest.envelopeConvention` e no `--help` de c
 - `pnpm cli flow views list --flow-id <id> [--include-schema]`
   - Lista as **visualizações (views salvas)** do flow com resumo de filtros/colunas/ordenação (usar `.views`; `raw` é pesado).
 - `pnpm cli comment list --flow-id <id> --card-id <id> [--full]`
-  - Default é digest: `{ summaries[], total }` com `description` capada em 800 chars (marcador ensina o caminho de volta). `--full` devolve `{raw, summaries[], total}` com o teor COMPLETO (pesado — comentários com transcrição chegam a 100KB+). `--summary-only` é legado (o digest já é o default). `--flow-id` defaulta de `CANGE_CARD_FLOW_ID`.
+  - Default é digest: `{ summaries[], total }` com `description` capada em 800 chars (marcador ensina o caminho de volta). `--full` devolve `{raw, summaries[], total}` com o teor COMPLETO (pesado — comentários com transcrição chegam a 100KB+). `--summary-only` é legado (o digest já é o default). `--flow-id` defaulta de `CANGE_CARD_FLOW_ID`; sem ele, o kit descobre o fluxo pelo número do cartão (`GET /card/locate`, saída com `resolved`).
 - `pnpm cli my-registers [--name <search>]`
 
 ### Mutações
@@ -140,7 +149,8 @@ Convenção (também exposta em `manifest.envelopeConvention` e no `--help` de c
 - `pnpm cli card create --payload <path-to-json> [--validate-fields] [--dry-run]`
 - `pnpm cli card create --payload-dir <dir> | --payloads <a.json,b.json> [--rps <n>] [--max-retries <n>]`
   - **LOTE** (use SEMPRE que forem 2+ cards): valida todos os payloads antes de mutar, cria com throttle + retry **só em 429** (5xx/timeout NÃO são repetidos — o create não é idempotente; o item vira falha pedindo para CONFERIR se o card existe), PARA se a chave bloquear ou se o gate de agente devolver 403, e devolve `{ requested, created, failed, notAttempted, cardIds, cards[], failures[], notAttemptedPayloads[], aborted?, warning? }`. Lote incompleto sai com **exit 5**; lote em que nada foi criado sai com a categoria do erro.
-- `pnpm cli card update --payload <path-to-json> [--dry-run]`
+- `pnpm cli card update --card-id <id> [--due <data>] [--responsible <pessoa>] | [--add-tag <etiqueta> | --remove-tag <etiqueta>] [--dry-run]`
+  - Vencimento (dd/mm/aaaa [HH:MM], dd/mm, aaaa-mm-dd, hoje, amanhã, `limpar`), responsável (id, e-mail, nome, `eu`, `ninguém`) e etiqueta (uma por comando, nunca junto com vencimento/responsável). O que já está igual não grava. Avançado: `--payload <path-to-json>` (sem `flowTagId`: exit 2).
 - `pnpm cli card update-values --payload <path-to-json> [--validate-fields] [--dry-run]`
 - `pnpm cli card move-step --payload <path-to-json> [--dry-run]`
 - `pnpm cli card move-step-with-values --payload <path-to-json> [--validate-fields] [--dry-run]`
@@ -379,6 +389,16 @@ Compatibilidade: também aceita `id_notification`.
 - Em movimentação com `values`, usar `idForm = flow_step.form_id` da etapa atual.
 - `flow.form_init_id` é apenas para criação (`card create`), não para mover etapa.
 - Se houver `values`, preencher obrigatórios (`required = 1`) do formulário alvo.
+- Mover exige os obrigatórios da etapa atual; peça os valores ao usuário se não estiverem no pedido. O kit cobra
+  sempre, em todo caminho de mover (`card move`, `card move-step-with-values` com ou sem `--payload`,
+  `card move-step`), e o erro traz o comando `card move ... --set` pronto. Igual à tela, não cobra ao voltar etapa
+  em fluxo com "pular obrigatórios ao voltar" nem campo oculto no formulário (`show_on_form = "S"`). Obrigatório com
+  condicional vazio não bloqueia (o kit não avalia condicionais) e volta em `warning`. Check list "exigir todos
+  concluídos" com item sem marcar bloqueia sempre, mesmo oculto ou com condicional (a tela confere todos).
+  Valor gravado que a tela não mostra (usuário bloqueado, leitor ou fora do fluxo privado; cartão conectado excluído;
+  opção apagada ou "none"; anexo que não existe) conta como vazio: obrigatório bloqueia com o motivo, o resto sai do
+  mover e vai em `warning`. Documento (CPF/CNPJ pela variation e pelo dígito) e telefone (10 ou 11 dígitos) com o
+  formato que a tela recusa bloqueiam o mover, obrigatório ou não, e o `--set` recusa igual.
 - Validar antes de mutar:
   - `card update-values --validate-fields --dry-run`
   - `card move-step-with-values --validate-fields --dry-run`

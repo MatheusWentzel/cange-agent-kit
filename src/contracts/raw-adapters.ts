@@ -49,6 +49,21 @@ export function extractArray(value: unknown): unknown[] {
   return [];
 }
 
+/**
+ * Lista do `GET /card/by-flow`. Fluxo grande (`isLargeData = 'S'`) não devolve a lista
+ * inteira: vem `{ mode: 'largeData', totalIds, cards }` só com a primeira página (150).
+ * `truncated` = o back tem mais cartões do que vieram (antes a lista saía vazia e a
+ * contagem saía 0 sem aviso).
+ */
+export function extractCardsByFlow(raw: unknown): { cards: unknown[]; truncated: boolean } {
+  const record = asRecord(raw);
+  if (record && record.mode === "largeData" && Array.isArray(record.cards)) {
+    const totalIds = typeof record.totalIds === "number" ? record.totalIds : record.cards.length;
+    return { cards: record.cards, truncated: totalIds > record.cards.length };
+  }
+  return { cards: extractArray(raw), truncated: false };
+}
+
 export function extractPrimaryRecord(raw: unknown): Record<string, unknown> | undefined {
   const direct = asRecord(raw);
   if (!direct) {
@@ -506,7 +521,7 @@ function toRecordArray(value: unknown): Record<string, unknown>[] {
   return value.map(asRecord).filter(isDefined);
 }
 
-function extractCardRecord(raw: unknown): Record<string, unknown> | undefined {
+export function extractCardRecord(raw: unknown): Record<string, unknown> | undefined {
   const direct = asRecord(raw);
   if (direct && looksLikeCardRecord(direct)) {
     return direct;

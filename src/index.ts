@@ -10,6 +10,7 @@ import {
   CangeAuthError,
   CangeCliUsageError,
   CangeError,
+  CangeToolCallError,
   CangeValidationError
 } from "./client/errors.js";
 import { createCangeClient, type CangeClient, type CangeClientConfig } from "./client/http.js";
@@ -73,6 +74,7 @@ export {
   CangeAuthError,
   CangeValidationError,
   CangeCliUsageError,
+  CangeToolCallError,
   assertHasAuthInput,
   resolveConfigFromEnv,
   createCangeClient

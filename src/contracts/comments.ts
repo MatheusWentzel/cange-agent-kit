@@ -46,7 +46,7 @@ function readEnvFlowId(): number | undefined {
 }
 
 const FLOW_ID_MISSING_MSG =
-  "flow_id ausente: passe --flow-id, inclua flowId no payload, ou rode com CANGE_CARD_FLOW_ID no ambiente (o runner injeta o flow do card automaticamente).";
+  "flow_id ausente. Sem o fluxo, o kit descobre pelo número do cartão (--card-id); não deu para descobrir: confira o número, ou passe o link do cartão em --card-id, --flow-id ou flowId no payload.";
 
 export function createCommentsContracts(client: CangeClient): CommentsContracts {
   return {

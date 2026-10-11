@@ -1,4 +1,4 @@
-import { CangeValidationError } from "../client/errors.js";
+import { CangeApiError, CangeValidationError } from "../client/errors.js";
 import type { CangeClient } from "../client/http.js";
 import {
   addCardLabelPayloadSchema,
@@ -14,21 +14,123 @@ import {
 } from "../schemas/cards.js";
 import { toNumber } from "../schemas/common.js";
 
-import { extractArray, summarizeCard } from "./raw-adapters.js";
+import { asRecord, extractArray, extractCardsByFlow, summarizeCard } from "./raw-adapters.js";
 import type { CardSummary } from "./types.js";
 
+/** Fluxo de um cartão descoberto só pelo número (`GET /card/locate`). */
+export interface LocatedCard {
+  cardId: number;
+  flowId: number;
+  flowName: string | null;
+}
+
+/** Etiqueta de um fluxo (`flow_tag`). */
+export interface FlowTagSummary {
+  id: number;
+  name: string;
+  color?: string;
+}
+
+export interface ListAllCardsByFlowInput {
+  flowId: number | string;
+  isTestModel?: boolean;
+  isArchived?: boolean;
+  isWithPreAnswer?: boolean;
+  isWithTimeTracking?: boolean;
+  /** Para de ler quando já houver tantos cartões aceitos (card list: deslocamento + limite + 1). */
+  need?: number;
+  /** Filtro local antes de contar o `need` (ex.: etapa, que o modo fluxo grande do back ignora). */
+  accept?: (summary: CardSummary) => boolean;
+  /** Teto de cartões lidos do back (padrão 20 mil, o mesmo da leitura do V2). */
+  maxCards?: number;
+}
+
+export interface ListAllCardsByFlowResult {
+  /** 1ª resposta do back; no fluxo grande, com `cards` = todos os lidos. */
+  raw: unknown;
+  /** Cartões aceitos, na ordem do back. */
+  cards: unknown[];
+  summaries: CardSummary[];
+  /** Leu o fluxo até o fim (sem fluxo grande, ou seguiu o cursor até o total). */
+  complete: boolean;
+  /** Total de cartões do fluxo segundo o back (só no fluxo grande). */
+  totalIds?: number;
+}
+
+/** Página pedida ao `/card/by-flow` no fluxo grande (o back aceita `limit`; padrão dele 150). */
+export const CARDS_BY_FLOW_PAGE_SIZE = 500;
+/** Teto da leitura do V1: 20 mil cartões (40 páginas de 500, igual ao V2). */
+export const CARDS_BY_FLOW_MAX_CARDS = 20_000;
+
 export interface CardsContracts {
-  getCard: (input: { cardId: number | string; flowId: number | string; companyId?: number | string }) => Promise<{
+  /**
+   * F6: descobre o fluxo do cartão pelo número, com o mesmo controle de acesso da
+   * leitura no back. 404 = cartão inexistente, sem acesso ou back sem a rota.
+   */
+  locateCard: (input: { cardId: number | string }) => Promise<LocatedCard>;
+  getCard: (input: {
+    cardId: number | string;
+    flowId: number | string;
+    companyId?: number | string;
+    /** Cartão de modo teste (deleted 'T'): o GET /card só acha com isTestMode=true. */
+    isTestMode?: boolean;
+  }) => Promise<{
     raw: unknown;
     summary: CardSummary;
   }>;
+  /**
+   * EXTRA-06 D1: o que a TELA usa para preencher o formulário da etapa do cartão
+   * (`GET /form/pre-answer`): o rascunho da etapa (form_answer com `flow_step_id` NULL)
+   * ou, sem ele, a última passagem confirmada do mesmo formulário. `undefined` = o back
+   * não tem a rota (404); outro erro propaga (sem ler o rascunho, o mover não grava).
+   */
+  getPreAnswer: (input: { cardId: number | string; formId: number | string }) => Promise<{ raw: unknown } | undefined>;
+  /**
+   * Revisão 3 do EXTRA-06 (R3-F1): os movimentos do cartão (`GET /card/moviment`), com o
+   * `dt_entry` de cada etapa. O mover usa a entrada na etapa atual para separar a passagem
+   * atual das anteriores. `undefined` = o back não tem a rota (404).
+   */
+  getCardMovements: (input: { cardId: number | string; flowId: number | string }) => Promise<{ raw: unknown } | undefined>;
+  /**
+   * R3-F4: o autocompletar de vínculo pela origem escolhida no formulário, o mesmo
+   * `POST /form/answers/by-register` que a tela faz no blur. Leitura (não grava nada).
+   */
+  getAutoCompleteByRegister: (input: {
+    items: Array<{ flowId: number | string; fieldId: number; childFieldId?: number; currValue: unknown }>;
+  }) => Promise<unknown>;
+  /**
+   * POP-2 (revisão 4 do EXTRA-06): o autocompletar que a tela faz ao abrir o cartão
+   * (`getAutoCompleteRule('answer')`: `POST /form/answers/by-cards` com o cartão e a lista de
+   * origens, na ordem dos campos). Leitura (não grava nada).
+   */
+  getAutoCompleteByCards: (input: {
+    cardId: number | string;
+    items: Array<{ flowId: number | string; fieldId: number; childFieldId?: number }>;
+  }) => Promise<unknown>;
+  /**
+   * POP-1 (revisão 4): os cartões conectados que o campo de cartão da tela carrega
+   * (`ComboBoxFlow`: `POST /card/by-cards` com o fluxo do campo e o fluxo do cartão como pai).
+   * Cartão excluído ou sem acesso não volta. Leitura.
+   */
+  getCardsByIds: (input: { flowId: number | string; parentFlowId?: number | string; cardIds: Array<number | string> }) => Promise<unknown>;
   listCardsByFlow: (input: {
     flowId: number | string;
     isTestModel?: boolean;
     isArchived?: boolean;
     isWithPreAnswer?: boolean;
     isWithTimeTracking?: boolean;
-  }) => Promise<{ raw: unknown; summaries: CardSummary[] }>;
+  }) => Promise<{
+    raw: unknown;
+    summaries: CardSummary[];
+    /** Fluxo grande: o back mandou só a primeira página (há mais cartões que estes). */
+    truncated?: boolean;
+  }>;
+  /**
+   * EXE-K1/K3: `GET /card/by-flow` INTEIRO. Fluxo grande (`isLargeData = 'S'`) vem em
+   * páginas: segue o `cursorKey` + `offset` do back até `totalIds` ou página vazia, com
+   * teto. `complete` = leu até o fim; senão a lista é parcial (o chamador diz `truncated`).
+   */
+  listAllCardsByFlow: (input: ListAllCardsByFlowInput) => Promise<ListAllCardsByFlowResult>;
   createCard: (input: {
     idForm: number;
     flowId: number;
@@ -38,8 +140,10 @@ export interface CardsContracts {
   updateCard: (input: {
     flowId: number;
     cardId: number;
-    userId?: number;
-    dtDue?: string;
+    /** `null` tira o responsável. */
+    userId?: number | null;
+    /** "aaaa-mm-dd HH:MM" (hora de parede, como a tela); `null` tira o vencimento. */
+    dtDue?: string | null;
     flowTagId?: number;
     complete?: "S" | "N";
     archived?: "S" | "N";
@@ -79,6 +183,17 @@ export interface CardsContracts {
     cardId: number;
     flowTagId: number;
   }) => Promise<{ raw: unknown }>;
+  /**
+   * v9 (g): tira a etiqueta do cartão (`DELETE /flow-tag/card?flow_id&card_id&flow_tag_id`,
+   * pela query, como a rota do back lê e a tela manda).
+   */
+  removeCardLabel: (input: {
+    flowId: number;
+    cardId: number;
+    flowTagId: number;
+  }) => Promise<{ raw: unknown }>;
+  /** v9 (g): as etiquetas do fluxo (`GET /flow-tag/by-flow?flow_id`), as que a tela oferece. Leitura. */
+  listFlowTags: (input: { flowId: number | string }) => Promise<{ raw: unknown; tags: FlowTagSummary[] }>;
   getCardRelationship: (input: {
     flowId: number | string;
     cardId: number | string;
@@ -180,6 +295,23 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
   }
 
   return {
+    async locateCard(input) {
+      const cardId = Number(String(input.cardId).trim());
+      if (!Number.isInteger(cardId) || cardId <= 0) {
+        throw new CangeValidationError("cardId inválido para locateCard.", { details: { cardId: input.cardId } });
+      }
+      const raw = await client.get<Record<string, unknown> | undefined>("/card/locate", { query: { id_card: cardId } });
+      const flowId = Number(raw?.flow_id);
+      if (!Number.isInteger(flowId) || flowId <= 0) {
+        throw new CangeApiError("Resposta inesperada de /card/locate (sem flow_id).", {
+          endpoint: "/card/locate",
+          details: raw
+        });
+      }
+      const flowName = typeof raw?.flow_name === "string" ? raw.flow_name : null;
+      return { cardId: Number(raw?.id_card ?? cardId), flowId, flowName };
+    },
+
     async getCard(input) {
       const parsed = getCardParamsSchema.safeParse(input);
       if (!parsed.success) {
@@ -192,7 +324,8 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         query: {
           id_card: toNumber(parsed.data.cardId),
           flow_id: toNumber(parsed.data.flowId),
-          company_id: parsed.data.companyId !== undefined ? toNumber(parsed.data.companyId) : undefined
+          company_id: parsed.data.companyId !== undefined ? toNumber(parsed.data.companyId) : undefined,
+          isTestMode: parsed.data.isTestMode === true ? true : undefined
         }
       });
 
@@ -200,6 +333,155 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         raw,
         summary: summarizeCard(raw)
       };
+    },
+
+    async getPreAnswer(input) {
+      const cardId = Number(String(input.cardId).trim());
+      const formId = Number(String(input.formId).trim());
+      if (!Number.isInteger(cardId) || cardId <= 0 || !Number.isInteger(formId) || formId <= 0) {
+        throw new CangeValidationError("Parâmetros inválidos para getPreAnswer.", { details: input });
+      }
+      try {
+        const raw = await client.get<unknown>("/form/pre-answer", { query: { card_id: cardId, id_form: formId } });
+        return { raw };
+      } catch (error) {
+        if (error instanceof CangeApiError && error.status === 404) return undefined;
+        throw error;
+      }
+    },
+
+    async getCardMovements(input) {
+      const cardId = Number(String(input.cardId).trim());
+      const flowId = Number(String(input.flowId).trim());
+      if (!Number.isInteger(cardId) || cardId <= 0 || !Number.isInteger(flowId) || flowId <= 0) {
+        throw new CangeValidationError("Parâmetros inválidos para getCardMovements.", { details: input });
+      }
+      try {
+        const raw = await client.get<unknown>("/card/moviment", { query: { card_id: cardId, flow_id: flowId } });
+        return { raw };
+      } catch (error) {
+        if (error instanceof CangeApiError && error.status === 404) return undefined;
+        throw error;
+      }
+    },
+
+    async getAutoCompleteByRegister(input) {
+      const fieldItems = input.items.map((item) => ({
+        flow_id: Number(item.flowId),
+        field_id: Number(item.fieldId),
+        ...(item.childFieldId !== undefined ? { child_field_id: Number(item.childFieldId) } : {}),
+        currValue: item.currValue
+      }));
+      return client.post<unknown>("/form/answers/by-register", { body: { field_items: fieldItems } });
+    },
+
+    async getAutoCompleteByCards(input) {
+      const fieldItems = input.items.map((item) => ({
+        flow_id: Number(item.flowId),
+        field_id: Number(item.fieldId),
+        ...(item.childFieldId !== undefined ? { child_field_id: Number(item.childFieldId) } : {})
+      }));
+      return client.post<unknown>("/form/answers/by-cards", { body: { card_id: Number(input.cardId), field_items: fieldItems } });
+    },
+
+    async getCardsByIds(input) {
+      return client.post<unknown>("/card/by-cards", {
+        body: {
+          card_items: input.cardIds.map((id) => String(id)),
+          flow_id: Number(input.flowId),
+          ...(input.parentFlowId !== undefined ? { flow_parent_id: Number(input.parentFlowId) } : {})
+        }
+      });
+    },
+
+    async listAllCardsByFlow(input) {
+      const parsed = listCardsByFlowParamsSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new CangeValidationError("Parâmetros inválidos para listAllCardsByFlow.", {
+          details: parsed.error.format()
+        });
+      }
+      const flags = {
+        isTestModel: parsed.data.isTestModel,
+        isArchived: parsed.data.isArchived,
+        isWithPreAnswer: parsed.data.isWithPreAnswer,
+        isWithTimeTracking: parsed.data.isWithTimeTracking
+      };
+      const need = input.need !== undefined && Number.isFinite(input.need) ? Math.max(1, Math.floor(input.need)) : undefined;
+      const maxCards = input.maxCards ?? CARDS_BY_FLOW_MAX_CARDS;
+      // Sem filtro local, a 1ª página só precisa do que o pedido usa (card list: 21).
+      const firstLimit = need !== undefined && !input.accept ? Math.min(need, CARDS_BY_FLOW_PAGE_SIZE) : CARDS_BY_FLOW_PAGE_SIZE;
+
+      const first = await client.get<unknown>("/card/by-flow/", {
+        query: { flow_id: toNumber(parsed.data.flowId), ...flags, limit: firstLimit }
+      });
+
+      const read: unknown[] = [];
+      const accepted: Array<{ item: unknown; summary: CardSummary }> = [];
+      const seen = new Set<string>();
+      const take = (items: unknown[]): void => {
+        for (const item of items) {
+          const summary = summarizeCard(item);
+          const id = summary.cardId !== undefined ? String(summary.cardId) : undefined;
+          if (id !== undefined) {
+            if (seen.has(id)) continue;
+            seen.add(id);
+          }
+          read.push(item);
+          if (!input.accept || input.accept(summary)) accepted.push({ item, summary });
+        }
+      };
+      const done = (raw: unknown, complete: boolean, totalIds?: number): ListAllCardsByFlowResult => ({
+        raw,
+        cards: accepted.map((entry) => entry.item),
+        summaries: accepted.map((entry) => entry.summary),
+        complete,
+        ...(totalIds !== undefined ? { totalIds } : {})
+      });
+
+      const record = asRecord(first);
+      if (!record || record.mode !== "largeData" || !Array.isArray(record.cards)) {
+        take(extractArray(first));
+        return done(first, true);
+      }
+
+      // Fluxo grande: o back devolve a 1ª página + `cursorKey` (Redis, 180 s) e serve as
+      // seguintes por `cursorKey` + `offset`. Sem cursor (Redis fora), fica a 1ª página.
+      const totalIds = typeof record.totalIds === "number" ? record.totalIds : undefined;
+      take(record.cards);
+      const cursorKey = typeof record.cursorKey === "string" && record.cursorKey.trim() !== "" ? record.cursorKey : undefined;
+      let offset = Number(record.offset ?? record.cards.length);
+      if (!Number.isFinite(offset)) offset = record.cards.length;
+      let complete = totalIds !== undefined ? offset >= totalIds : record.cards.length === 0;
+
+      while (!complete && cursorKey && offset < maxCards && (need === undefined || accepted.length < need)) {
+        let page: Record<string, unknown> | undefined;
+        try {
+          page = asRecord(
+            await client.get<unknown>("/card/by-flow/", {
+              query: { cursorKey, offset, limit: Math.min(CARDS_BY_FLOW_PAGE_SIZE, maxCards - offset), ...flags }
+            })
+          );
+        } catch (error) {
+          // 400 = cursor vencido (TTL de 180 s no back): para aqui; a lista sai parcial (truncated).
+          if (error instanceof CangeApiError && error.status === 400) break;
+          throw error;
+        }
+        const ids = Array.isArray(page?.ids) ? page.ids : undefined;
+        const cards = Array.isArray(page?.cards) ? page.cards : [];
+        const nextOffset = Number(page?.offset);
+        if ((ids !== undefined ? ids.length : cards.length) === 0) {
+          complete = true;
+          break;
+        }
+        take(cards);
+        // Sem avanço do deslocamento, parar (nada de laço sem fim).
+        if (!Number.isFinite(nextOffset) || nextOffset <= offset) break;
+        offset = nextOffset;
+        if (totalIds !== undefined && offset >= totalIds) complete = true;
+      }
+
+      return done({ ...record, cards: read, offset }, complete, totalIds);
     },
 
     async listCardsByFlow(input) {
@@ -219,9 +501,11 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
           isWithTimeTracking: parsed.data.isWithTimeTracking
         }
       });
+      const { cards, truncated } = extractCardsByFlow(raw);
       return {
         raw,
-        summaries: extractArray(raw).map((item) => summarizeCard(item))
+        summaries: cards.map((item) => summarizeCard(item)),
+        truncated
       };
     },
 
@@ -281,14 +565,17 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
         });
       }
 
-      const raw = await client.put<unknown>("/form/answer", {
-        body: {
-          id_form: parsed.data.idForm,
-          flow_id: parsed.data.flowId,
-          card_id: parsed.data.cardId,
-          values: parsed.data.values
-        }
-      });
+      const data = parsed.data;
+      const send = (idForm: number) =>
+        client.put<unknown>("/form/answer", {
+          body: {
+            id_form: idForm,
+            flow_id: data.flowId,
+            card_id: data.cardId,
+            values: data.values
+          }
+        });
+      const raw = await putFormAnswerWithRecovery(send, data.idForm, data.cardId);
 
       return {
         raw,
@@ -372,6 +659,42 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
       return { raw };
     },
 
+    async removeCardLabel(input) {
+      const parsed = addCardLabelPayloadSchema.safeParse(input);
+      if (!parsed.success) {
+        throw new CangeValidationError("Payload inválido para removeCardLabel.", {
+          details: parsed.error.format()
+        });
+      }
+
+      const raw = await client.delete<unknown>("/flow-tag/card", {
+        query: {
+          flow_id: parsed.data.flowId,
+          card_id: parsed.data.cardId,
+          flow_tag_id: parsed.data.flowTagId
+        }
+      });
+      return { raw };
+    },
+
+    async listFlowTags(input) {
+      const flowId = Number(String(input.flowId).trim());
+      if (!Number.isInteger(flowId) || flowId <= 0) {
+        throw new CangeValidationError("flowId inválido para listFlowTags.", { details: { flowId: input.flowId } });
+      }
+      const raw = await client.get<unknown>("/flow-tag/by-flow", { query: { flow_id: flowId } });
+      const tags: FlowTagSummary[] = [];
+      for (const item of extractArray(raw)) {
+        const record = asRecord(item);
+        if (!record) continue;
+        const id = Number(record.id_flow_tag ?? record.id);
+        const name = typeof record.description === "string" ? record.description.trim() : "";
+        if (!Number.isInteger(id) || id <= 0 || name === "") continue;
+        tags.push({ id, name, ...(typeof record.color === "string" ? { color: record.color } : {}) });
+      }
+      return { raw, tags };
+    },
+
     async getCardRelationship(input) {
       const parsed = cardRelationshipParamsSchema.safeParse(input);
       if (!parsed.success) {
@@ -444,6 +767,84 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
       };
     }
   };
+}
+
+/** `complement` do erro do back (`{ status, message, complement: { code, ... } }`). */
+export function apiErrorComplement(error: unknown): Record<string, unknown> | undefined {
+  if (!(error instanceof CangeApiError)) return undefined;
+  const details = error.details;
+  if (!details || typeof details !== "object") return undefined;
+  const record = details as Record<string, unknown>;
+  const complement = record.complement;
+  if (complement && typeof complement === "object" && !Array.isArray(complement)) {
+    return complement as Record<string, unknown>;
+  }
+  return typeof record.code === "string" ? record : undefined;
+}
+
+function busyRetryDelayMs(): number {
+  const override = Number(process.env.CANGE_BUSY_RETRY_MS);
+  return Number.isFinite(override) && override >= 0 ? override : 1000;
+}
+
+/**
+ * P1 (F2b, contrato do back 05/10) no `PUT /form/answer`:
+ *  - o back CRIA a resposta da etapa atual quando falta (nada de mover o cartão
+ *    para a própria etapa para gravar campo);
+ *  - 409 `STEP_FORM_ANSWER_BUSY` (outra gravação no cartão): tenta de novo 1 vez
+ *    depois de ~1 s;
+ *  - 422 `FIELD_FORM_MISMATCH` (campo mandado com o form errado): refaz 1 vez com
+ *    o `expected_form_id`; se ainda falhar, vale a mensagem do back;
+ *  - 422 `STEP_FORM_NOT_CURRENT` (form de outra etapa, sem resposta): repassa a
+ *    mensagem do back em 1 linha com o caminho certo (`cange card move --set`).
+ */
+async function putFormAnswerWithRecovery(
+  send: (idForm: number) => Promise<unknown>,
+  idForm: number,
+  cardId: number
+): Promise<unknown> {
+  let currentForm = idForm;
+  let busyRetried = false;
+  let formRetried = false;
+  for (;;) {
+    try {
+      return await send(currentForm);
+    } catch (error) {
+      const complement = apiErrorComplement(error);
+      const code = typeof complement?.code === "string" ? complement.code : undefined;
+      const status = error instanceof CangeApiError ? error.status : undefined;
+
+      if (status === 409 && code === "STEP_FORM_ANSWER_BUSY" && !busyRetried) {
+        busyRetried = true;
+        await new Promise((resolve) => setTimeout(resolve, busyRetryDelayMs()));
+        continue;
+      }
+      if (status === 422 && code === "FIELD_FORM_MISMATCH" && !formRetried) {
+        const expected = Number(complement?.expected_form_id);
+        if (Number.isInteger(expected) && expected > 0 && expected !== currentForm) {
+          formRetried = true;
+          currentForm = expected;
+          continue;
+        }
+      }
+      if (status === 422 && code === "STEP_FORM_NOT_CURRENT" && error instanceof CangeApiError) {
+        const steps = Array.isArray(complement?.steps) ? (complement.steps as Array<Record<string, unknown>>) : [];
+        const stepName = typeof steps[0]?.name === "string" ? (steps[0].name as string) : undefined;
+        const hint = stepName
+          ? ` Grave ao mover para ela: cange card move --card-id ${cardId} --to "${stepName}" --set "Campo=valor".`
+          : ` Grave ao mover para a etapa do campo: cange card move --card-id ${cardId} --to "<etapa>" --set "Campo=valor".`;
+        throw new CangeApiError(`${error.message.replace(/\s+/g, " ").trim()}${hint}`, {
+          ...(error.status !== undefined ? { status: error.status } : {}),
+          ...(error.endpoint !== undefined ? { endpoint: error.endpoint } : {}),
+          ...(error.method !== undefined ? { method: error.method } : {}),
+          code: "STEP_FORM_NOT_CURRENT",
+          details: complement,
+          cause: error
+        });
+      }
+      throw error;
+    }
+  }
 }
 
 function extractChildCardId(raw: unknown): number | undefined {

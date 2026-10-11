@@ -4,7 +4,7 @@ import { CangeCliUsageError } from "../../client/errors.js";
 import type { FlowQueryEngineChoice } from "../../contracts/flowCards.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
-import { parseOptionalBoolean } from "../helpers.js";
+import { addSearchSynonyms, parseOptionalBoolean } from "../helpers.js";
 
 interface FlowQueryOptions {
   flowId: string;
@@ -58,7 +58,7 @@ export function registerFlowQueryCommand(flowCommand: Command): void {
     .requiredOption("--flow-id <id>", "ID do flow")
     .option("--view-id <id>", "ID de uma visualização salva (aplica filtros/colunas/ordenação dela)")
     .option("--step-id <id>", "Filtra cartões por etapa atual")
-    .option("--search <texto>", "Busca textual")
+    .option("--search <texto>", "Busca textual (--q é sinônimo)")
     .option(
       "--search-scope <scope>",
       "Escopo da busca: view (só colunas da view) | flow (todos os campos). Default: flow quando há --search sem --view-id"
@@ -89,6 +89,7 @@ export function registerFlowQueryCommand(flowCommand: Command): void {
         });
       })
     );
+  addSearchSynonyms(command, "search");
 
   annotateCommand(command, {
     envelope: "{ engine, requestedEngine, fellBackToV1, truncated, totalCount, total, summaries[], executionStats }",

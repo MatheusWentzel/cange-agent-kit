@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { parseCatalogQuery } from "../src/cli/catalog-by-id.js";
 import { accessRequestSentence } from "../src/cli/commands/access.js";
 import { getCommandMeta } from "../src/cli/command-metadata.js";
 import { EXIT_CODES } from "../src/cli/exit-codes.js";
@@ -473,5 +474,325 @@ describe("cange catalog / cange access request (CLI)", () => {
     expect(access.commands.map((c) => c.name())).toEqual(["request"]);
     expect(getCommandMeta(catalog as never)?.mutates).toBeUndefined();
     expect(getCommandMeta(access.commands[0] as never)?.mutates).toBe(true);
+  });
+});
+
+// Bancada F2-F6 (t06, frio 5 min rep 3 e quente rep 1): depois do "sem acesso" no
+// fluxo 316, o agente procurou `catalog --q 316`; o back busca só pelo nome, não
+// achou e o agente perguntou ao usuário em vez de pedir acesso. Agora número, link
+// ou hash procuram também pelo id, na MESMA lista do catálogo (sem revelar nada a mais).
+describe("parseCatalogQuery (sem rede)", () => {
+  const HASH = "3f2a9c0d1e4b5a6978c0d1e2f3a4b5c6d7e8f901";
+
+  it("número (com ou sem #) procura pelo id e pelo nome", () => {
+    expect(parseCatalogQuery("316", "all")).toEqual({ kind: "id", id: 316, q: "316" });
+    expect(parseCatalogQuery(" #316 ", "flow")).toEqual({ kind: "id", id: 316, q: "316" });
+  });
+
+  it("texto, número com letra, zero à esquerda e vazio seguem pelo nome", () => {
+    expect(parseCatalogQuery("compras", "all")).toEqual({ kind: "name", q: "compras" });
+    expect(parseCatalogQuery("316a", "all")).toEqual({ kind: "name", q: "316a" });
+    expect(parseCatalogQuery("0316", "all")).toEqual({ kind: "name", q: "0316" });
+    expect(parseCatalogQuery("fluxo 316", "all")).toEqual({ kind: "name", q: "fluxo 316" });
+    expect(parseCatalogQuery(undefined, "all")).toEqual({ kind: "name" });
+    expect(parseCatalogQuery("99999999999999999999", "all")).toEqual({ kind: "name", q: "99999999999999999999" });
+  });
+
+  it("link do Cange dá o id ou o hash do fluxo/cadastro; link só de cartão não traz o fluxo", () => {
+    expect(parseCatalogQuery("cange://card/9?flow=316", "register")).toEqual({
+      kind: "ref",
+      refs: [{ type: "flow", ref: { kind: "id", id: "316" } }],
+      source: "link",
+      cardOnly: false
+    });
+    expect(parseCatalogQuery(`https://app.cange.me/register/${HASH}`, "all")).toMatchObject({
+      kind: "ref",
+      refs: [{ type: "register", ref: { kind: "hash", hash: HASH } }]
+    });
+    expect(parseCatalogQuery("cange://card/9", "all")).toEqual({ kind: "ref", refs: [], source: "link", cardOnly: true });
+  });
+
+  it("hash solto (hex) vale para os tipos do --type; palavra comum não é hash", () => {
+    expect(parseCatalogQuery(HASH, "all")).toEqual({
+      kind: "ref",
+      refs: [
+        { type: "flow", ref: { kind: "hash", hash: HASH } },
+        { type: "register", ref: { kind: "hash", hash: HASH } }
+      ],
+      source: "hash",
+      cardOnly: false
+    });
+    expect(parseCatalogQuery(HASH, "register")).toMatchObject({ refs: [{ type: "register" }] });
+    expect(parseCatalogQuery("fornecedoresativos", "all")).toEqual({ kind: "name", q: "fornecedoresativos" });
+  });
+});
+
+describe("cange catalog pelo número, link ou hash (bancada t06)", () => {
+  const HASH = "3f2a9c0d1e4b5a6978c0d1e2f3a4b5c6d7e8f901";
+  const stdout: string[] = [];
+  const stderr: string[] = [];
+  const requests: Array<{ method: string; path: string; query: URLSearchParams }> = [];
+  let handler: (method: string, path: string, query: URLSearchParams) => { status: number; body: unknown };
+
+  const item = (id: number, name: string, type: "flow" | "register", hasAccess: boolean, role: string | null = null) => ({
+    id,
+    name,
+    type,
+    has_access: hasAccess,
+    role,
+    requestable: !hasAccess
+  });
+  const list = (items: unknown[], extra: Record<string, unknown> = {}) => ({
+    anchor: { kind: "conversation", name: "Matheus" },
+    scope: "anchor_and_agent",
+    items,
+    total: items.length,
+    truncated: false,
+    ...extra
+  });
+
+  /** Catálogo por tipo (o que o back devolve sem `q`) e a busca pelo nome (com `q`). */
+  function catalogHandler(byType: Record<string, unknown>, byName: unknown = list([])) {
+    return (method: string, path: string, query: URLSearchParams) => {
+      if (method === "GET" && path.endsWith("/agent-run/catalog")) {
+        if (query.get("q") !== null) return { status: 200, body: byName };
+        return { status: 200, body: byType[query.get("type") ?? ""] ?? list([]) };
+      }
+      return { status: 404, body: { message: "Não foi possivel encontrar o fluxo ou você não possuí acesso" } };
+    };
+  }
+
+  beforeEach(() => {
+    delete process.env.CANGE_OUTPUT_PROFILE;
+    process.env.CANGE_ACCESS_TOKEN = TOKEN;
+    stdout.length = 0;
+    stderr.length = 0;
+    requests.length = 0;
+    handler = () => ({ status: 404, body: { message: "rota não mockada" } });
+    vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stdout.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(process.stderr, "write").mockImplementation((chunk: string | Uint8Array) => {
+      stderr.push(String(chunk));
+      return true;
+    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const method = (init?.method ?? "GET").toUpperCase();
+      const path = url.pathname.replace(/\/+$/, "");
+      requests.push({ method, path, query: url.searchParams });
+      const response = handler(method, path, url.searchParams);
+      return new Response(JSON.stringify(response.body), { status: response.status, headers: { "content-type": "application/json" } });
+    });
+  });
+
+  afterEach(() => {
+    process.env = { ...envBackup };
+    process.exitCode = undefined;
+    vi.restoreAllMocks();
+  });
+
+  async function run(args: string[]): Promise<void> {
+    await createProgram().parseAsync(["node", "cange", "--output", "json", ...args]);
+  }
+
+  const catalogCalls = () =>
+    requests.filter((r) => r.path.endsWith("/agent-run/catalog")).map((r) => r.query.toString());
+
+  it("--q 316 (caso da bancada): acha o fluxo sem acesso pelo id, primeiro, com o pedido pronto, e ainda busca pelo nome", async () => {
+    handler = catalogHandler(
+      {
+        flow: list([item(12, "Compras", "flow", true, "M"), item(316, "Projetos Capex", "flow", false), item(900, "Pedido 316", "flow", false)]),
+        register: list([item(44, "Fornecedores", "register", true)])
+      },
+      list([item(900, "Pedido 316", "flow", false)])
+    );
+    await run(["catalog", "--q", "316"]);
+    expect(process.exitCode).toBeUndefined();
+    expect(catalogCalls()).toEqual(["type=all&q=316", "type=flow&limit=500", "type=register&limit=500"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items).toEqual([
+      {
+        id: 316,
+        name: "Projetos Capex",
+        type: "flow",
+        access: "não",
+        match: "id",
+        request: 'cange access request --flow 316 --reason "<por que precisa>"'
+      },
+      { id: 900, name: "Pedido 316", type: "flow", access: "não" }
+    ]);
+    expect(out.total).toBe(2);
+    expect(out.note).toContain("O fluxo 316 está no seu catálogo e você não tem acesso");
+    expect(out.note).toContain("sem perguntar ao usuário se deve pedir");
+    expect(out.note).toContain("--then");
+    // O item 900 veio pelo nome: a nota geral de pedido continua.
+    expect(out.note).toContain('Para um item com access "não"');
+    expect(out.note).not.toContain("Nada encontrado");
+    expect(out.note).not.toContain("—");
+    // Nome do recurso é dado: não entra na nota.
+    expect(out.note).not.toContain("Projetos Capex");
+  });
+
+  it("--search '#316' --type flow: só a lista de fluxos; achado pelo nome e pelo id sai uma vez só", async () => {
+    handler = catalogHandler(
+      { flow: list([item(316, "Obra 316", "flow", false)]) },
+      list([item(316, "Obra 316", "flow", false)])
+    );
+    await run(["catalog", "--type", "flow", "--search", "#316"]);
+    expect(catalogCalls()).toEqual(["type=flow&q=316", "type=flow&limit=500"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items).toHaveLength(1);
+    expect(out.items[0]).toMatchObject({ id: 316, match: "id", access: "não" });
+    expect(out.total).toBe(1);
+    expect(out.note).not.toContain('Para um item com access "não"');
+  });
+
+  it("id fora do catálogo (lista completa): não pede, não diz que não existe, nada de `request`", async () => {
+    handler = catalogHandler({ flow: list([item(12, "Compras", "flow", true, "M")]), register: list([]) });
+    await run(["catalog", "--q", "316"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items).toEqual([]);
+    expect(out.note).toContain("O id 316 não está entre os fluxos e cadastros do seu catálogo");
+    expect(out.note).toContain("não peça acesso por ele");
+    expect(out.note).toContain("não diga que não existe");
+    expect(out.note).not.toContain("cange access request --flow 316");
+    expect(out.note).not.toContain("Nada encontrado com esse filtro");
+  });
+
+  it("lista do tipo cortada no teto (500) e o id não veio: manda ao nome ou ao pedido direto (que não cria nada fora do catálogo)", async () => {
+    const flows = Array.from({ length: 500 }, (_, i) => item(1000 + i, `F${i}`, "flow", true, "M"));
+    handler = catalogHandler({ flow: list(flows, { total: 731, truncated: true }) });
+    await run(["catalog", "--type", "flow", "--q", "316"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items).toEqual([]);
+    expect(out.note).toContain("não apareceu nos 500 primeiros fluxos");
+    expect(out.note).toContain('cange access request --flow 316 --reason "<por que precisa>"');
+    expect(out.note).toContain("sem criar nada");
+  });
+
+  it("id no catálogo COM acesso: lê direto, sem pedir", async () => {
+    handler = catalogHandler({ flow: list([item(316, "Projetos", "flow", true, "M")]), register: list([]) });
+    await run(["catalog", "--q", "316"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items).toEqual([{ id: 316, name: "Projetos", type: "flow", access: "sim", role: "M", match: "id" }]);
+    expect(out.note).toContain("você já tem acesso: leia direto");
+  });
+
+  it("mesmo número como fluxo e como cadastro: os dois aparecem, cada um com o seu pedido", async () => {
+    handler = catalogHandler({
+      flow: list([item(316, "Projetos", "flow", false)]),
+      register: list([item(316, "Clientes", "register", false, "V")])
+    });
+    await run(["catalog", "--q", "316"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items.map((i: { type: string; request: string }) => [i.type, i.request])).toEqual([
+      ["flow", 'cange access request --flow 316 --reason "<por que precisa>"'],
+      ["register", 'cange access request --register 316 --reason "<por que precisa>"']
+    ]);
+  });
+
+  it("--limit não corta o achado pelo id", async () => {
+    handler = catalogHandler(
+      { flow: list([item(316, "Projetos", "flow", false)]), register: list([]) },
+      list([item(1, "A316", "flow", true, "M"), item(2, "B316", "flow", true, "M")], { total: 2 })
+    );
+    await run(["catalog", "--q", "316", "--limit", "1"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items.map((i: { id: number }) => i.id)).toEqual([316]);
+    expect(out.truncated).toBe(true);
+  });
+
+  it("link com o id do fluxo (menção do chat): só a busca pelo id, sem busca pelo nome", async () => {
+    handler = catalogHandler({ flow: list([item(316, "Projetos", "flow", false)]) });
+    await run(["catalog", "--q", "cange://card/9?flow=316"]);
+    expect(catalogCalls()).toEqual(["type=flow&limit=500"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items[0]).toMatchObject({ id: 316, match: "id", request: 'cange access request --flow 316 --reason "<por que precisa>"' });
+  });
+
+  it("link com hash que abre (agente acessa): troca pelo id e acha no catálogo", async () => {
+    const base = catalogHandler({ register: list([item(7946, "Projetos", "register", true, "M")]) });
+    handler = (method, path, query) => {
+      if (path.endsWith("/register") && query.get("hash") === HASH) return { status: 200, body: { id_register: 7946, hash: HASH } };
+      return base(method, path, query);
+    };
+    await run(["catalog", "--q", `https://app.cange.me/register/${HASH}`]);
+    expect(catalogCalls()).toEqual(["type=register&limit=500"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items[0]).toMatchObject({ id: 7946, type: "register", access: "sim", match: "id" });
+  });
+
+  it("link ou hash SEM acesso (404 no GET por hash): não chama o catálogo e manda procurar pelo nome", async () => {
+    handler = catalogHandler({});
+    for (const q of [`https://app.cange.me/flow/${HASH}`, HASH]) {
+      stdout.length = 0;
+      requests.length = 0;
+      await run(["catalog", "--q", q]);
+      expect(process.exitCode, q).toBeUndefined();
+      expect(catalogCalls()).toEqual([]);
+      const out = JSON.parse(stdout.join(""));
+      expect(out.items).toEqual([]);
+      expect(out.note).toContain("sem acesso, então não sei o id");
+      expect(out.note).toContain("cange catalog --q <nome>");
+      expect(out.note).toContain("Não diga que não existe");
+    }
+    // Hash solto com --type all: tentou fluxo e cadastro.
+    expect(requests.filter((r) => r.query.get("hash") === HASH).map((r) => r.path.split("/").pop())).toEqual(["flow", "register"]);
+  });
+
+  it("hash solto que abre como fluxo não tenta cadastro", async () => {
+    const base = catalogHandler({ flow: list([item(316, "Projetos", "flow", true, "A")]) });
+    handler = (method, path, query) => {
+      if (path.endsWith("/flow") && query.get("hash") === HASH) return { status: 200, body: { id_flow: 316, hash: HASH } };
+      return base(method, path, query);
+    };
+    await run(["catalog", "--q", HASH]);
+    expect(requests.filter((r) => r.query.get("hash") === HASH)).toHaveLength(1);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items[0]).toMatchObject({ id: 316, match: "id" });
+    expect(out.note).not.toContain("não sei o id");
+  });
+
+  it("link só de cartão: diz que o link não traz o fluxo", async () => {
+    handler = catalogHandler({});
+    await run(["catalog", "--q", "cange://card/9"]);
+    expect(catalogCalls()).toEqual([]);
+    expect(JSON.parse(stdout.join("")).note).toContain("link é de um cartão e não traz o fluxo");
+  });
+
+  it("--raw com número traz as duas respostas cruas; --full marca o achado e traz o pedido", async () => {
+    const flows = list([item(316, "Projetos", "flow", false)]);
+    handler = catalogHandler({ flow: flows }, list([]));
+    await run(["catalog", "--type", "flow", "--q", "316", "--raw"]);
+    expect(JSON.parse(stdout.join(""))).toEqual({ byName: list([]), byId: [flows] });
+
+    stdout.length = 0;
+    await run(["catalog", "--type", "flow", "--q", "316", "--full"]);
+    const full = JSON.parse(stdout.join(""));
+    expect(full.items[0]).toMatchObject({
+      id: 316,
+      hasAccess: false,
+      matchedBy: "id",
+      request: 'cange access request --flow 316 --reason "<por que precisa>"'
+    });
+  });
+
+  it("texto continua uma busca só pelo nome (sem a lista inteira)", async () => {
+    handler = catalogHandler({}, list([item(12064, "Compras", "flow", false)]));
+    await run(["catalog", "--q", "compras"]);
+    expect(catalogCalls()).toEqual(["type=all&q=compras"]);
+    const out = JSON.parse(stdout.join(""));
+    expect(out.items).toEqual([{ id: 12064, name: "Compras", type: "flow", access: "não" }]);
+  });
+
+  it("falha do back na busca pelo id (5xx) sobe como erro de API", async () => {
+    handler = (method, path, query) =>
+      query.get("q") !== null
+        ? { status: 200, body: list([]) }
+        : { status: 500, body: { message: "Erro interno" } };
+    await run(["catalog", "--type", "flow", "--q", "316"]);
+    expect(process.exitCode).toBe(EXIT_CODES.API);
   });
 });

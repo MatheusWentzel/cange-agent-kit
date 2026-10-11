@@ -9,10 +9,14 @@ import {
   mapWithThrottle,
   retryAfterMs
 } from "../../utils/rateLimit.js";
+import { cardStateOf, dueLabel } from "../../utils/cardState.js";
 import { dropEmpty, htmlToMarkdown, looksLikeHtml, type OutputProfile } from "../../utils/lean.js";
+import { TRUNCATED_VALUE_MARKER, listFieldTitles, matchFieldsByKey } from "../../utils/valueResolver.js";
+import type { NormalizedField } from "../../schemas/fields.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { envCardId, envFlowId } from "../env-defaults.js";
+import { FLOW_FROM_CARD_HINT } from "../resource-ref.js";
 import { exitCodeForBatch } from "../exit-codes.js";
 
 interface CardReadOptions {
@@ -20,7 +24,19 @@ interface CardReadOptions {
   cardId?: string;
   cardIds?: string;
   fieldIds?: string;
+  fields?: string;
   rps?: string;
+}
+
+/**
+ * Pedido de campos da leitura. `original` (--field-ids): valor cru, para reescrever.
+ * `readable` (--fields): valor legível (markdown) INTEIRO, sem o corte do padrão.
+ */
+interface FieldRequest {
+  ids: string[];
+  mode: "original" | "readable";
+  /** Título de cada id pedido (do fluxo): campo vazio no cartão sai com o título. */
+  titles: Record<string, string>;
 }
 
 /** Teto do batch: acima disso o output deixa de ser "enxuto" e vira despejo. */
@@ -67,8 +83,13 @@ export function registerCardReadCommand(cardCommand: Command): void {
       `Lote: lista de card ids separados por vírgula (máx ${READ_MANY_MAX}) — 1 comando lê N cards do mesmo flow`
     )
     .option(
+      "--fields <campos>",
+      'Só estes campos, pelo TÍTULO (sem diferença de maiúscula/acento), id ou hash, separados por vírgula: --fields "Valor,Data da ligação". Valor legível e INTEIRO (sem o corte de ' +
+        "600 caracteres do padrão)"
+    )
+    .option(
       "--field-ids <ids>",
-      "Filtra fieldValues por IDs de field (lista separada por vírgula)"
+      "Filtra por IDs de field (lista separada por vírgula) e devolve o valor ORIGINAL (HTML do rich text), para reescrever"
     )
     .option(
       "--rps <n>",
@@ -80,18 +101,13 @@ export function registerCardReadCommand(cardCommand: Command): void {
         // erro CLARO aqui, não um usage error genérico.
         const flowId = options.flowId ?? envFlowId();
         if (!flowId) {
-          throw new CangeCliUsageError(
-            "--flow-id é obrigatório (em automação, RUNNER_FLOW_ID/CANGE_CARD_FLOW_ID do ambiente são usados como default)."
-          );
+          throw new CangeCliUsageError(FLOW_FROM_CARD_HINT);
         }
         options.flowId = flowId;
         if (!options.cardId && !options.cardIds) {
           options.cardId = envCardId();
         }
-        const requested = (options.fieldIds ?? "")
-          .split(",")
-          .map((item) => item.trim())
-          .filter((item) => item.length > 0);
+        const request = await resolveFieldRequest(kit, flowId, options);
 
         // ── Modo LOTE (redução de custo do agente: 1 passo lê N cards — em
         // pedidos com 10-20 itens, cada passo economizado poupa o contexto
@@ -134,7 +150,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
               }
               try {
                 const result = await kit.contracts.getCard({ flowId, cardId });
-                return buildLeanRead(result, requested, profile);
+                return buildLeanRead(result, request, profile);
               } catch (error) {
                 // Um card com erro não derruba o lote — vira entrada de erro
                 // legível E entra na contagem: lote incompleto sai com exit 5,
@@ -181,32 +197,33 @@ export function registerCardReadCommand(cardCommand: Command): void {
           flowId: options.flowId,
           cardId: options.cardId
         });
-        const read = buildLeanRead(result, requested, profile);
+        const read = buildLeanRead(result, request, profile);
         return profile === "lean" ? dropEmpty(read) : read;
       })
     );
 
   annotateCommand(command, {
     envelope:
-      "Enxuto (padrão): { cardId, title, flowId, flowName, stepId, stepName, dueDate?, completedAt?, responsibleName?, archived, complete, fields: [{id, title, value} | {id, title, cards: [{cardId, label}]} | {id, title, entries: [{entryId, label}]}] } (rich text em markdown; --field-ids devolve o valor original). " +
+      "Enxuto (padrão): { cardId, title, flowId, flowName, stepId, stepName, due (\"27/10/2026 00:00\", hora de Brasília, ou null), completedAt?, responsible ({id, name} ou null), tags ([{id, name}], sem etiqueta = []), archived, complete, fields: [{id, title, value} | {id, title, cards: [{cardId, label}]} | {id, title, entries: [{entryId, label}]}] } (rich text em markdown; valor acima de 600 caracteres sai cortado com a dica do --fields; --fields \"<título>\" traz só esses campos, inteiros; --field-ids devolve o valor original). " +
       "Com --full: { cardId, title, flowId, flowName, stepId, stepName, createdAt, archived, complete, fieldValues, links?, registerLinks? } — com --card-ids: { count, ok, errors, notAttempted?, aborted?, cards: [<mesmo shape>; card que falhou vira {cardId, error}] }. Lote parcial sai com exit code 5; lote em que NADA foi lido sai com a categoria do erro (ex.: 4). Em 429 o lote PARA e o restante volta como notAttempted.",
     fieldsLocation:
       "fieldValues: chave = field id, valor = texto legível (multi-valor vira array). links: vínculos COMBO_BOX_FLOW_FIELD — [{cardId, label}] (acha os FILHOS de um pai). registerLinks: COMBO_BOX_REGISTER_FIELD — [{entryId, label}] (o entryId pronto p/ usar em campo de register de outro card)",
-    example: "card read --flow-id 22795 --card-ids 1223901,1223902,1223903"
+    example: 'card read --card-id 1223901 --fields "Valor,Data da ligação"  ·  card read --flow-id 22795 --card-ids 1223901,1223902'
   });
 }
 
 /** Monta a visão enxuta a partir do envelope do getCard (single e lote usam o mesmo). */
 function buildLeanRead(
   result: { raw: unknown; summary: unknown },
-  requestedFieldIds: string[],
+  request: FieldRequest | undefined,
   profile: OutputProfile = "full"
 ): Record<string, unknown> {
   const s = result.summary as Record<string, unknown>;
   const extracted = extractValuesAndLinks(result.raw);
   if (profile === "lean") {
-    return buildAgentRead(s, extracted, requestedFieldIds);
+    return buildAgentRead(s, extracted, request, result.raw);
   }
+  const requestedFieldIds = request?.ids ?? [];
 
   // Preferência: valores agregados do raw (multi-valor vira array, deletado
   // sai); fallback no summary legado quando o raw não tiver form_answers.
@@ -259,17 +276,18 @@ function buildLeanRead(
 function buildAgentRead(
   s: Record<string, unknown>,
   extracted: ExtractedCard,
-  requestedFieldIds: string[]
+  request: FieldRequest | undefined,
+  raw: unknown
 ): Record<string, unknown> {
   const values: Record<string, unknown> =
     extracted.fieldValues ?? ((s.fieldValues ?? s.fields ?? {}) as Record<string, unknown>);
-  const titles = extracted.fieldTitles ?? {};
+  const titles = { ...(request?.titles ?? {}), ...(extracted.fieldTitles ?? {}) };
   const links = extracted.links ?? {};
   const registerLinks = extracted.registerLinks ?? {};
-  const requested = requestedFieldIds.length > 0;
+  const requested = request !== undefined && request.ids.length > 0;
 
   const order: string[] = requested
-    ? requestedFieldIds
+    ? request.ids
     : Array.from(new Set([...Object.keys(values), ...Object.keys(links), ...Object.keys(registerLinks)]));
 
   const fields = order.map((fieldId) => {
@@ -283,10 +301,11 @@ function buildAgentRead(
       entry.entries = registerLinks[fieldId];
     } else {
       const value = fieldId in values ? values[fieldId] : null;
-      if (requested) {
+      if (requested && request.mode === "original") {
         entry.value = value;
       } else {
-        const readable = readableValue(fieldId, value);
+        // C4: sem --fields o valor longo é cortado em 600 caracteres; com --fields sai inteiro.
+        const readable = readableValue(value, requested ? undefined : cutHint(fieldId, titles[fieldId]));
         entry.value = readable.value;
         // R5-KR-07: o valor convertido de HTML para markdown vem MARCADO. Gravar o
         // markdown de volta num campo rich text mostraria `[texto](url)` literal:
@@ -297,6 +316,10 @@ function buildAgentRead(
     return entry;
   });
 
+  // v9 (g, conversas 857 e runs 1125/1126): vencimento, responsável e etiquetas SEMPRE
+  // presentes (null e [] querem dizer vazio), para o agente não confundir vazio com não lido.
+  // O dropEmpty não tira null nem [] no primeiro nível.
+  const state = cardStateOf(raw);
   return {
     cardId: s.cardId ?? s.id_card,
     title: s.title,
@@ -305,10 +328,10 @@ function buildAgentRead(
     stepId: s.currentStepId ?? s.step_id,
     stepName: s.stepName,
     createdAt: s.createdAt,
-    dueDate: s.dueDate,
+    due: state.due === null ? null : dueLabel(state.due),
     completedAt: s.completedAt,
-    responsibleUserId: s.responsibleUserId,
-    responsibleName: s.responsibleName,
+    responsible: state.responsible,
+    tags: state.tags,
     archived: s.archived,
     complete: s.complete,
     fields
@@ -319,21 +342,79 @@ function buildAgentRead(
  * Valor legível: HTML vira markdown e o que passa do teto é cortado com marcador.
  * `converted` diz se algum item veio de HTML (o campo sai com `format: "markdown"`).
  */
-function readableValue(fieldId: string, value: unknown): { value: unknown; converted: boolean } {
+function readableValue(value: unknown, hint: string | undefined): { value: unknown; converted: boolean } {
   let converted = false;
   const one = (item: unknown): unknown => {
     if (typeof item !== "string") return item;
     const isHtml = looksLikeHtml(item);
     if (isHtml) converted = true;
     const text = isHtml ? htmlToMarkdown(item) : item;
-    if (text.length <= FIELD_VALUE_CAP) return text;
-    return (
-      text.slice(0, FIELD_VALUE_CAP) +
-      ` […truncado ${text.length - FIELD_VALUE_CAP} chars; use --field-ids ${fieldId} p/ o valor completo]`
-    );
+    if (hint === undefined || text.length <= LEAN_FIELD_VALUE_CAP) return text;
+    return `${text.slice(0, LEAN_FIELD_VALUE_CAP)}${TRUNCATED_VALUE_MARKER} use ${hint} para ler inteiro)`;
   };
   const out = Array.isArray(value) ? value.map(one) : one(value);
   return { value: out, converted };
+}
+
+/**
+ * C4 (card #1367459): teto do valor no padrão enxuto. Ler o cartão era 8% do custo
+ * em produção, com 62 releituras do mesmo cartão: o rich text inteiro (ata de
+ * reunião) ia junto em cada uma. O inteiro vem com `--fields "<título>"`.
+ */
+const LEAN_FIELD_VALUE_CAP = 600;
+
+/** `--fields "<título>"` (ou o id, quando o título falta ou tem aspas/vírgula). */
+function cutHint(fieldId: string, title: string | undefined): string {
+  const key = title && !/[",]/.test(title) ? title : fieldId;
+  return `--fields "${key}"`;
+}
+
+/**
+ * Resolve `--fields` (título, id ou hash, como nas escritas) e `--field-ids` (ids).
+ * `--fields` consulta os campos do fluxo uma vez (também no lote).
+ */
+async function resolveFieldRequest(
+  kit: { contracts: { getFieldsByFlow: (input: { flowId: string | number }) => Promise<{ fields: NormalizedField[] }> } },
+  flowId: string,
+  options: CardReadOptions
+): Promise<FieldRequest | undefined> {
+  const split = (text: string | undefined): string[] =>
+    (text ?? "")
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.length > 0);
+  const keys = split(options.fields);
+  const fieldIds = split(options.fieldIds);
+  if (keys.length > 0 && fieldIds.length > 0) {
+    throw new CangeCliUsageError(
+      "Use --fields (valor legível, inteiro) OU --field-ids (valor original, para reescrever), não os dois."
+    );
+  }
+  if (fieldIds.length > 0) return { ids: fieldIds, mode: "original", titles: {} };
+  if (keys.length === 0) return undefined;
+
+  const { fields } = await kit.contracts.getFieldsByFlow({ flowId });
+  const ids: string[] = [];
+  const titles: Record<string, string> = {};
+  const unknown: string[] = [];
+  for (const key of keys) {
+    const hits = matchFieldsByKey(key, fields);
+    if (hits.length === 0) {
+      unknown.push(key);
+      continue;
+    }
+    for (const field of hits) {
+      const id = String(field.id ?? field.name);
+      if (!ids.includes(id)) ids.push(id);
+      if (field.title) titles[id] = field.title;
+    }
+  }
+  if (unknown.length > 0) {
+    throw new CangeCliUsageError(
+      `Campo ${unknown.map((key) => `"${key}"`).join(", ")} não existe no fluxo ${flowId} (campos: ${listFieldTitles(fields)}).`
+    );
+  }
+  return { ids, mode: "readable", titles };
 }
 
 /**

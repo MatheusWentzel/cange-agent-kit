@@ -31,10 +31,20 @@ export interface AttachmentsContracts {
     cardId: number | string;
     withBase64?: boolean;
   }) => Promise<{ raw: unknown; files: CardAttachmentFile[] }>;
+  /**
+   * POP-1 (revisão 4 do EXTRA-06): o anexo como o campo de anexo da tela o carrega
+   * (`GET /attachment?id_attachment=`). 404 = não existe na empresa (a tela não mostra).
+   */
+  getAttachment: (input: { attachmentId: number | string }) => Promise<{ raw: unknown }>;
 }
 
 export function createAttachmentsContracts(client: CangeClient): AttachmentsContracts {
   return {
+    async getAttachment(input) {
+      const raw = await client.get<unknown>("/attachment", { query: { id_attachment: Number(input.attachmentId) } });
+      return { raw };
+    },
+
     async uploadAttachment(input) {
       const parsed = uploadAttachmentInputSchema.safeParse(input);
       if (!parsed.success) {
