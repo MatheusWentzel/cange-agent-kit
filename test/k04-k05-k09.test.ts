@@ -12,6 +12,7 @@ import { TRUNCATED_VALUE_MARKER } from "../src/utils/valueResolver.js";
  * Achados menores do code review do Alex (lote v9):
  *  - K-04: valor com o marcador de texto cortado da leitura enxuta não é gravado (exit 2).
  *  - K-05: `--due dd/mm` sem ano que já passou pede o ano (antes ia para o ano seguinte calado).
+ *  - K-09: falha ao ler os campos da máscara não é engolida na execução real (falha fechado).
  */
 
 const envBackup = { ...process.env };
@@ -22,7 +23,8 @@ const requests: Array<{ method: string; path: string; body?: Record<string, unkn
 const FLOW = { id_flow: 316, name: "Vendas", form_init_id: 900, flow_steps: [{ id_step: 1, name: "Triagem", form_id: 901, index: 1 }] };
 const FIELDS = [
   { id_field: 20, name: "h_obs", title: "Observação", type: "TEXT_LONG_FIELD", form_id: 900 },
-  { id_field: 21, name: "h_link", title: "Filhos", type: "COMBO_BOX_FLOW_FIELD", form_id: 900 }
+  { id_field: 21, name: "h_link", title: "Filhos", type: "COMBO_BOX_FLOW_FIELD", form_id: 900 },
+  { id_field: 22, name: "h_tel", title: "Telefone", type: "PHONE_FIELD", form_id: 900 }
 ];
 const CARD = { id_card: 55, flow_id: 316, flow_step_id: 1, form_answers: [{ id_form_answer: 700, form_id: 900, form_answer_fields: [] }] };
 let fieldsStatus = 200;
@@ -160,5 +162,37 @@ describe("K-05: --due dd/mm sem ano", () => {
     const error = JSON.parse(stderr.join(""));
     expect(error.message).toContain('Vencimento "05/03" sem ano já passou em 2026: informe o ano (05/03/2027 ou 05/03/2026');
     expect(error.suggestion).toBe('cange card update --card-id 55 --due "05/03/2027"');
+  });
+});
+
+describe("K-09: campos da máscara (card add-child sem resolução)", () => {
+  async function childPayload(): Promise<string> {
+    return payloadFile({
+      child: { flowId: 316, idForm: 900, origin: "/x", values: { h_tel: "51981740992" } },
+      parent: { flowId: 316, cardId: 55, idForm: 900, linkField: "h_link" }
+    });
+  }
+
+  it("execução real: a leitura dos campos falhou = erro claro, nada gravado", async () => {
+    fieldsStatus = 500;
+    await run(["card", "add-child", "--payload", await childPayload()]);
+    expect(process.exitCode).toBe(4);
+    expect(writes()).toEqual([]);
+    const error = JSON.parse(stderr.join(""));
+    expect(error.code).toBe("FIELDS_READ_FAILED");
+    expect(error.message).toContain("Nada foi gravado");
+  });
+
+  it("dry-run: segue sem a máscara, com aviso", async () => {
+    fieldsStatus = 500;
+    const out = await run(["card", "add-child", "--payload", await childPayload(), "--dry-run"]);
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(out!.payload.child.values).toEqual({ h_tel: "51981740992" });
+    expect(out!.warning).toContain("sem a máscara");
+  });
+
+  it("leitura ok: grava mascarado (como antes)", async () => {
+    const out = await run(["card", "add-child", "--payload", await childPayload(), "--dry-run"]);
+    expect(out!.payload.child.values).toEqual({ h_tel: "(51) 981740992" });
   });
 });

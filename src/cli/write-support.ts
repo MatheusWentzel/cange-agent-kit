@@ -1,6 +1,6 @@
 import type { Command } from "commander";
 
-import { CangeCliUsageError, CangeValidationError } from "../client/errors.js";
+import { CangeApiError, CangeCliUsageError, CangeError, CangeValidationError } from "../client/errors.js";
 import type { FlowStepSummary } from "../contracts/payload-builder.js";
 import { extractFlowSteps } from "../contracts/payload-builder.js";
 import { asRecord, extractPrimaryRecord } from "../contracts/raw-adapters.js";
@@ -419,14 +419,32 @@ export function maskPassthroughValues(
 }
 
 /**
- * Campos para a máscara do payload por arquivo (1 GET). Leitura de apoio: se falhar, o
- * payload segue como antes do v9 (o back decide), sem derrubar a escrita.
+ * Campos para a máscara do payload por arquivo (1 GET).
+ * K-09: na execução real, falha FECHADO: sem os campos, o telefone e o documento iriam sem a
+ * máscara da tela, diferente do que a conferência mostrou; erro claro e nada gravado. Em
+ * dry-run segue sem a máscara, com `warning` (a execução real vai ler de novo).
  */
-export async function fieldsForMask(load: () => Promise<NormalizedField[]>): Promise<NormalizedField[] | undefined> {
+export async function fieldsForMask(
+  load: () => Promise<NormalizedField[]>,
+  options: { dryRun: boolean }
+): Promise<{ fields?: NormalizedField[]; warning?: string }> {
   try {
-    return await load();
-  } catch {
-    return undefined;
+    return { fields: await load() };
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    if (options.dryRun) {
+      return {
+        warning: `Não deu para ler os campos do formulário (${reason}): telefone e documento aparecem sem a máscara da tela. A execução real lê de novo e não grava se falhar.`
+      };
+    }
+    throw new CangeApiError(
+      `Não deu para ler os campos do formulário para gravar telefone e documento como a tela (${reason}). Nada foi gravado; tente de novo.`,
+      {
+        code: "FIELDS_READ_FAILED",
+        cause: error,
+        ...(error instanceof CangeError && error.status !== undefined ? { status: error.status } : {})
+      }
+    );
   }
 }
 

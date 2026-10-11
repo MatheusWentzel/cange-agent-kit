@@ -59,6 +59,7 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
         const inline = parseInlineValues(options);
         // v9 (h): telefone e documento do filho vão como a tela grava.
         let formatted: ReturnType<typeof formattedInfo> = {};
+        let maskWarning: string | undefined;
         if (needsFieldResolution({ ...child.values, ...(inline ?? {}) }, inline !== undefined)) {
           const auth = authOnce(kit, ensureAuth);
           await auth();
@@ -79,7 +80,11 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
           throwIfInvalid(truncatedValueIssues(child.values));
           if (mayNeedScreenMask(child.values)) {
             await authOnce(kit, ensureAuth)();
-            const fields = await fieldsForMask(async () => (await kit.contracts.getFieldsByFlow({ flowId: child.flowId })).fields);
+            const { fields, warning } = await fieldsForMask(
+              async () => (await kit.contracts.getFieldsByFlow({ flowId: child.flowId })).fields,
+              { dryRun: options.dryRun === true }
+            );
+            maskWarning = warning;
             if (fields) {
               const masked = maskPassthroughValues(child.values, fields);
               throwIfInvalid(masked.issues);
@@ -103,7 +108,8 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
                 resultingChildIds: "[...existingChildIds, novoId] (REPLACE do campo multi-valor)"
               }
             }),
-            ...formatted
+            ...formatted,
+            ...(maskWarning ? { warning: maskWarning } : {})
           };
         }
 
