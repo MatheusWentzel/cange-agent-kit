@@ -136,11 +136,9 @@ describe("--due (régua da data)", () => {
     ["amanhã", "2026-10-09 00:00"],
     ["amanha", "2026-10-09 00:00"],
     ["Amanhã 18:00", "2026-10-09 18:00"],
-    // dd/mm: a próxima ocorrência a partir de hoje (hoje conta).
+    // dd/mm: este ano, se ainda não passou (hoje conta). Já passou: pede o ano (K-05, k04-k05-k09.test.ts).
     ["08/10", "2026-10-08 00:00"],
-    ["27/10", "2026-10-27 00:00"],
-    ["05/03", "2027-03-05 00:00"],
-    ["29/02", "2028-02-29 00:00"]
+    ["27/10", "2026-10-27 00:00"]
   ])("%s vira %s (hora de parede de Brasília)", (raw, wall) => {
     expect(parseDueInput(raw, now)).toEqual({ kind: "set", wall });
   });

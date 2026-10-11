@@ -9,6 +9,7 @@ import {
   cardStateOf,
   dueInvalidMessage,
   dueLabel,
+  dueNeedsYearMessage,
   parseDueInput,
   type CardState,
   type DueInput
@@ -64,7 +65,7 @@ export function registerCardUpdateCommand(cardCommand: Command): void {
     .option("--flow-id <id>", "Fluxo do cartão (opcional: vem do link do cartão, do ambiente do run ou do número do cartão)")
     .option(
       "--due <data>",
-      'Vencimento: dd/mm/aaaa, dd/mm/aaaa HH:MM, dd/mm, aaaa-mm-dd [HH:MM], hoje, amanhã (sem hora = 00:00, hora de Brasília). "limpar" tira o vencimento'
+      'Vencimento: dd/mm/aaaa, dd/mm/aaaa HH:MM, dd/mm (só data deste ano que ainda não passou), aaaa-mm-dd [HH:MM], hoje, amanhã (sem hora = 00:00, hora de Brasília). "limpar" tira o vencimento'
     )
     .option(
       "--responsible <pessoa>",
@@ -211,30 +212,42 @@ async function runInlineMode(
   const flowId = resolveWriteFlowId(options.flowId);
   const problems: string[] = [];
 
+  // K-02/K-05: erro sem escolha segura = os candidatos com o comando pronto de cada um.
+  const ready: string[] = [];
+
   // A data é conferida antes da rede (formato inválido não lê nada a mais do que precisa).
   let due: DueInput | undefined;
+  // O --due dos comandos prontos (com o ano, se faltou).
+  let dueForReady = options.due;
   if (wantsDue) {
-    due = parseDueInput(options.due!);
-    if (!due) problems.push(dueInvalidMessage(options.due!));
+    const parsed = parseDueInput(options.due!);
+    if (!parsed) problems.push(dueInvalidMessage(options.due!));
+    else if (parsed.kind === "needs_year") {
+      problems.push(dueNeedsYearMessage(parsed));
+      dueForReady = parsed.withYear(parsed.nextYear);
+    } else due = parsed;
   }
 
   await auth();
   const card = await kit.contracts.getCard({ flowId, cardId });
   const state = cardStateOf(card.raw);
 
-  // K-02: busca por nome sem escolha segura = os candidatos com o comando pronto de cada um.
-  const ready: string[] = [];
   let responsible: { id: number; name?: string } | null | undefined;
   if (wantsResponsible) {
     const outcome = await resolveResponsible(kit, flowId, options.responsible!);
     if (outcome.ok) responsible = outcome.user;
     else {
       problems.push(`Responsável: ${outcome.error}`);
-      const dueArg = wantsDue ? ` --due ${quoteArg(options.due!)}` : "";
+      const dueArg = wantsDue ? ` --due ${quoteArg(dueForReady!)}` : "";
       for (const user of (outcome.candidates ?? []).slice(0, 8)) {
         ready.push(`cange card update --card-id ${cardId}${dueArg} --responsible ${user.id}`);
       }
     }
+  }
+  // K-05: faltou o ano (e o responsável não deu comandos prontos, que já levam o ano).
+  if (wantsDue && dueForReady !== options.due && ready.length === 0) {
+    const responsibleArg = wantsResponsible ? ` --responsible ${quoteArg(options.responsible!)}` : "";
+    ready.push(`cange card update --card-id ${cardId} --due ${quoteArg(dueForReady!)}${responsibleArg}`);
   }
 
   let tag: { op: TagOp; tag: FlowTagSummary } | undefined;

@@ -144,6 +144,22 @@ export function cardStateOf(raw: unknown): CardState {
 
 export type DueInput = { kind: "clear" } | { kind: "set"; wall: WallClock };
 
+/**
+ * K-05: dd/mm sem ano que já passou neste ano (ou que não existe nele, 29/02). Antes ia para o
+ * ano seguinte em silêncio; agora é erro de uso pedindo o ano, com o comando pronto.
+ */
+export interface DueNeedsYear {
+  kind: "needs_year";
+  /** Como veio (sem o ano): "05/03" ou "05/03 18:00". */
+  text: string;
+  /** dd/mm com o ano, para montar o comando pronto. */
+  withYear: (year: number) => string;
+  currentYear: number;
+  /** A próxima ocorrência (o que o kit fazia sozinho antes). */
+  nextYear: number;
+  reason: "passed" | "missing_this_year";
+}
+
 const CLEAR_WORDS = new Set(["", "limpar", "sem"]);
 
 /** Hoje em Brasília (`now` injetável nos testes). */
@@ -172,12 +188,12 @@ function normalizeWord(text: string): string {
 }
 
 /**
- * `--due` do `card update`: dd/mm/aaaa [HH:MM], dd/mm (a próxima ocorrência a partir de
- * hoje), aaaa-mm-dd [HH:MM] ou aaaa-mm-ddTHH:MM, hoje, amanhã/amanha; `limpar`, `sem` ou
+ * `--due` do `card update`: dd/mm/aaaa [HH:MM], dd/mm (este ano, se ainda não passou; senão
+ * `needs_year`, K-05), aaaa-mm-dd [HH:MM] ou aaaa-mm-ddTHH:MM, hoje, amanhã/amanha; `limpar`, `sem` ou
  * "" tiram o vencimento. Sem hora = 00:00, como o seletor da tela. Hora de parede de
  * Brasília, sem conversão. undefined = inválido.
  */
-export function parseDueInput(raw: string, now: Date = new Date()): DueInput | undefined {
+export function parseDueInput(raw: string, now: Date = new Date()): DueInput | DueNeedsYear | undefined {
   const text = raw.trim();
   const word = normalizeWord(text);
   if (CLEAR_WORDS.has(word)) return { kind: "clear" };
@@ -206,11 +222,23 @@ export function parseDueInput(raw: string, now: Date = new Date()): DueInput | u
     const day = Number(d);
     const month = Number(m);
     if (y !== undefined) return build(Number(y), month, day, hh, mi);
-    // dd/mm: a próxima ocorrência a partir de hoje (hoje conta). 29/02 procura o próximo ano bissexto.
+    // dd/mm: este ano, se ainda não passou (hoje conta). Já passou (ou não existe neste ano, 29/02):
+    // K-05, o kit pede o ano em vez de pular para o ano seguinte sem avisar.
     const today = todayInSaoPaulo(now);
     const fromToday = month > today.month || (month === today.month && day >= today.day);
+    if (fromToday && isValidDay(today.year, month, day)) return build(today.year, month, day, hh, mi);
+    if (!time(hh, mi)) return undefined;
     for (let year = fromToday ? today.year : today.year + 1, tries = 0; tries < 8; year += 1, tries += 1) {
-      if (isValidDay(year, month, day)) return build(year, month, day, hh, mi);
+      if (!isValidDay(year, month, day)) continue;
+      const clock = hh !== undefined ? ` ${hh}:${mi}` : "";
+      return {
+        kind: "needs_year",
+        text: `${d}/${m}${clock}`,
+        withYear: (target) => `${d}/${m}/${target}${clock}`,
+        currentYear: today.year,
+        nextYear: year,
+        reason: fromToday ? "missing_this_year" : "passed"
+      };
     }
     return undefined;
   }
@@ -221,6 +249,16 @@ export function parseDueInput(raw: string, now: Date = new Date()): DueInput | u
     return build(Number(y), Number(m), Number(d), hh, mi);
   }
   return undefined;
+}
+
+/** K-05: a mensagem do dd/mm sem ano que já passou (ou não existe neste ano). */
+export function dueNeedsYearMessage(due: DueNeedsYear): string {
+  const head =
+    due.reason === "passed"
+      ? `Vencimento "${due.text}" sem ano já passou em ${due.currentYear}: informe o ano`
+      : `Vencimento "${due.text}" não existe em ${due.currentYear}: informe o ano`;
+  const thisYear = due.reason === "passed" ? ` ou ${due.withYear(due.currentYear)} (este ano, já vencido)` : "";
+  return `${head} (${due.withYear(due.nextYear)}${thisYear}).`;
 }
 
 export function dueInvalidMessage(raw: string): string {

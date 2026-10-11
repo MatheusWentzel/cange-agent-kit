@@ -5,11 +5,13 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createProgram } from "../src/cli/index.js";
+import { parseDueInput } from "../src/utils/cardState.js";
 import { TRUNCATED_VALUE_MARKER } from "../src/utils/valueResolver.js";
 
 /**
  * Achados menores do code review do Alex (lote v9):
  *  - K-04: valor com o marcador de texto cortado da leitura enxuta não é gravado (exit 2).
+ *  - K-05: `--due dd/mm` sem ano que já passou pede o ano (antes ia para o ano seguinte calado).
  */
 
 const envBackup = { ...process.env };
@@ -64,6 +66,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   process.env = { ...envBackup };
   process.exitCode = undefined;
   vi.restoreAllMocks();
@@ -122,5 +125,40 @@ describe("K-04: texto cortado da leitura enxuta não é gravado", () => {
     await run(["card", "add-child", "--payload", file]);
     expect(process.exitCode).toBe(2);
     expect(writes()).toEqual([]);
+  });
+});
+
+describe("K-05: --due dd/mm sem ano", () => {
+  // 08/10/2026 15:00 em Brasília.
+  const now = new Date("2026-10-08T18:00:00.000Z");
+
+  it("data futura (ou hoje) sem ano: este ano", () => {
+    expect(parseDueInput("27/10", now)).toEqual({ kind: "set", wall: "2026-10-27 00:00" });
+    expect(parseDueInput("08/10", now)).toEqual({ kind: "set", wall: "2026-10-08 00:00" });
+  });
+
+  it("data que já passou: pede o ano, com o do ano que vem pronto", () => {
+    const due = parseDueInput("05/03 18:00", now);
+    expect(due).toMatchObject({ kind: "needs_year", text: "05/03 18:00", currentYear: 2026, nextYear: 2027, reason: "passed" });
+    expect(due?.kind === "needs_year" && due.withYear(2027)).toBe("05/03/2027 18:00");
+  });
+
+  it("29/02 em ano que não é bissexto: pede o ano (o próximo bissexto no comando pronto)", () => {
+    expect(parseDueInput("29/02", now)).toMatchObject({ kind: "needs_year", nextYear: 2028, reason: "passed" });
+    expect(parseDueInput("29/02", new Date("2026-01-10T15:00:00.000Z"))).toMatchObject({
+      kind: "needs_year",
+      nextYear: 2028,
+      reason: "missing_this_year"
+    });
+  });
+
+  it("card update --due 05/03: exit 2, nada gravado, suggestion com o ano", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now });
+    await run(["card", "update", "--card-id", "55", "--flow-id", "316", "--due", "05/03"]);
+    expect(process.exitCode).toBe(2);
+    expect(writes()).toEqual([]);
+    const error = JSON.parse(stderr.join(""));
+    expect(error.message).toContain('Vencimento "05/03" sem ano já passou em 2026: informe o ano (05/03/2027 ou 05/03/2026');
+    expect(error.suggestion).toBe('cange card update --card-id 55 --due "05/03/2027"');
   });
 });
