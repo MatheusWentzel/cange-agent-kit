@@ -26,7 +26,7 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
       "   NUNCA baixe com curl na URL do blob (Azure): dá 404 ou 403.",
       "2) PDF ou DOCX: NUNCA use `Read` no arquivo binário (vira base64 e explode o contexto; 1,5 MB num run real).",
       "   Extraia o TEXTO primeiro e leia o .txt:",
-      `   - docx: \`textutil -convert txt <arquivo>.docx -output ${RUN_FOLDER}/doc.txt\``,
+      `   - docx: \`unzip -p "<arquivo>.docx" word/document.xml | perl -pe 's/<\\/w:p>/\\n/g; s/<[^>]+>//g' > ${RUN_FOLDER}/doc.txt\``,
       `   - pdf: \`pdftotext <arquivo>.pdf ${RUN_FOLDER}/doc.txt\` (sem pdftotext: \`python3 -c "import pypdf; ..."\`)`,
       "3) Planilha (xlsx/csv): leia com python3 e imprima só o resumo que a tarefa pede, nunca o arquivo inteiro."
     ]
