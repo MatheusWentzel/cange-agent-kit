@@ -1,4 +1,5 @@
 import { CangeApiError } from "../client/errors.js";
+import { clientReadsHoldingWindow } from "../client/http.js";
 import { asRecord, extractArray } from "../contracts/raw-adapters.js";
 import type { CangeAgentKit } from "../index.js";
 import type { NormalizedField } from "../schemas/fields.js";
@@ -28,9 +29,9 @@ import { screenUsersFor } from "./write-support.js";
  * nada: o kit não afirma o que não conferiu.
  *
  * Teto de leitura do back (10 GET/s por chave numa janela fixa de 1 s; estourar bloqueia a chave
- * por 5 minutos): estas leituras saem uma por vez, e cada uma só começa quando menos de 8 GETs do
- * processo, os que o mover fez antes daqui também, ainda podem cair na mesma janela do back que ela
- * (`createReadWindowPacer`). Os anexos vão um por um, parando no primeiro que não existe, como a tela.
+ * por 5 minutos): estas leituras saem uma por vez, e cada uma só começa quando menos de 8 GETs da
+ * credencial do cliente (N-1: o registro é por credencial), os que o mover fez antes daqui também,
+ * ainda podem cair na mesma janela do back que ela (`createReadWindowPacer`). Os anexos vão um por um, parando no primeiro que não existe, como a tela.
  *
  * REG-F1 (07/10): o ritmo fixo de 2 por segundo levava 22 s no cartão 921055 (43 anexos) e estourava
  * o prazo de 15 s da conferência do gate: o agente nunca conseguia pedir aprovação. Agora o ritmo é o
@@ -70,6 +71,7 @@ export async function resolveScreenReferences(kit: CangeAgentKit, input: ScreenR
   const userLists = new Map<string, Promise<ReadonlySet<number> | undefined>>();
   const throttle = createReadWindowPacer({
     maxPerWindow: screenRefsPerSecond(),
+    holding: clientReadsHoldingWindow(kit.client),
     deadlineAt: Date.now() + screenRefsBudgetMs()
   });
   await Promise.all(

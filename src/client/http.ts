@@ -2,7 +2,7 @@ import { isForceDryRun, isWriteRequest } from "../utils/forceDryRun.js";
 import { createReadWindowPacer, type Throttle } from "../utils/rateLimit.js";
 
 import { CangeApiError, CangeCliUsageError, type CangeHttpMethod, sanitizeSensitive } from "./errors.js";
-import { noteRead } from "./readWindow.js";
+import { readWindowFor, type ReadWindow } from "./readWindow.js";
 
 export interface CangeClientConfig {
   baseUrl: string;
@@ -44,29 +44,65 @@ export interface CangeClient {
  * teto de 7 por janela de 1 s: sobra folga para o processo vizinho (a conferência do gate roda
  * num processo e a execução real logo depois, em outro, com a mesma chave).
  *
- * O pacer é do processo (o teto é por chave e o histórico de leituras, `readWindow`, também):
- * ele só serializa a ADMISSÃO de cada GET (esperar vaga e anotar o início); as leituras
+ * N-1 (2ª rodada, 10/10/2026): o teto é POR CREDENCIAL (o access token da requisição), como no
+ * back. O pacer e o histórico de leituras (`readWindowFor`) ficam numa chave por hash do token:
+ * o MCP remoto monta um kit por requisição, cada um com a credencial do seu usuário, no mesmo
+ * processo, e usuários diferentes não dividem mais as 7 leituras. Por que não um pacer por
+ * instância de `createCangeClient`: o MCP cria um cliente novo a cada requisição, e as requisições
+ * paralelas do MESMO usuário (a mesma chave no back) deixariam de somar no teto. Pela credencial,
+ * o CLI (uma chave por processo) segue igual e quem usa o kit como biblioteca não precisa de opção.
+ *
+ * O pacer só serializa a ADMISSÃO de cada GET (esperar vaga e anotar o início); as leituras
  * admitidas seguem em paralelo e contam como em voo até a resposta.
  * `CANGE_READS_PER_SECOND` ajusta o teto (os testes sobem para não esperar o relógio).
  */
 export const DEFAULT_READS_PER_SECOND = 7;
 
-const readPacers = new Map<number, Throttle>();
+/** Pacers por registro de leituras (e por teto): some junto quando o registro parado sai do mapa. */
+const readPacers = new WeakMap<ReadWindow, Map<number, Throttle>>();
 
 export function readsPerSecond(): number {
   const raw = Number(process.env.CANGE_READS_PER_SECOND);
   return Number.isFinite(raw) && raw >= 1 ? Math.trunc(raw) : DEFAULT_READS_PER_SECOND;
 }
 
-/** Espera a vaga de um GET no teto do processo e anota o início; devolve quem anota o fim. */
-function admitRead(): Promise<(endAt?: number) => void> {
+/**
+ * Espera a vaga de um GET no teto da credencial e anota o início; devolve quem anota o fim.
+ * Sem credencial (antes do login), o registro anônimo.
+ */
+async function admitRead(accessToken: string | undefined): Promise<(endAt?: number) => void> {
   const limit = readsPerSecond();
-  let pacer = readPacers.get(limit);
-  if (!pacer) {
-    pacer = createReadWindowPacer({ maxPerWindow: limit });
-    readPacers.set(limit, pacer);
+  const window = readWindowFor(accessToken);
+  let byLimit = readPacers.get(window);
+  if (!byLimit) {
+    byLimit = new Map();
+    readPacers.set(window, byLimit);
   }
-  return pacer.run(async () => noteRead());
+  let pacer = byLimit.get(limit);
+  if (!pacer) {
+    pacer = createReadWindowPacer({
+      maxPerWindow: limit,
+      holding: (windowMs, at) => window.readsHoldingWindow(windowMs, at)
+    });
+    byLimit.set(limit, pacer);
+  }
+  // Esperando vaga, o registro não sai do mapa (o GET ainda não foi anotado).
+  const release = window.hold();
+  try {
+    return await pacer.run(async () => window.noteRead());
+  } finally {
+    release();
+  }
+}
+
+/**
+ * Até quando cada GET da credencial do cliente ainda segura a janela (`createReadWindowPacer`):
+ * quem pacea leituras próprias (o `screen-refs`) enxerga as que o mesmo cliente já fez.
+ */
+export function clientReadsHoldingWindow(
+  client: Pick<CangeClient, "getAccessToken">
+): (windowMs: number, at: number) => number[] {
+  return (windowMs, at) => readWindowFor(client.getAccessToken?.()).readsHoldingWindow(windowMs, at);
 }
 
 export function createCangeClient(config: CangeClientConfig): CangeClient {
@@ -104,9 +140,9 @@ export function createCangeClient(config: CangeClientConfig): CangeClient {
     for (let attempt = 0; ; attempt += 1) {
       // REG-F1: o teto de leitura do back conta toda tentativa de GET, quando ela chega (entre o
       // início e a resposta): o `readWindow` guarda os dois (ver `createReadWindowPacer`).
-      // K-03: e cada tentativa só sai quando cabe no teto do processo (`admitRead`), antes do
-      // relógio do timeout (a espera na fila não conta como lentidão da API).
-      const readDone = method === "GET" ? await admitRead() : undefined;
+      // K-03: e cada tentativa só sai quando cabe no teto da credencial (`admitRead`, N-1), antes
+      // do relógio do timeout (a espera na fila não conta como lentidão da API).
+      const readDone = method === "GET" ? await admitRead(options.skipAuth ? undefined : accessToken) : undefined;
       const abortController = new AbortController();
       const timeout = setTimeout(() => abortController.abort(), effectiveTimeout);
 

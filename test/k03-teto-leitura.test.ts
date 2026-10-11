@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { DEFAULT_READS_PER_SECOND, createCangeClient } from "../src/client/http.js";
-import { resetReadWindow } from "../src/client/readWindow.js";
+import { DEFAULT_READS_PER_SECOND, clientReadsHoldingWindow, createCangeClient } from "../src/client/http.js";
+import { credentialKey, readWindowCount, readWindowFor, resetReadWindow } from "../src/client/readWindow.js";
 
 /**
  * K-03 (code review do Alex, lote v9): o back permite 10 GET/s por chave e a 11ª bloqueia a chave
@@ -72,5 +72,96 @@ describe("K-03: teto de leitura do cliente HTTP", () => {
 
     expect(starts).toHaveLength(10);
     expect(Date.now() - begin).toBeLessThan(900);
+  });
+});
+
+/** Cliente com fetch que anota o início de cada GET por token e demora `delayMs` para responder. */
+function timedClient(token: string, starts: Map<string, number[]>, delayMs = 30) {
+  return createCangeClient({
+    baseUrl: "https://api.teste.local",
+    appOrigin: "https://app.teste.local",
+    accessToken: token,
+    fetchFn: (async (_input: unknown, init?: RequestInit) => {
+      const auth = new Headers(init?.headers).get("authorization") ?? "";
+      const list = starts.get(auth) ?? [];
+      list.push(Date.now());
+      starts.set(auth, list);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch
+  });
+}
+
+describe("N-1: o teto de leitura é por credencial, não por processo", () => {
+  it("dois clientes com tokens diferentes no mesmo processo não dividem o teto", async () => {
+    const starts = new Map<string, number[]>();
+    const ana = timedClient("token-ana", starts);
+    const bruno = timedClient("token-bruno", starts);
+
+    const begin = Date.now();
+    await Promise.all([
+      ...Array.from({ length: 7 }, (_, index) => ana.get(`/a/${index}`)),
+      ...Array.from({ length: 7 }, (_, index) => bruno.get(`/b/${index}`))
+    ]);
+
+    const all = [...starts.get("Bearer token-ana")!, ...starts.get("Bearer token-bruno")!];
+    expect(all).toHaveLength(14);
+    // Com um teto do processo, os 14 levariam mais de 1 s (7 + espera da janela + 7).
+    expect(Math.max(...all) - begin).toBeLessThan(500);
+    expect(rollingPeak(all)).toBe(14);
+  });
+
+  it("o mesmo token em dois clientes (o MCP monta um por requisição) segue com 7 por segundo", async () => {
+    const starts = new Map<string, number[]>();
+    const first = timedClient("token-ana", starts);
+    const second = timedClient("token-ana", starts);
+
+    await Promise.all([
+      ...Array.from({ length: 8 }, (_, index) => first.get(`/a/${index}`)),
+      ...Array.from({ length: 7 }, (_, index) => second.get(`/b/${index}`))
+    ]);
+
+    const all = starts.get("Bearer token-ana")!;
+    expect(all).toHaveLength(15);
+    expect(rollingPeak(all)).toBeLessThanOrEqual(7);
+  }, 15_000);
+
+  it("quem pacea leituras próprias (screen-refs) enxerga as do mesmo cliente e não as de outro token", async () => {
+    const starts = new Map<string, number[]>();
+    const ana = timedClient("token-ana", starts, 0);
+    const bruno = timedClient("token-bruno", starts, 0);
+
+    await Promise.all([ana.get("/a/1"), ana.get("/a/2"), bruno.get("/b/1")]);
+
+    const now = Date.now();
+    expect(clientReadsHoldingWindow(ana)(1000, now)).toHaveLength(2);
+    expect(clientReadsHoldingWindow(bruno)(1000, now)).toHaveLength(1);
+  });
+
+  it("o registro guarda o hash da credencial, não o token, e o parado sai do mapa", () => {
+    const key = credentialKey("token-secreto")!;
+    expect(key).not.toContain("token-secreto");
+    expect(key).toMatch(/^[0-9a-f]{32}$/);
+    expect(credentialKey(undefined)).toBeUndefined();
+
+    let clock = 1_000_000;
+    const realNow = Date.now;
+    Date.now = () => clock;
+    try {
+      readWindowFor("token-ana").noteRead(clock)(clock + 10);
+      expect(readWindowCount()).toBe(1);
+      clock += 20_000;
+      readWindowFor("token-bruno");
+      // O da Ana estava parado (nada em voo nem nos últimos 5 s): saiu.
+      expect(readWindowCount()).toBe(1);
+      const waiting = readWindowFor("token-bruno").hold();
+      clock += 20_000;
+      readWindowFor("token-carla");
+      // Quem espera vaga segura o registro.
+      expect(readWindowCount()).toBe(2);
+      waiting();
+    } finally {
+      Date.now = realNow;
+    }
   });
 });

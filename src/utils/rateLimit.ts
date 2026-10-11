@@ -114,7 +114,8 @@ export interface ReadWindowPacerOptions {
   windowMs?: number;
   /**
    * Até quando cada GET ainda pode cair na janela de uma leitura que comece em `at` (em voo =
-   * `Infinity`), só os que ainda seguram. Default: os que o cliente HTTP anotou (`readsHoldingWindow`).
+   * `Infinity`), só os que ainda seguram. Default: os GETs sem credencial (`readsHoldingWindow`, o
+   * registro anônimo); quem lê com credencial passa os do cliente (`clientReadsHoldingWindow`, N-1).
    */
   holding?: (windowMs: number, at: number) => number[];
   /** Instante (ms) a partir do qual nenhuma leitura nova começa: `run` rejeita com `ReadBudgetExceededError`. */
