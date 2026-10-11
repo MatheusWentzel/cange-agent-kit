@@ -13,6 +13,7 @@ import {
   normalizeText,
   resolveFieldValues,
   screenMaskOf,
+  truncatedValueIssues,
   type CompanyUser,
   type FormScope,
   type ResolvedValue,
@@ -308,6 +309,8 @@ export async function resolveLayers(input: {
   const passthrough: Record<string, unknown> = {};
   for (const layer of input.layers) {
     if (!layer || Object.keys(layer).length === 0) continue;
+    // K-04: o texto cortado da leitura enxuta não volta para o cartão (nem como chave técnica).
+    issues.push(...truncatedValueIssues(layer));
     const result = await resolveFieldValues({
       values: layer,
       forms: input.forms,

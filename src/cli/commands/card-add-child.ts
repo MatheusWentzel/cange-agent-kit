@@ -3,6 +3,7 @@ import type { Command } from "commander";
 import { CangeValidationError } from "../../client/errors.js";
 import { addChildCardPayloadSchema } from "../../schemas/cards.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
+import { truncatedValueIssues } from "../../utils/valueResolver.js";
 import { createCommandAction } from "../context.js";
 import { normalizeNumericValueKeys, readPayloadFile } from "../helpers.js";
 import {
@@ -73,14 +74,18 @@ export function registerCardAddChildCommand(cardCommand: Command): void {
           throwIfInvalid(issues);
           child.values = mergedValues({ resolved, passthrough });
           formatted = formattedInfo(formattedOf(resolved));
-        } else if (mayNeedScreenMask(child.values)) {
-          await authOnce(kit, ensureAuth)();
-          const fields = await fieldsForMask(async () => (await kit.contracts.getFieldsByFlow({ flowId: child.flowId })).fields);
-          if (fields) {
-            const masked = maskPassthroughValues(child.values, fields);
-            throwIfInvalid(masked.issues);
-            child.values = masked.values;
-            formatted = formattedInfo(masked.formatted);
+        } else {
+          // K-04: sem resolução também não grava o texto cortado da leitura enxuta.
+          throwIfInvalid(truncatedValueIssues(child.values));
+          if (mayNeedScreenMask(child.values)) {
+            await authOnce(kit, ensureAuth)();
+            const fields = await fieldsForMask(async () => (await kit.contracts.getFieldsByFlow({ flowId: child.flowId })).fields);
+            if (fields) {
+              const masked = maskPassthroughValues(child.values, fields);
+              throwIfInvalid(masked.issues);
+              child.values = masked.values;
+              formatted = formattedInfo(masked.formatted);
+            }
           }
         }
         if (/^\d+$/.test(parent.linkField)) {

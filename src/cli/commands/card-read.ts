@@ -11,7 +11,7 @@ import {
 } from "../../utils/rateLimit.js";
 import { cardStateOf, dueLabel } from "../../utils/cardState.js";
 import { dropEmpty, htmlToMarkdown, looksLikeHtml, type OutputProfile } from "../../utils/lean.js";
-import { listFieldTitles, matchFieldsByKey } from "../../utils/valueResolver.js";
+import { TRUNCATED_VALUE_MARKER, listFieldTitles, matchFieldsByKey } from "../../utils/valueResolver.js";
 import type { NormalizedField } from "../../schemas/fields.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
@@ -350,7 +350,7 @@ function readableValue(value: unknown, hint: string | undefined): { value: unkno
     if (isHtml) converted = true;
     const text = isHtml ? htmlToMarkdown(item) : item;
     if (hint === undefined || text.length <= LEAN_FIELD_VALUE_CAP) return text;
-    return `${text.slice(0, LEAN_FIELD_VALUE_CAP)}…(cortado: use ${hint} para ler inteiro)`;
+    return `${text.slice(0, LEAN_FIELD_VALUE_CAP)}${TRUNCATED_VALUE_MARKER} use ${hint} para ler inteiro)`;
   };
   const out = Array.isArray(value) ? value.map(one) : one(value);
   return { value: out, converted };

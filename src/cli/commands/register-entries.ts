@@ -6,7 +6,7 @@ import type { NormalizedField } from "../../schemas/fields.js";
 import { NO_ANSWER_FIELD_TYPES } from "../../schemas/flowV2Build.js";
 import { dropEmpty, htmlToMarkdown, looksLikeHtml } from "../../utils/lean.js";
 import { listOutput } from "../../utils/toon.js";
-import { matchFieldsByKey } from "../../utils/valueResolver.js";
+import { TRUNCATED_VALUE_MARKER, matchFieldsByKey } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, type CliCommandContext } from "../context.js";
 import { addSearchSynonyms } from "../helpers.js";
@@ -51,7 +51,7 @@ function cutEntryValue(value: unknown, entryId: unknown, title: string): unknown
   if (Array.isArray(value)) return value.map((item) => cutEntryValue(item, entryId, title));
   const text = readableValue(value);
   if (typeof text !== "string" || text.length <= ENTRY_VALUE_CAP) return text;
-  return `${text.slice(0, ENTRY_VALUE_CAP)}…(cortado: o valor inteiro em ${cutHint(entryId, title)})`;
+  return `${text.slice(0, ENTRY_VALUE_CAP)}${TRUNCATED_VALUE_MARKER} o valor inteiro em ${cutHint(entryId, title)})`;
 }
 
 function leanEntry(entry: RegisterEntry): Record<string, unknown> {

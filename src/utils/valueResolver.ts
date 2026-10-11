@@ -1014,6 +1014,32 @@ export function formatValueIssues(issues: ValueIssue[]): string {
   return lines.join("\n");
 }
 
+/**
+ * K-04: marcador que a leitura enxuta põe no valor cortado (`card read` e `register entries`).
+ * Valor com ele é um PEDAÇO do original: gravar de volta apagaria o resto do campo.
+ */
+export const TRUNCATED_VALUE_MARKER = "…(cortado:";
+
+function hasTruncatedMarker(value: unknown, depth = 0): boolean {
+  if (typeof value === "string") return value.includes(TRUNCATED_VALUE_MARKER);
+  if (depth > 4 || value === null || typeof value !== "object") return false;
+  return Object.values(value as Record<string, unknown>).some((item) => hasTruncatedMarker(item, depth + 1));
+}
+
+/** Um `issue` (exit 2, nada gravado) por valor que veio com o marcador de texto cortado. */
+export function truncatedValueIssues(values: Record<string, unknown> | undefined): ValueIssue[] {
+  if (!values) return [];
+  return Object.entries(values)
+    .filter(([, value]) => hasTruncatedMarker(value))
+    .map(([key]) => ({
+      kind: "invalid_value" as const,
+      blocking: true,
+      text:
+        `"${key}" tem o marcador ${TRUNCATED_VALUE_MARKER} da leitura enxuta: é um pedaço do valor, e gravar apagaria o resto. ` +
+        `Leia o campo inteiro (card read --fields "<campo>" ou register entries --entry-id <id> --fields "<campo>") e mande o valor completo`
+    }));
+}
+
 /** Mapa hash → valor a partir dos resolvidos (opcionalmente só de um formulário). */
 export function valuesOf(resolved: ResolvedValue[], formId?: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
