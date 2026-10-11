@@ -504,7 +504,7 @@ describe("régua de responsável e etiqueta (unidade)", () => {
     expect(resolveTag("URGENTE", tags, "F")).toEqual({ ok: true, tag: tags[2] });
     expect(resolveTag("2", tags, "F")).toEqual({ ok: true, tag: tags[1] });
     expect(resolveTag("prioridade media", tags, "F")).toEqual({ ok: true, tag: tags[1] });
-    expect(resolveTag("prioridade", tags, "F")).toEqual({
+    expect(resolveTag("prioridade", tags, "F")).toMatchObject({
       ok: false,
       error: 'Etiqueta "prioridade" é ambígua no fluxo F: Prioridade alta (id 1), Prioridade média (id 2). Use o nome inteiro ou o id; nada foi gravado.'
     });

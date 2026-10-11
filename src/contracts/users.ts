@@ -6,6 +6,8 @@ export interface CompanyUserSummary {
   id: number;
   name?: string;
   email?: string;
+  /** `user.type` ("AG" = bot de agente; K-02: só é escolhido pelo nome exato ou pelo id). */
+  userType?: string;
 }
 
 /** Usuário da lista do campo de usuário da tela (`GET /user/by-flow?form_id`). */
@@ -22,6 +24,8 @@ export interface FlowUserSummary {
   email?: string;
   /** `flow_user.type` no fluxo; a tela tira o leitor ("V") do seletor de responsável. */
   flowUserType?: string;
+  /** `user.type` ("AG" = bot de agente; K-02: só é escolhido pelo nome exato ou pelo id). */
+  userType?: string;
 }
 
 export interface UsersContracts {
@@ -57,7 +61,8 @@ export function createUsersContracts(client: CangeClient): UsersContracts {
         users.push({
           id,
           ...(typeof record.name === "string" && record.name.trim() ? { name: record.name.trim() } : {}),
-          ...(typeof record.email === "string" && record.email.trim() ? { email: record.email.trim() } : {})
+          ...(typeof record.email === "string" && record.email.trim() ? { email: record.email.trim() } : {}),
+          ...(typeof record.type === "string" && record.type.trim() ? { userType: record.type.trim() } : {})
         });
       }
       return { raw, users };
@@ -88,7 +93,8 @@ export function createUsersContracts(client: CangeClient): UsersContracts {
           id,
           ...(typeof record.name === "string" && record.name.trim() ? { name: record.name.trim() } : {}),
           ...(typeof record.email === "string" && record.email.trim() ? { email: record.email.trim() } : {}),
-          ...(typeof record.flow_user_type === "string" ? { flowUserType: record.flow_user_type } : {})
+          ...(typeof record.flow_user_type === "string" ? { flowUserType: record.flow_user_type } : {}),
+          ...(typeof record.type === "string" && record.type.trim() ? { userType: record.type.trim() } : {})
         });
       }
       return { raw, users };

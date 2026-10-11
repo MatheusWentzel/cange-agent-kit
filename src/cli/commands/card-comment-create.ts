@@ -4,7 +4,7 @@ import { CangeCliUsageError, CangeValidationError } from "../../client/errors.js
 import type { CangeAgentKit } from "../../index.js";
 import { createCardCommentPayloadSchema } from "../../schemas/comments.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
-import { normalizeText, type CompanyUser } from "../../utils/valueResolver.js";
+import { describeUser, isAgentUser, pickByName, type CompanyUser } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { SPEAKER_OUTSIDE_CHAT_MESSAGE, envFlowId, envSpeakerUserId, isSpeakerRef } from "../env-defaults.js";
@@ -78,7 +78,15 @@ export function registerCardCommentCreateCommand(commentCommand: Command): void 
         let mentioned: CompanyUser[] = [];
         if (options.mention && options.mention.length > 0) {
           await authOnce(kit, ensureAuth)();
-          mentioned = await resolveMentions(kit, options.mention);
+          const refs = options.mention;
+          // K-02: o comando pronto troca só a menção sem escolha segura pelo id do candidato.
+          const readyCommand = (ref: string, id: number): string =>
+            [
+              `cange comment create --card-id ${input.cardId}`,
+              `--text ${quoteArg(options.text ?? input.description)}`,
+              ...refs.map((item) => `--mention ${item === ref ? String(id) : quoteArg(item)}`)
+            ].join(" ");
+          mentioned = await resolveMentions(kit, refs, inlineMode ? readyCommand : undefined);
           const withMarkup = applyMentionMarkup(input.description, mentioned);
           input.description = withMarkup;
           input.mentions = Array.from(new Set([...(input.mentions ?? []), ...mentioned.map((user) => user.id)]));
@@ -114,8 +122,16 @@ export function registerCardCommentCreateCommand(commentCommand: Command): void 
   });
 }
 
-/** id, e-mail ou nome → usuário da empresa (único). Erro de uso listando candidatos. */
-export async function resolveMentions(kit: CangeAgentKit, refs: string[]): Promise<CompanyUser[]> {
+/**
+ * id, e-mail ou nome → usuário da empresa (único). Erro de uso listando candidatos.
+ * K-02: nome exato ou início de palavra; trecho no meio do nome, mais de um candidato ou bot
+ * de agente sem o nome exato = erro (exit 2) com os candidatos e o comando pronto, nada gravado.
+ */
+export async function resolveMentions(
+  kit: CangeAgentKit,
+  refs: string[],
+  readyCommand?: (ref: string, id: number) => string
+): Promise<CompanyUser[]> {
   let users: CompanyUser[] | undefined;
   try {
     users = (await kit.contracts.listCompanyUsers()).users;
@@ -125,6 +141,7 @@ export async function resolveMentions(kit: CangeAgentKit, refs: string[]): Promi
 
   const out: CompanyUser[] = [];
   const problems: string[] = [];
+  const ready: string[] = [];
   for (const ref of refs) {
     const text = ref.trim().replace(/^@/, "");
     // v9 (C1): `eu` = quem conversa com o agente (RUNNER_SPEAKER_USER_ID, só em conversa).
@@ -146,6 +163,7 @@ export async function resolveMentions(kit: CangeAgentKit, refs: string[]): Promi
       continue;
     }
     let pool: CompanyUser[];
+    let partial = false;
     if (asId !== undefined) {
       pool = users.filter((user) => user.id === asId);
       if (pool.length === 0) {
@@ -155,27 +173,35 @@ export async function resolveMentions(kit: CangeAgentKit, refs: string[]): Promi
     } else if (text.includes("@")) {
       pool = users.filter((user) => user.email?.toLowerCase() === text.toLowerCase());
     } else {
-      const wanted = normalizeText(text);
-      const exact = users.filter((user) => user.name && normalizeText(user.name) === wanted);
-      pool = exact.length > 0 ? exact : users.filter((user) => user.name && normalizeText(user.name).includes(wanted));
+      const pick = pickByName(text, users, (user) => user.name, { exactOnly: isAgentUser });
+      pool = pick.ok ? [pick.item] : pick.candidates;
+      partial = !pick.ok && pick.reason === "partial";
     }
-    if (pool.length === 1) {
+    if (pool.length === 1 && !partial) {
       if (!out.some((user) => user.id === pool[0]!.id)) out.push(pool[0]!);
       continue;
     }
+    const list = pool.slice(0, 8).map(describeUser).join(", ");
     problems.push(
       pool.length === 0
         ? `nenhum usuário "${text}"`
-        : `"${text}" é ambíguo: ${pool
-            .slice(0, 8)
-            .map((user) => `${user.name ?? "?"} (id ${user.id}${user.email ? `, ${user.email}` : ""})`)
-            .join(", ")}`
+        : partial
+          ? `"${text}" não é o nome exato nem o início de um nome; parecidos: ${list}`
+          : `"${text}" é ambíguo: ${list}`
     );
+    if (readyCommand) for (const user of pool.slice(0, 8)) ready.push(readyCommand(ref, user.id));
   }
   if (problems.length > 0) {
-    throw new CangeCliUsageError(`Nada foi gravado. Menção: ${problems.join("; ")}.`);
+    const lines = ready.length > 0 ? `\nComando pronto (escolha o certo):\n${ready.join("\n")}` : "";
+    throw new CangeCliUsageError(`Nada foi gravado. Menção: ${problems.join("; ")}.${lines}`, {
+      ...(ready.length === 1 ? { suggestion: ready[0]! } : {})
+    });
   }
   return out;
+}
+
+function quoteArg(value: string): string {
+  return `"${value.replace(/(["\\$`])/g, "\\$1")}"`;
 }
 
 /**

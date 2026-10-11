@@ -48,6 +48,8 @@ export interface CompanyUser {
   id: number;
   name?: string;
   email?: string;
+  /** `user.type` ("AG" = bot de agente: só pelo nome exato ou pelo id, K-02). */
+  userType?: string;
 }
 
 /** Consultas sob demanda (só chamadas quando o valor precisa). */
@@ -132,6 +134,71 @@ export function normalizeText(value: string): string {
     .trim()
     .replace(/[\s*:]+$/, "")
     .trim();
+}
+
+// ---------------------------------------------------------------------------
+// Busca por nome (K-02)
+// ---------------------------------------------------------------------------
+
+/**
+ * K-02 (code review do Alex, lote v9): a busca por TRECHO gravava a pessoa, a etiqueta ou a
+ * entrada errada (`--responsible "Ana"` casava com "Luciana Souza" e podia casar com o bot de
+ * um agente, que aciona outro agente). Régua única:
+ *
+ *  - aceita só a igualdade (sem acento e sem caixa) ou o início de palavra (`word`) ou do
+ *    título inteiro (`prefix`, entrada de cadastro);
+ *  - igualdade vence; mais de um candidato = `ambiguous`;
+ *  - trecho no meio da palavra = `partial` (os candidatos saem no erro, nada é escolhido);
+ *  - `exactOnly` (bot de agente) só é escolhido pela igualdade.
+ */
+export type NamePick<T> =
+  | { ok: true; item: T }
+  | { ok: false; reason: "none" | "ambiguous" | "partial"; candidates: T[] };
+
+function startsAtWord(name: string, wanted: string): boolean {
+  let index = name.indexOf(wanted);
+  while (index >= 0) {
+    if (index === 0 || !/[\p{L}\p{N}]/u.test(name[index - 1]!)) return true;
+    index = name.indexOf(wanted, index + 1);
+  }
+  return false;
+}
+
+export function pickByName<T>(
+  text: string,
+  items: readonly T[],
+  nameOf: (item: T) => string | undefined,
+  options: { mode?: "word" | "prefix"; exactOnly?: (item: T) => boolean } = {}
+): NamePick<T> {
+  const wanted = normalizeText(text);
+  if (wanted === "") return { ok: false, reason: "none", candidates: [] };
+  const named = items
+    .map((item) => ({ item, name: normalizeText(nameOf(item) ?? "") }))
+    .filter((entry) => entry.name !== "");
+  const exact = named.filter((entry) => entry.name === wanted).map((entry) => entry.item);
+  if (exact.length === 1) return { ok: true, item: exact[0]! };
+  if (exact.length > 1) return { ok: false, reason: "ambiguous", candidates: exact };
+  const starts = named.filter((entry) =>
+    options.mode === "prefix" ? entry.name.startsWith(wanted) : startsAtWord(entry.name, wanted)
+  );
+  const eligible = starts.filter((entry) => !options.exactOnly?.(entry.item)).map((entry) => entry.item);
+  if (eligible.length === 1) return { ok: true, item: eligible[0]! };
+  if (eligible.length > 1) return { ok: false, reason: "ambiguous", candidates: eligible };
+  const partial = named.filter((entry) => entry.name.includes(wanted)).map((entry) => entry.item);
+  return partial.length > 0 ? { ok: false, reason: "partial", candidates: partial } : { ok: false, reason: "none", candidates: [] };
+}
+
+/** Tipo de usuário do bot de um agente (`user.type`): só é escolhido pelo nome exato. */
+export const AGENT_USER_TYPE = "AG";
+
+export function isAgentUser(user: { userType?: string }): boolean {
+  return user.userType === AGENT_USER_TYPE;
+}
+
+/** "Ana Souza (id 7, ana@acme.com)" para as listas de candidatos. */
+export function describeUser(user: { id: number; name?: string; email?: string; userType?: string }): string {
+  const extra = [user.email, isAgentUser(user) ? "bot de agente: só pelo nome exato ou id" : undefined].filter(Boolean);
+  return `${user.name ?? "?"} (id ${user.id}${extra.length > 0 ? `, ${extra.join(", ")}` : ""})`;
 }
 
 /**
@@ -447,7 +514,7 @@ function splitList(text: string): string[] {
     .filter((item) => item.length > 0);
 }
 
-async function resolveUser(raw: unknown, lookups: ResolverLookups | undefined): Promise<Coerced> {
+async function resolveUser(raw: unknown, lookups: ResolverLookups | undefined, fieldTitle?: string): Promise<Coerced> {
   const id = toIdNumber(raw);
   if (id !== undefined) return { ok: true, value: id };
   if (typeof raw !== "string") return { ok: false, error: "use o id, o e-mail ou o nome do usuário" };
@@ -477,21 +544,35 @@ async function resolveUser(raw: unknown, lookups: ResolverLookups | undefined): 
     return hit ? { ok: true, value: hit.id } : { ok: false, error: `nenhum usuário com o e-mail ${text}` };
   }
 
-  const wanted = normalizeText(text);
-  const exact = users.filter((user) => user.name !== undefined && normalizeText(user.name) === wanted);
-  const pool =
-    exact.length > 0
-      ? exact
-      : users.filter((user) => user.name !== undefined && normalizeText(user.name).includes(wanted));
-  if (pool.length === 1) return { ok: true, value: pool[0]!.id };
-  if (pool.length === 0) return { ok: false, error: `nenhum usuário chamado "${text}"` };
-  return {
-    ok: false,
-    error: `"${text}" é ambíguo: ${pool
-      .slice(0, 8)
-      .map((user) => `${user.name} (id ${user.id}${user.email ? `, ${user.email}` : ""})`)
-      .join(", ")}`
-  };
+  // K-02: nome exato ou início de palavra; trecho no meio, mais de um candidato ou bot de agente
+  // sem o nome exato = erro com os candidatos e o valor pronto (nunca grava o errado).
+  const pick = pickByName(text, users, (user) => user.name, { exactOnly: isAgentUser });
+  if (pick.ok) return { ok: true, value: pick.item.id };
+  if (pick.reason === "none") return { ok: false, error: `nenhum usuário chamado "${text}"` };
+  const candidates = pick.candidates.map((user) => ({ id: user.id, label: describeUser(user) }));
+  return { ok: false, error: candidatesError(text, pick, "usuário", candidates, fieldTitle) };
+}
+
+/** "Ana" casa com 2 usuários: A (id 7), B (id 8). Use o id: --set "Campo=7" */
+function candidatesError(
+  text: string,
+  pick: { reason: "none" | "ambiguous" | "partial" },
+  what: string,
+  candidates: Array<{ id: number; label: string }>,
+  fieldTitle: string | undefined
+): string {
+  const head =
+    pick.reason === "ambiguous"
+      ? `"${text}" casa com ${candidates.length} ${what === "usuário" ? "usuários" : "entradas"}`
+      : `"${text}" não é o nome exato nem o início de ${what === "usuário" ? "um nome" : "um título"}; ${what === "usuário" ? "parecidos" : "parecidas"}`;
+  const list = candidates.slice(0, 8).map((candidate) => candidate.label).join(", ") + (candidates.length > 8 ? ", ..." : "");
+  const first = candidates[0];
+  const ready = !fieldTitle || !first
+    ? " Use o id"
+    : candidates.length === 1
+      ? ` Se for essa, use o id: --set "${fieldTitle}=${first.id}"`
+      : ` Use o id da certa (ex.: --set "${fieldTitle}=${first.id}")`;
+  return `${head}: ${list}.${ready}`;
 }
 
 async function resolveRegisterEntry(
@@ -510,19 +591,23 @@ async function resolveRegisterEntry(
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, error: `não deu para buscar "${label}" no cadastro ${registerId} (${message})` };
   }
-  const wanted = normalizeText(label);
-  const exact = entries.filter((entry) => normalizeText(entry.title) === wanted);
-  const pool = exact.length > 0 ? exact : entries;
-  if (pool.length === 1) return { ok: true, value: pool[0]!.id };
-  if (pool.length === 0) {
+  // K-02: só o título exato ou o prefixo do título. Com 1 resultado da busca que não bate,
+  // antes gravava mesmo assim; agora é erro com o candidato e o id pronto.
+  const pick = pickByName(label, entries, (entry) => entry.title, { mode: "prefix" });
+  if (pick.ok) return { ok: true, value: pick.item.id };
+  if (pick.reason === "none" && entries.length === 0) {
     return { ok: false, error: `nenhuma entrada "${label}" no cadastro ${registerId}` };
   }
+  const candidates = pick.reason === "none" ? entries : pick.candidates;
   return {
     ok: false,
-    error: `"${label}" casa com ${pool.length} entradas: ${pool
-      .slice(0, 8)
-      .map((entry) => `${entry.title} (id ${entry.id})`)
-      .join(", ")}${pool.length > 8 ? ", ..." : ""}. Use o id`
+    error: candidatesError(
+      label,
+      { reason: pick.reason === "ambiguous" ? "ambiguous" : "partial" },
+      "entrada",
+      candidates.map((entry) => ({ id: entry.id, label: `${entry.title} (id ${entry.id})` })),
+      field.title
+    )
   };
 }
 
@@ -578,7 +663,7 @@ export async function coerceFieldValue(
   }
 
   if (USER_TYPES.has(type)) {
-    const user = await resolveUser(raw, lookups);
+    const user = await resolveUser(raw, lookups, field.title);
     if (!user.ok || typeof user.value !== "number" || !SCREEN_USER_TYPES.has(type) || !lookups?.screenUsers) return user;
     // R4-P1: o id precisa estar na lista que a tela mostra para o campo (como o --set de quem usa a tela).
     let allowed: ReadonlySet<number> | undefined;

@@ -15,7 +15,7 @@ import {
 } from "../../utils/cardState.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { FORCED_DRY_RUN_NOTE, isForceDryRun } from "../../utils/forceDryRun.js";
-import { normalizeText } from "../../utils/valueResolver.js";
+import { describeUser, isAgentUser, normalizeText, pickByName } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction, withExitCode } from "../context.js";
 import { SPEAKER_OUTSIDE_CHAT_MESSAGE, envSpeakerUserId, isSpeakerRef } from "../env-defaults.js";
@@ -222,11 +222,19 @@ async function runInlineMode(
   const card = await kit.contracts.getCard({ flowId, cardId });
   const state = cardStateOf(card.raw);
 
+  // K-02: busca por nome sem escolha segura = os candidatos com o comando pronto de cada um.
+  const ready: string[] = [];
   let responsible: { id: number; name?: string } | null | undefined;
   if (wantsResponsible) {
     const outcome = await resolveResponsible(kit, flowId, options.responsible!);
     if (outcome.ok) responsible = outcome.user;
-    else problems.push(`Responsável: ${outcome.error}`);
+    else {
+      problems.push(`Responsável: ${outcome.error}`);
+      const dueArg = wantsDue ? ` --due ${quoteArg(options.due!)}` : "";
+      for (const user of (outcome.candidates ?? []).slice(0, 8)) {
+        ready.push(`cange card update --card-id ${cardId}${dueArg} --responsible ${user.id}`);
+      }
+    }
   }
 
   let tag: { op: TagOp; tag: FlowTagSummary } | undefined;
@@ -237,20 +245,27 @@ async function runInlineMode(
     // O GET /card não traz o nome do fluxo: só no erro o kit lê (a mensagem diz o fluxo pelo nome).
     if (!outcome.ok) outcome = resolveTag(op.ref, tags, await flowNameOf(kit, flowId, card.summary.flowName));
     if (outcome.ok) tag = { op, tag: outcome.tag };
-    else problems.push(outcome.error);
+    else {
+      problems.push(outcome.error);
+      for (const candidate of (outcome.candidates ?? []).slice(0, 8)) {
+        ready.push(tagCommand(cardId, { kind: op.kind, ref: String(candidate.id) }));
+      }
+    }
   }
 
   const base = { cardId: Number(cardId), flowId: Number(flowId) };
   if (problems.length > 0) {
-    const message = problems.join("\n");
+    const message = [...problems, ...(ready.length > 0 ? ["Comando pronto (escolha o certo):", ...ready] : [])].join("\n");
+    const suggestion = ready.length === 1 ? { suggestion: ready[0]! } : {};
     if (options.dryRun) {
       return withExitCode(
-        { dryRun: true, executed: false, ...base, calls: [], unchanged: [], validation: { valid: false, message } },
+        { dryRun: true, executed: false, ...base, calls: [], unchanged: [], validation: { valid: false, message }, ...suggestion },
         EXIT_CODES.USAGE
       );
     }
     throw new CangeValidationError(message.includes("nada foi gravado") ? message : `${message}\nNada foi gravado.`, {
-      code: "CARD_UPDATE_INVALID"
+      code: "CARD_UPDATE_INVALID",
+      ...suggestion
     });
   }
 
@@ -418,12 +433,15 @@ export function buildPlan(
 
 const CLEAR_RESPONSIBLE = new Set(["ninguem", "nenhum", "limpar"]);
 
-type ResponsibleOutcome = { ok: true; user: { id: number; name?: string } | null } | { ok: false; error: string };
+type ResponsibleOutcome =
+  | { ok: true; user: { id: number; name?: string } | null }
+  | { ok: false; error: string; candidates?: FlowUserSummary[] };
 
 /**
  * Candidatos = a lista do seletor de responsável da tela (`GET /user/by-flow?id_flow`, sem o
  * leitor). Régua do `--mention`: id, e-mail exato, nome exato sem acento e caixa, depois
- * trecho único. `eu` = RUNNER_SPEAKER_USER_ID, que também precisa estar na lista.
+ * início de palavra único (K-02: trecho no meio do nome não vale; bot de agente só pelo nome
+ * exato). `eu` = RUNNER_SPEAKER_USER_ID, que também precisa estar na lista.
  */
 async function resolveResponsible(kit: CangeAgentKit, flowId: string, ref: string): Promise<ResponsibleOutcome> {
   const text = ref.trim().replace(/^@/, "");
@@ -453,24 +471,24 @@ export function pickResponsible(ref: string, users: FlowUserSummary[], speaker?:
     const hit = users.find((user) => user.id === asId);
     return hit ? one(hit) : notFound;
   }
-  let pool: FlowUserSummary[];
   if (text.includes("@")) {
-    pool = users.filter((user) => user.email?.toLowerCase() === text.toLowerCase());
-  } else {
-    const wanted = normalizeText(text);
-    if (wanted === "") return notFound;
-    const exact = users.filter((user) => user.name && normalizeText(user.name) === wanted);
-    pool = exact.length > 0 ? exact : users.filter((user) => user.name && normalizeText(user.name).includes(wanted));
+    const pool = users.filter((user) => user.email?.toLowerCase() === text.toLowerCase());
+    if (pool.length === 1) return one(pool[0]!);
+    if (pool.length === 0) return notFound;
+    return { ok: false, error: `"${text}" é de mais de uma pessoa: ${listUsers(pool)}.`, candidates: pool };
   }
-  if (pool.length === 1) return one(pool[0]!);
-  if (pool.length === 0) return notFound;
-  return {
-    ok: false,
-    error: `"${text}" é ambíguo: ${pool
-      .slice(0, 8)
-      .map((user) => `${user.name ?? "?"} (id ${user.id}${user.email ? `, ${user.email}` : ""})`)
-      .join(", ")}${pool.length > 8 ? ", ..." : ""}.`
-  };
+  const pick = pickByName(text, users, (user) => user.name, { exactOnly: isAgentUser });
+  if (pick.ok) return one(pick.item);
+  if (pick.reason === "none") return notFound;
+  const head =
+    pick.reason === "ambiguous"
+      ? `"${text}" é ambíguo`
+      : `"${text}" não é o nome exato nem o início de um nome; parecidos`;
+  return { ok: false, error: `${head}: ${listUsers(pick.candidates)}.`, candidates: pick.candidates };
+}
+
+function listUsers(users: FlowUserSummary[]): string {
+  return users.slice(0, 8).map(describeUser).join(", ") + (users.length > 8 ? ", ..." : "");
 }
 
 // ---------------------------------------------------------------------------
@@ -482,7 +500,7 @@ export function resolveTag(
   ref: string,
   tags: FlowTagSummary[],
   flowName: string
-): { ok: true; tag: FlowTagSummary } | { ok: false; error: string } {
+): { ok: true; tag: FlowTagSummary } | { ok: false; error: string; candidates?: FlowTagSummary[] } {
   const text = ref.trim();
   if (tags.length === 0) {
     return {
@@ -494,16 +512,18 @@ export function resolveTag(
     const hit = tags.find((tag) => tag.id === Number(text.replace(/^#/, "")));
     if (hit) return { ok: true, tag: hit };
   }
-  const wanted = normalizeText(text);
-  const exact = wanted === "" ? [] : tags.filter((tag) => normalizeText(tag.name) === wanted);
-  const pool = exact.length > 0 || wanted === "" ? exact : tags.filter((tag) => normalizeText(tag.name).includes(wanted));
-  if (pool.length === 1) return { ok: true, tag: pool[0]! };
-  if (pool.length > 1) {
+  // K-02: nome exato ou início de palavra; trecho no meio do nome não grava (sai em candidates).
+  const pick = pickByName(text, tags, (tag) => tag.name);
+  if (pick.ok) return { ok: true, tag: pick.item };
+  if (pick.reason !== "none") {
+    const list = pick.candidates.map((tag) => `${tag.name} (id ${tag.id})`).join(", ");
     return {
       ok: false,
-      error: `Etiqueta "${text}" é ambígua no fluxo ${flowName}: ${pool
-        .map((tag) => `${tag.name} (id ${tag.id})`)
-        .join(", ")}. Use o nome inteiro ou o id; nada foi gravado.`
+      error:
+        pick.reason === "ambiguous"
+          ? `Etiqueta "${text}" é ambígua no fluxo ${flowName}: ${list}. Use o nome inteiro ou o id; nada foi gravado.`
+          : `Etiqueta "${text}" não é o nome nem o início de um nome no fluxo ${flowName}; parecidas: ${list}. Use o nome inteiro ou o id; nada foi gravado.`,
+      candidates: pick.candidates
     };
   }
   const names = [...tags]
