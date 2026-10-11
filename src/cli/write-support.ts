@@ -11,6 +11,7 @@ import {
   formatValueIssues,
   looksLikeTitleKey,
   normalizeText,
+  REGISTER_ENTRY_SEARCH_PAGE,
   resolveFieldValues,
   screenMaskOf,
   truncatedValueIssues,
@@ -107,10 +108,18 @@ export function createWriteLookups(kit: CangeAgentKit, ensureAuth: () => Promise
     },
     async searchRegisterEntries(registerId, text) {
       await ensureAuth();
-      const result = await kit.contracts.getRegisterEntries({ registerId, search: text, pageSize: 20 });
-      return result.entries
-        .filter((entry) => entry.id !== undefined && Number.isFinite(Number(entry.id)))
-        .map((entry) => ({ id: Number(entry.id), title: entry.title ?? String(entry.id) }));
+      const result = await kit.contracts.getRegisterEntries({ registerId, search: text, pageSize: REGISTER_ENTRY_SEARCH_PAGE });
+      // N-2: busca cortada (`hasMore`, ou a página do V2 cheia) = o prefixo não decide (só o título exato).
+      // O V1 devolve a lista inteira, sem página: só o `hasMore` conta.
+      const truncated =
+        result.pageInfo.hasMore === true ||
+        (result.engine === "v2" && result.entries.length >= REGISTER_ENTRY_SEARCH_PAGE);
+      return {
+        entries: result.entries
+          .filter((entry) => entry.id !== undefined && Number.isFinite(Number(entry.id)))
+          .map((entry) => ({ id: Number(entry.id), title: entry.title ?? String(entry.id) })),
+        truncated
+      };
     },
     listUsers() {
       usersPromise ??= (async () => {

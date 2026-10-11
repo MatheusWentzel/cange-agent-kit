@@ -193,6 +193,52 @@ describe("campo de usuário e entrada de cadastro (--set)", () => {
   });
 });
 
+describe("N-2: entrada de cadastro com a busca cortada (20 por página)", () => {
+  const CLIENTE: NormalizedField = {
+    id: 16,
+    name: "h_cliente",
+    title: "Cliente",
+    type: "COMBO_BOX_REGISTER_FIELD",
+    formId: 902,
+    required: false,
+    raw: { register_id: 175 }
+  };
+  /** 1 entrada que começa por "Ana Clara" e 19 que só têm o texto no meio (a busca do back é "contém"). */
+  const page = [
+    { id: 500, title: "Ana Clara Souza" },
+    ...Array.from({ length: 19 }, (_, index) => ({ id: 600 + index, title: `Mariana Clara ${index}` }))
+  ];
+
+  it('prefixo "Ana Clara" com hasMore: ambíguo, com os candidatos (não escolhe a única da página)', async () => {
+    const searchRegisterEntries = vi.fn().mockResolvedValue({ entries: page, truncated: true });
+    const result = await coerceFieldValue(CLIENTE, "Ana Clara", { searchRegisterEntries });
+    expect(result.ok).toBe(false);
+    const error = !result.ok ? result.error : "";
+    expect(error).toContain("Ana Clara Souza (id 500)");
+    expect(error).toContain('--set "Cliente=500"');
+    expect(error).toContain("só o título exato ou o id");
+  });
+
+  it("página cheia sem o hasMore (lista solta de 20): também ambíguo", async () => {
+    const searchRegisterEntries = vi.fn().mockResolvedValue(page);
+    expect((await coerceFieldValue(CLIENTE, "Ana Clara", { searchRegisterEntries })).ok).toBe(false);
+  });
+
+  it('o título exato na mesma página cortada resolve ("Ana" entre 19 "Ana ...")', async () => {
+    const entries = [
+      ...Array.from({ length: 19 }, (_, index) => ({ id: 700 + index, title: `Ana ${index}` })),
+      { id: 799, title: "Ana" }
+    ];
+    const searchRegisterEntries = vi.fn().mockResolvedValue({ entries, truncated: true });
+    expect(await coerceFieldValue(CLIENTE, "ana", { searchRegisterEntries })).toEqual({ ok: true, value: [799] });
+  });
+
+  it("busca inteira (sem hasMore, página não cheia): o prefixo único segue resolvendo", async () => {
+    const searchRegisterEntries = vi.fn().mockResolvedValue({ entries: page.slice(0, 5), truncated: false });
+    expect(await coerceFieldValue(CLIENTE, "Ana Clara", { searchRegisterEntries })).toEqual({ ok: true, value: [500] });
+  });
+});
+
 describe("comment create --mention", () => {
   it('"Ana" não menciona Luciana: exit 2, nada gravado, comando pronto com o id', async () => {
     users = [users[0]!];

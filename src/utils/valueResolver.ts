@@ -44,6 +44,19 @@ export interface RegisterEntryCandidate {
   title: string;
 }
 
+/**
+ * N-2: o resultado da busca de entradas com o aviso de que ela foi cortada (`hasMore` ou página
+ * cheia). Uma lista solta (formato antigo) com `REGISTER_ENTRY_SEARCH_PAGE` ou mais itens conta
+ * como cortada.
+ */
+export interface RegisterEntrySearch {
+  entries: RegisterEntryCandidate[];
+  truncated: boolean;
+}
+
+/** Tamanho da página da busca de entrada de cadastro do resolvedor. */
+export const REGISTER_ENTRY_SEARCH_PAGE = 20;
+
 export interface CompanyUser {
   id: number;
   name?: string;
@@ -54,7 +67,7 @@ export interface CompanyUser {
 
 /** Consultas sob demanda (só chamadas quando o valor precisa). */
 export interface ResolverLookups {
-  searchRegisterEntries?: (registerId: string, text: string) => Promise<RegisterEntryCandidate[]>;
+  searchRegisterEntries?: (registerId: string, text: string) => Promise<RegisterEntryCandidate[] | RegisterEntrySearch>;
   listUsers?: () => Promise<CompanyUser[]>;
   /**
    * R4-P1 (revisão 4 do EXTRA-06): os usuários que o campo de usuário da TELA lista para este
@@ -563,7 +576,7 @@ function candidatesError(
 ): string {
   const head =
     pick.reason === "ambiguous"
-      ? `"${text}" casa com ${candidates.length} ${what === "usuário" ? "usuários" : "entradas"}`
+      ? `"${text}" casa com ${candidates.length} ${what === "usuário" ? (candidates.length === 1 ? "usuário" : "usuários") : candidates.length === 1 ? "entrada" : "entradas"}`
       : `"${text}" não é o nome exato nem o início de ${what === "usuário" ? "um nome" : "um título"}; ${what === "usuário" ? "parecidos" : "parecidas"}`;
   const list = candidates.slice(0, 8).map((candidate) => candidate.label).join(", ") + (candidates.length > 8 ? ", ..." : "");
   const first = candidates[0];
@@ -585,8 +598,11 @@ async function resolveRegisterEntry(
     return { ok: false, error: `use o id da entrada (cange register entries --search "${label}")` };
   }
   let entries: RegisterEntryCandidate[];
+  let truncated: boolean;
   try {
-    entries = await lookups.searchRegisterEntries(String(registerId), label);
+    const found = await lookups.searchRegisterEntries(String(registerId), label);
+    entries = Array.isArray(found) ? found : found.entries;
+    truncated = Array.isArray(found) ? found.length >= REGISTER_ENTRY_SEARCH_PAGE : found.truncated;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return { ok: false, error: `não deu para buscar "${label}" no cadastro ${registerId} (${message})` };
@@ -594,20 +610,28 @@ async function resolveRegisterEntry(
   // K-02: só o título exato ou o prefixo do título. Com 1 resultado da busca que não bate,
   // antes gravava mesmo assim; agora é erro com o candidato e o id pronto.
   const pick = pickByName(label, entries, (entry) => entry.title, { mode: "prefix" });
-  if (pick.ok) return { ok: true, value: pick.item.id };
-  if (pick.reason === "none" && entries.length === 0) {
+  // N-2: com a busca cortada (`hasMore` ou página cheia), o prefixo não decide: a entrada que só
+  // começa pelo texto pode ter irmãs fora da página. Só o título exato resolve; o resto é ambíguo.
+  if (pick.ok && (!truncated || normalizeText(pick.item.title) === normalizeText(label))) {
+    return { ok: true, value: pick.item.id };
+  }
+  if (!pick.ok && pick.reason === "none" && entries.length === 0) {
     return { ok: false, error: `nenhuma entrada "${label}" no cadastro ${registerId}` };
   }
-  const candidates = pick.reason === "none" ? entries : pick.candidates;
+  const prefixed = pick.ok ? [pick.item] : pick.reason === "none" ? entries : pick.candidates;
+  const reason = pick.ok || pick.reason === "ambiguous" ? "ambiguous" : "partial";
+  const message = candidatesError(
+    label,
+    { reason },
+    "entrada",
+    prefixed.map((entry) => ({ id: entry.id, label: `${entry.title} (id ${entry.id})` })),
+    field.title
+  );
   return {
     ok: false,
-    error: candidatesError(
-      label,
-      { reason: pick.reason === "ambiguous" ? "ambiguous" : "partial" },
-      "entrada",
-      candidates.map((entry) => ({ id: entry.id, label: `${entry.title} (id ${entry.id})` })),
-      field.title
-    )
+    error: truncated
+      ? `${message} A busca no cadastro ${registerId} trouxe só as primeiras ${entries.length} entradas e há mais: só o título exato ou o id escolhem (cange register entries --register-id ${registerId} --search "${label}").`
+      : message
   };
 }
 
