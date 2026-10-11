@@ -96,8 +96,11 @@ describe("CANGE_FORCE_DRY_RUN: toda escrita do kit vira dry-run", () => {
       // GET genérico com o que o dry-run inline precisa (form_init_id do fluxo). O mover
       // confere os obrigatórios da etapa atual (decisão 1): o fluxo traz as etapas e o
       // cartão está na 484, sem obrigatório no form 658.
+      // K-01: o --payload é convertido sempre; o update-values lê os campos do fluxo.
       const body = url.pathname.replace(/\/+$/, "") === "/card"
         ? { id_card: 5, flow_id: 192, flow_step_id: 484, form_answers: [] }
+        : url.pathname === "/field/by-flow"
+        ? [{ id_field: 1, name: "abc", title: "Abc", type: "TEXT_SHORT_FIELD", form_id: 662 }]
         : {
             ok: true,
             warnings: [],

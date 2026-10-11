@@ -136,8 +136,8 @@ export function normalizeText(value: string): string {
 
 /**
  * Chave que NÃO é hash nem id: tem espaço, acento ou começa com maiúscula.
- * Só ela obriga o kit a consultar os campos quando o payload vem de arquivo sem
- * `--validate-fields` (hash e chave técnica seguem direto, sem GET extra).
+ * Chave técnica desconhecida (hash) pode seguir como veio no payload sem
+ * `--validate-fields`; título desconhecido é sempre erro.
  */
 export function looksLikeTitleKey(key: string): boolean {
   return /\s/.test(key) || /[^\x00-\x7F]/.test(key) || /^[A-Z]/.test(key);

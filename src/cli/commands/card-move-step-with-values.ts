@@ -21,9 +21,7 @@ import {
   formattedOf,
   initScope,
   loadFlowContext,
-  maskPassthroughValues,
   mergedValues,
-  needsFieldResolution,
   parseInlineValues,
   resolveLayers,
   stepLabel,
@@ -56,7 +54,7 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
   command
     .option(
       "--validate-fields",
-      "Também recusa chave desconhecida e cobra os obrigatórios do idForm (os da etapa atual são sempre exigidos)"
+      "Também recusa chave desconhecida e cobra os obrigatórios do idForm (os da etapa atual são sempre exigidos; o payload é sempre convertido pelos campos)"
     )
     .option(
       "--discover-required",
@@ -146,51 +144,41 @@ export function registerCardMoveStepWithValuesCommand(cardCommand: Command): voi
         let validation: ReturnType<typeof validationSummary> | undefined;
         let finalValues: Record<string, unknown> = payload.values;
         const issues: ValueIssue[] = [];
-        // v9 (h): telefone e documento do payload vão como a tela grava (o rascunho reenviado não é tocado).
-        let formatted: ReturnType<typeof formattedInfo> = {};
-        const resolveNeeded = needsFieldResolution(
-          { ...payload.values, ...(inline ?? {}) },
-          options.validateFields === true || inline !== undefined
-        );
-        if (resolveNeeded) {
-          // P4: o validate-fields filtrava SÓ pelo idForm do payload e dizia "não existe na
-          // estrutura consultada" para um campo da outra etapa (10 erros em 5 runs). Agora
-          // a chave é procurada em todos os formulários do fluxo e o erro diz de qual etapa
-          // o campo é; o `card move` separa os formulários sozinho.
-          const others: FormScope[] = [];
-          const seen = new Set([targetFormId]);
-          const addOther = (formId: string | number | undefined, label: string): void => {
-            if (formId === undefined || seen.has(String(formId))) return;
-            seen.add(String(formId));
-            others.push(formScope(ctx.fields, formId, label, 9));
-          };
-          for (const step of ctx.steps) addOther(step.formId, describeForm(ctx, payload, String(step.formId)));
-          const init = initScope(ctx, 9);
-          if (init) addOther(init.formId, init.label);
+        // K-01: o payload é convertido SEMPRE (com ou sem --validate-fields): o gate confere com
+        // `--dry-run --validate-fields` e a execução real vem sem a flag, e os `values` gravados
+        // têm de ser os que a aprovação mostrou. A flag só acrescenta a validação.
+        // P4: o validate-fields filtrava SÓ pelo idForm do payload e dizia "não existe na
+        // estrutura consultada" para um campo da outra etapa (10 erros em 5 runs). Agora
+        // a chave é procurada em todos os formulários do fluxo e o erro diz de qual etapa
+        // o campo é; o `card move` separa os formulários sozinho.
+        const others: FormScope[] = [];
+        const seen = new Set([targetFormId]);
+        const addOther = (formId: string | number | undefined, label: string): void => {
+          if (formId === undefined || seen.has(String(formId))) return;
+          seen.add(String(formId));
+          others.push(formScope(ctx.fields, formId, label, 9));
+        };
+        for (const step of ctx.steps) addOther(step.formId, describeForm(ctx, payload, String(step.formId)));
+        const init = initScope(ctx, 9);
+        if (init) addOther(init.formId, init.label);
 
-          const resolution = await resolveLayers({
-            layers: [payload.values, inline],
-            forms: [target],
-            outOfScope: others,
-            lookups: createWriteLookups(kit, auth),
-            passthroughUnknown: options.validateFields !== true
+        const resolution = await resolveLayers({
+          layers: [payload.values, inline],
+          forms: [target],
+          outOfScope: others,
+          lookups: createWriteLookups(kit, auth),
+          passthroughUnknown: options.validateFields !== true
+        });
+        finalValues = mergedValues(resolution);
+        // v9 (h): telefone e documento do payload vão como a tela grava (o rascunho reenviado não é tocado).
+        const formatted = formattedInfo(formattedOf(resolution.resolved));
+        issues.push(...resolution.issues);
+        if (issues.some((issue) => issue.kind === "out_of_scope")) {
+          issues.push({
+            kind: "invalid_value",
+            blocking: true,
+            text: `o idForm ${targetFormId} só grava ${target.label}. \`cange card move --card-id ${payload.cardId} --to ${payload.toStepId} --set "Campo=valor"\` separa os formulários sozinho`
           });
-          finalValues = mergedValues(resolution);
-          formatted = formattedInfo(formattedOf(resolution.resolved));
-          issues.push(...resolution.issues);
-          if (issues.some((issue) => issue.kind === "out_of_scope")) {
-            issues.push({
-              kind: "invalid_value",
-              blocking: true,
-              text: `o idForm ${targetFormId} só grava ${target.label}. \`cange card move --card-id ${payload.cardId} --to ${payload.toStepId} --set "Campo=valor"\` separa os formulários sozinho`
-            });
-          }
-        } else {
-          // Sem resolução: os campos do fluxo já estão lidos (ctx.fields), sem GET extra.
-          const masked = maskPassthroughValues(finalValues, ctx.fields);
-          finalValues = masked.values;
-          formatted = formattedInfo(masked.formatted);
-          issues.push(...masked.issues);
         }
 
         // Decisão 1 (06/10): os obrigatórios da etapa ATUAL do cartão, sempre (com ou sem

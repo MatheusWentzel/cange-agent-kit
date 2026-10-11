@@ -84,7 +84,11 @@ export function parseInlineValues(options: InlineValueOptions): Record<string, u
   return values;
 }
 
-/** O payload (arquivo) precisa da estrutura de campos? Hash e chave técnica passam direto. */
+/**
+ * O payload (arquivo) precisa da estrutura de campos? Hash e chave técnica passam direto.
+ * Só o `card add-child` ainda decide assim: os comandos com --validate-fields convertem o
+ * payload sempre (K-01), para o gate e a execução real gravarem o mesmo valor.
+ */
 export function needsFieldResolution(values: Record<string, unknown>, force: boolean): boolean {
   if (force) return true;
   return Object.keys(values).some((key) => /^#?\d+$/.test(key.trim()) || looksLikeTitleKey(key));
@@ -379,7 +383,8 @@ export function mayNeedScreenMask(values: Record<string, unknown>): boolean {
 }
 
 /**
- * v9 (h): payload por arquivo que segue SEM resolução (chave hash, sem --validate-fields).
+ * v9 (h): payload por arquivo que segue SEM resolução (hoje só o `card add-child`; os 5
+ * comandos com --payload e --validate-fields convertem sempre, K-01).
  * Telefone e documento, achados pelo hash (ou id) nos campos do formulário, vão como a
  * tela grava; valor que a tela recusa vira `issue` (exit 2, nada gravado), como no `--set`.
  * O resto segue como veio.

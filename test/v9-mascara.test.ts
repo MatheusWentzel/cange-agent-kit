@@ -210,10 +210,10 @@ describe("card create grava telefone e documento como a tela (conversa 858)", ()
     expect(errorMessage()).toContain("Telefone inválido");
   });
 
-  it("--payload sem nada com cara de telefone ou documento: nenhuma consulta extra (como antes)", async () => {
+  it("--payload sem nada com cara de telefone ou documento: 1 GET dos campos (K-01: o payload é sempre convertido)", async () => {
     const file = await payloadFile({ flowId: 316, idForm: 900, origin: "/x", values: { h_nome: "Mercopar 2026" } });
     await run(["card", "create", "--payload", file]);
-    expect(requests.filter((request) => request.method === "GET")).toEqual([]);
+    expect(requests.filter((request) => request.method === "GET").map((request) => request.path)).toEqual(["/field/by-flow"]);
     expect(writes()[0]!.body!.values).toEqual({ h_nome: "Mercopar 2026" });
   });
 
@@ -308,7 +308,7 @@ describe("update-values, mover e cadastro também", () => {
     expect(second!.formatted).toEqual([{ field: "CNPJ", from: "11222333000181", to: "11.222.333/0001-81" }]);
   });
 
-  it("register update --payload com o cadastro: mascarado; sem o cadastro segue como veio", async () => {
+  it("register update --payload com o cadastro: mascarado; sem o cadastro, erro de uso (K-01: não dá para converter)", async () => {
     const file = await payloadFile({ idForm: 950, registerId: 183, formAnswerId: 6507, values: { r_tel: "51981740992" } });
     await run(["register", "update", "--payload", file]);
     expect(writes()[0]!.body).toMatchObject({ values: { r_tel: "(51) 981740992" } });
@@ -317,7 +317,8 @@ describe("update-values, mover e cadastro também", () => {
     stdout.length = 0;
     const noRegister = await payloadFile({ idForm: 950, formAnswerId: 6507, values: { r_tel: "51981740992" } });
     await run(["register", "update", "--payload", noRegister]);
-    expect(writes()[0]!.body).toMatchObject({ values: { r_tel: "51981740992" } });
+    expect(process.exitCode).toBe(2);
+    expect(writes()).toEqual([]);
   });
 
   it("card add-child: valores do filho mascarados", async () => {

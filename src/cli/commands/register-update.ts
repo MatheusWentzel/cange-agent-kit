@@ -11,12 +11,8 @@ import {
   addInlineValueOptions,
   authOnce,
   fieldTitles,
-  fieldsForMask,
   formattedInfo,
   formattedOf,
-  maskPassthroughValues,
-  mayNeedScreenMask,
-  needsFieldResolution,
   parseInlineValues,
   resolveRegisterValues,
   throwIfInvalid,
@@ -43,7 +39,7 @@ export function registerRegisterUpdateCommand(registerCommand: Command): void {
     .option("--payload <path>", "AVANÇADO: arquivo JSON {idForm, registerId, formAnswerId, values}");
   addInlineValueOptions(command);
   command
-    .option("--validate-fields", "Valida values contra fields antes de mutar")
+    .option("--validate-fields", "Valida values contra fields antes de mutar; o --payload é sempre convertido pelos campos, com ou sem a flag")
     .option("--dry-run", "Exibe o payload resolvido e a validação sem executar a mutação")
     .action(
       createCommandAction(async ({ kit, ensureAuth }, options: RegisterUpdateOptions) => {
@@ -103,63 +99,39 @@ export function registerRegisterUpdateCommand(registerCommand: Command): void {
         }
         const payload = parsed.data;
         const validate = options.validateFields === true;
-        let formatted: ReturnType<typeof formattedInfo> = {};
-        const payloadRegisterId =
+        // K-01: o payload é convertido SEMPRE (com ou sem --validate-fields): o gate confere com
+        // `--dry-run --validate-fields` e a execução real vem sem a flag, e os `values` gravados
+        // têm de ser os que a aprovação mostrou. A flag só acrescenta a validação. Converter
+        // exige os campos do cadastro: sem o cadastro, nada é gravado.
+        const registerId =
           options.registerId ?? (payload.registerId !== undefined ? String(payload.registerId) : undefined);
-
-        if (needsFieldResolution({ ...payload.values, ...(inline ?? {}) }, validate || inline !== undefined)) {
-          const registerId =
-            options.registerId ?? (payload.registerId !== undefined ? String(payload.registerId) : undefined);
-          if (!registerId) {
-            throw new CangeCliUsageError(
-              "Para resolver os campos (título, id ou --validate-fields) informe --register-id ou registerId no payload. " +
-                "Ou use o hash (name) do campo (cange fields by-register --register-id <id>)."
-            );
-          }
-          const { values, issues, resolved } = await resolveRegisterValues({
-            kit,
-            auth,
-            registerId,
-            formId: payload.idForm,
-            layers: [payload.values, inline],
-            validate,
-            requireRequired: validate,
-            passthroughUnknown: !validate
-          });
-          formatted = formattedInfo(formattedOf(resolved));
-          if (options.dryRun) {
-            const validation = validationSummary(issues);
-            return withExitCode(
-              { ...createDryRunResult({ ...payload, values }), validation, ...formatted },
-              validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
-            );
-          }
-          throwIfInvalid(issues);
-          payload.values = values;
-        } else if (payloadRegisterId !== undefined && mayNeedScreenMask(payload.values)) {
-          // v9 (h): sem resolução, o kit lê os campos do cadastro (1 GET) só para gravar telefone e
-          // documento como a tela grava. Sem o cadastro (nem --register-id nem registerId), segue como veio.
-          await auth();
-          const fields = await fieldsForMask(async () =>
-            (await kit.contracts.getFieldsByRegister({ registerId: payloadRegisterId })).fields
+        if (!registerId) {
+          throw new CangeCliUsageError(
+            "Informe --register-id ou registerId no payload: o kit converte os valores pelos campos do cadastro " +
+              "(cange register update --payload <arquivo> --register-id <id>)."
           );
-          if (fields) {
-            const masked = maskPassthroughValues(payload.values, fields);
-            formatted = formattedInfo(masked.formatted);
-            if (options.dryRun) {
-              const validation = validationSummary(masked.issues);
-              if (!validation.valid) {
-                return withExitCode({ ...createDryRunResult(payload), validation, ...formatted }, EXIT_CODES.USAGE);
-              }
-            }
-            throwIfInvalid(masked.issues);
-            payload.values = masked.values;
-          }
         }
-
+        const { values, issues, resolved } = await resolveRegisterValues({
+          kit,
+          auth,
+          registerId,
+          formId: payload.idForm,
+          layers: [payload.values, inline],
+          validate,
+          requireRequired: validate,
+          passthroughUnknown: !validate
+        });
+        // v9 (h): telefone e documento já vão no payload como a tela grava.
+        const formatted = formattedInfo(formattedOf(resolved));
         if (options.dryRun) {
-          return { ...createDryRunResult(payload), ...formatted };
+          const validation = validationSummary(issues);
+          return withExitCode(
+            { ...createDryRunResult({ ...payload, values }), validation, ...formatted },
+            validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
+          );
         }
+        throwIfInvalid(issues);
+        payload.values = values;
 
         return { ...(await kit.contracts.updateRegister(payload)), ...formatted };
       })

@@ -11,12 +11,8 @@ import {
   addInlineValueOptions,
   authOnce,
   fieldTitles,
-  fieldsForMask,
   formattedInfo,
   formattedOf,
-  maskPassthroughValues,
-  mayNeedScreenMask,
-  needsFieldResolution,
   parseInlineValues,
   resolveRegisterValues,
   throwIfInvalid,
@@ -39,7 +35,7 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
     .option("--payload <path>", "AVANÇADO: arquivo JSON {idForm, registerId, origin, values}");
   addInlineValueOptions(command);
   command
-    .option("--validate-fields", "Valida values contra fields antes de mutar (inclui obrigatórios)")
+    .option("--validate-fields", "Valida values contra fields antes de mutar (inclui obrigatórios); o --payload é sempre convertido pelos campos, com ou sem a flag")
     .option("--dry-run", "Exibe o payload resolvido e a validação sem executar a mutação")
     .action(
       createCommandAction(async ({ kit, ensureAuth }, options: RegisterCreateOptions) => {
@@ -100,52 +96,31 @@ export function registerRegisterCreateCommand(registerCommand: Command): void {
         const payload = parsed.data;
         const registerId = options.registerId ?? String(payload.registerId);
         const validate = options.validateFields === true;
-        let formatted: ReturnType<typeof formattedInfo> = {};
-
-        if (needsFieldResolution({ ...payload.values, ...(inline ?? {}) }, validate || inline !== undefined)) {
-          // R5-KR-03 + P4: chave pelo título, id ou hash; valores convertidos para o tipo do campo.
-          const { values, issues, resolved } = await resolveRegisterValues({
-            kit,
-            auth,
-            registerId,
-            formId: payload.idForm,
-            layers: [payload.values, inline],
-            validate,
-            requireRequired: validate,
-            passthroughUnknown: !validate
-          });
-          formatted = formattedInfo(formattedOf(resolved));
-          if (options.dryRun) {
-            const validation = validationSummary(issues);
-            return withExitCode(
-              { ...createDryRunResult({ ...payload, values }), validation, ...formatted },
-              validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
-            );
-          }
-          throwIfInvalid(issues);
-          payload.values = values;
-        } else if (mayNeedScreenMask(payload.values)) {
-          // v9 (h): sem resolução, o kit lê os campos do cadastro (1 GET) só para gravar telefone e
-          // documento como a tela grava.
-          await auth();
-          const fields = await fieldsForMask(async () => (await kit.contracts.getFieldsByRegister({ registerId })).fields);
-          if (fields) {
-            const masked = maskPassthroughValues(payload.values, fields);
-            formatted = formattedInfo(masked.formatted);
-            if (options.dryRun) {
-              const validation = validationSummary(masked.issues);
-              if (!validation.valid) {
-                return withExitCode({ ...createDryRunResult(payload), validation, ...formatted }, EXIT_CODES.USAGE);
-              }
-            }
-            throwIfInvalid(masked.issues);
-            payload.values = masked.values;
-          }
-        }
-
+        // K-01: o payload é convertido SEMPRE (com ou sem --validate-fields): o gate confere com
+        // `--dry-run --validate-fields` e a execução real vem sem a flag, e os `values` gravados
+        // têm de ser os que a aprovação mostrou. A flag só acrescenta a validação.
+        // R5-KR-03 + P4: chave pelo título, id ou hash; valores convertidos para o tipo do campo.
+        const { values, issues, resolved } = await resolveRegisterValues({
+          kit,
+          auth,
+          registerId,
+          formId: payload.idForm,
+          layers: [payload.values, inline],
+          validate,
+          requireRequired: validate,
+          passthroughUnknown: !validate
+        });
+        // v9 (h): telefone e documento já vão no payload como a tela grava.
+        const formatted = formattedInfo(formattedOf(resolved));
         if (options.dryRun) {
-          return { ...createDryRunResult(payload), ...formatted };
+          const validation = validationSummary(issues);
+          return withExitCode(
+            { ...createDryRunResult({ ...payload, values }), validation, ...formatted },
+            validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
+          );
         }
+        throwIfInvalid(issues);
+        payload.values = values;
 
         return { ...(await kit.contracts.createRegister(payload)), ...formatted };
       })

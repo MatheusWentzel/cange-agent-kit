@@ -15,15 +15,11 @@ import {
   authOnce,
   createWriteLookups,
   fieldTitles,
-  fieldsForMask,
   formattedInfo,
   formattedOf,
   initScope,
   loadFlowContext,
-  maskPassthroughValues,
-  mayNeedScreenMask,
   mergedValues,
-  needsFieldResolution,
   otherStepScopes,
   parseInlineValues,
   requireCardId,
@@ -62,7 +58,7 @@ export function registerCardUpdateValuesCommand(cardCommand: Command): void {
     .option("--payload <path>", "AVANÇADO: arquivo JSON {idForm, flowId, cardId, values}");
   addInlineValueOptions(command);
   command
-    .option("--validate-fields", "Valida values contra fields antes de mutar (no modo inline a validação já é sempre feita)")
+    .option("--validate-fields", "Também recusa chave desconhecida (o --payload é sempre convertido pelos campos; no modo inline a validação já é sempre feita)")
     .option("--dry-run", "Mostra o payload resolvido e a validação, sem gravar (exit 2 se inválido)")
     .action(
       createCommandAction(async ({ kit, ensureAuth }, options: CardUpdateValuesOptions) => {
@@ -218,58 +214,36 @@ async function runPayloadMode(
     });
   }
   const payload = parsed.data;
-  const resolveNeeded = needsFieldResolution({ ...payload.values, ...(inline ?? {}) }, options.validateFields === true || inline !== undefined);
-  let formatted: ReturnType<typeof formattedInfo> = {};
-
-  if (!resolveNeeded && mayNeedScreenMask(payload.values)) {
-    // v9 (h): sem resolução, o kit lê os campos (1 GET) só para gravar telefone e documento como a tela.
-    await auth();
-    const fields = await fieldsForMask(async () => (await kit.contracts.getFieldsByFlow({ flowId: payload.flowId })).fields);
-    if (fields) {
-      const masked = maskPassthroughValues(payload.values, fields);
-      formatted = formattedInfo(masked.formatted);
-      if (options.dryRun) {
-        const validation = validationSummary(masked.issues);
-        if (!validation.valid) {
-          return withExitCode({ ...createDryRunResult(payload), validation, ...formatted }, EXIT_CODES.USAGE);
-        }
-      }
-      throwIfInvalid(masked.issues);
-      payload.values = masked.values;
-    }
+  // K-01: o modo payload converte SEMPRE (rótulo de opção, dd/mm/aaaa, R$, nome, máscara), com
+  // ou sem --validate-fields. O gate confere com `--dry-run --validate-fields` e a execução real
+  // vem sem a flag: os `values` gravados têm de ser os mesmos que a aprovação mostrou. A flag só
+  // acrescenta a validação (chave desconhecida vira erro em vez de seguir como veio).
+  await auth();
+  const { fields } = await kit.contracts.getFieldsByFlow({ flowId: payload.flowId });
+  const { target, others } = scopesFromFields(fields, payload.idForm);
+  if (target.fields.length === 0) {
+    throw new CangeValidationError(
+      `Nenhum campo do fluxo ${payload.flowId} pertence ao idForm ${payload.idForm}. Use \`cange card update-values --card-id ${payload.cardId} --set "Campo=valor"\` (o kit acha o formulário pelo campo).`
+    );
   }
-
-  if (resolveNeeded) {
-    await auth();
-    const { fields } = await kit.contracts.getFieldsByFlow({ flowId: payload.flowId });
-    const { target, others } = scopesFromFields(fields, payload.idForm);
-    if (target.fields.length === 0) {
-      throw new CangeValidationError(
-        `Nenhum campo do fluxo ${payload.flowId} pertence ao idForm ${payload.idForm}. Use \`cange card update-values --card-id ${payload.cardId} --set "Campo=valor"\` (o kit acha o formulário pelo campo).`
-      );
-    }
-    const { resolved, issues, passthrough } = await resolveLayers({
-      layers: [payload.values, inline],
-      forms: [target],
-      outOfScope: others,
-      lookups: createWriteLookups(kit, auth),
-      passthroughUnknown: options.validateFields !== true
-    });
-    const values = mergedValues({ resolved, passthrough });
-    formatted = formattedInfo(formattedOf(resolved));
-    if (options.dryRun) {
-      const validation = validationSummary(issues);
-      return withExitCode(
-        { ...createDryRunResult({ ...payload, values }), validation, ...formatted },
-        validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
-      );
-    }
-    throwIfInvalid(issues);
-    payload.values = values;
-  }
-
+  const { resolved, issues, passthrough } = await resolveLayers({
+    layers: [payload.values, inline],
+    forms: [target],
+    outOfScope: others,
+    lookups: createWriteLookups(kit, auth),
+    passthroughUnknown: options.validateFields !== true
+  });
+  const values = mergedValues({ resolved, passthrough });
+  const formatted = formattedInfo(formattedOf(resolved));
   if (options.dryRun) {
-    return { ...createDryRunResult(payload), ...formatted };
+    const validation = validationSummary(issues);
+    return withExitCode(
+      { ...createDryRunResult({ ...payload, values }), validation, ...formatted },
+      validation.valid ? EXIT_CODES.SUCCESS : EXIT_CODES.USAGE
+    );
   }
+  throwIfInvalid(issues);
+  payload.values = values;
+
   return { ...(await kit.contracts.updateCardValues(payload)), ...formatted };
 }

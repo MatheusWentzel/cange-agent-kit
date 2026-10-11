@@ -95,6 +95,14 @@ describe("cli parsing", () => {
       writes.push(String(chunk));
       return true;
     });
+    // K-01: o --payload é convertido sempre; o dry-run lê os campos do fluxo (só GET).
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify([{ id_field: 1, name: "customer_name", title: "Cliente", type: "TEXT_SHORT_FIELD", form_id: 662 }]),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
 
     try {
       const program = createProgram();
@@ -116,6 +124,7 @@ describe("cli parsing", () => {
     const output = writes.join("");
     expect(output).toContain("\"dryRun\":true");
     expect(output).toContain("\"executed\":false");
+    expect(fetchMock.mock.calls.every(([, init]) => ((init as RequestInit | undefined)?.method ?? "GET") === "GET")).toBe(true);
   });
 
   it("runs card move-step-with-values in dry-run without mutating", async () => {

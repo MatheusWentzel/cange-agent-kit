@@ -31,15 +31,11 @@ import {
   authOnce as authOnceShared,
   createWriteLookups,
   fieldTitles,
-  fieldsForMask,
   formattedInfo,
   formattedOf,
   initScope,
   loadFlowContext,
-  maskPassthroughValues,
-  mayNeedScreenMask,
   mergedValues,
-  needsFieldResolution,
   otherStepScopes,
   parseInlineValues,
   resolveLayers,
@@ -109,7 +105,7 @@ export function registerCardCreateCommand(cardCommand: Command): void {
       `LOTE: diretório com arquivos .json, um por card (ordem alfanumérica, máx ${BATCH_MAX_PAYLOADS})`
     )
     .option("--payloads <paths>", "LOTE: caminhos .json separados por vírgula")
-    .option("--validate-fields", "Valida values contra fields do flow antes de mutar (inclui obrigatórios)")
+    .option("--validate-fields", "Valida values contra fields do flow antes de mutar (inclui obrigatórios); o --payload é sempre convertido pelos campos, com ou sem a flag")
     .option("--dry-run", "Exibe payload resolvido e validação (ou o plano do lote) sem executar a mutação")
     .option("--full", "Devolve o envelope completo (raw + summary). Default: só {cardId, stepId, createdAt}")
     .option(
@@ -470,8 +466,8 @@ function createDiscoveryDeps(kit: CangeAgentKit, ensureAuth: () => Promise<unkno
 
 /**
  * P4: chaves e valores passam pelo resolvedor único (título, id, rótulo, número
- * em texto, data dd/mm/aaaa). Payload só com hash e sem --validate-fields segue
- * direto, sem GET extra.
+ * em texto, data dd/mm/aaaa), com ou sem --validate-fields (K-01). Os campos do
+ * fluxo são lidos 1 vez por fluxo (cache no lote).
  */
 async function loadItem(
   deps: DiscoveryDeps,
@@ -487,29 +483,9 @@ async function loadItem(
     });
   }
   const payload = parsed.data;
-  const merged = { ...payload.values, ...(options.inline ?? {}) };
-  if (!needsFieldResolution(merged, options.validateFields || options.inline !== undefined)) {
-    // v9 (h): sem resolução, o kit ainda lê os campos (1 GET por fluxo, em cache no lote) para
-    // gravar telefone e documento como a tela grava.
-    if (!mayNeedScreenMask(payload.values)) return { source, payload, translatedKeys: [] };
-    await options.ensureAuth();
-    const fields = await fieldsForMask(async () => (await deps.fields(payload.flowId)).fields);
-    if (!fields) return { source, payload, translatedKeys: [] };
-    const masked = maskPassthroughValues(payload.values, fields);
-    const maskValidation = validationSummary(masked.issues);
-    if (!maskValidation.valid && !(single && options.dryRun)) {
-      throwIfInvalid(masked.issues);
-    }
-    payload.values = masked.values;
-    return {
-      source,
-      payload,
-      translatedKeys: [],
-      ...formattedInfo(masked.formatted),
-      ...(single && !maskValidation.valid ? { validation: maskValidation } : {})
-    };
-  }
-
+  // K-01: o payload é convertido SEMPRE (com ou sem --validate-fields): o gate confere com
+  // `--dry-run --validate-fields` e a execução real vem sem a flag, e os `values` gravados têm de
+  // ser os que a aprovação mostrou. A flag só acrescenta a validação.
   // A resolução consulta a API; em --dry-run o CLI pula a autenticação global.
   await options.ensureAuth();
   if (options.validateFields) {
