@@ -4,6 +4,32 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-10
 
+### Revisão do Alex, 2ª rodada (lote v9)
+
+- N-1: o teto de leitura (K-03, 7 GET por janela de 1 s) agora é POR CREDENCIAL, não por processo. O pacer e o
+  histórico de leituras ficam numa chave pelo hash do access token (o token cru não fica no registro nem vai para log).
+  O MCP remoto monta um kit por requisição, com a credencial de cada usuário, no mesmo processo: antes todos os
+  usuários dividiam as 7 leituras; agora cada credencial tem as suas, e o mesmo token em vários clientes (o CLI, ou as
+  requisições paralelas do mesmo usuário no MCP) segue somando no mesmo teto, como no back. Sem credencial (antes do
+  login, `skipAuth`) vale um registro anônimo. Registro parado sai do mapa. Escolha: por credencial em vez de um pacer
+  por instância de `createCangeClient`, porque o MCP cria um cliente novo a cada requisição e, por instância, as
+  requisições paralelas do mesmo usuário deixariam de somar; não há opção nova para configurar.
+  Biblioteca: `readWindowFor(token)`, `credentialKey`, `createReadWindow` (`client/readWindow`) e
+  `clientReadsHoldingWindow(client)` (`client/http`, o que o `screen-refs` usa para enxergar as leituras do mesmo
+  cliente). `noteRead`/`readsHoldingWindow` soltos e o default do `createReadWindowPacer` passam a ser o registro
+  anônimo: quem pacea leituras com credencial passa `holding: clientReadsHoldingWindow(client)`.
+- N-2: entrada de cadastro pelo nome com a busca cortada (`hasMore`, ou a página de 20 do V2 cheia) só resolve pelo
+  título exato; o prefixo vira ambíguo (exit 2, candidatos e o `--set` com o id), porque a entrada certa pode estar
+  fora da página. Busca inteira segue como antes (título exato ou prefixo único). Biblioteca: `searchRegisterEntries`
+  do `ResolverLookups` pode devolver `{ entries, truncated }` (`RegisterEntrySearch`); a lista solta segue aceita e,
+  com `REGISTER_ENTRY_SEARCH_PAGE` (20) itens ou mais, conta como cortada.
+- N-3: `card add-child` converte o payload SEMPRE, também o só de hash (rótulo de opção, dd/mm/aaaa, R$, nome de
+  usuário, entrada de cadastro), como os outros 5 comandos do K-01. Custo: 1 GET dos campos do fluxo filho quando há
+  valor. Payload só de hash com falha na leitura dos campos segue o K-09 (execução real exit 4 `FIELDS_READ_FAILED`;
+  dry-run segue sem converter, com `warning`).
+- N-4: o marcador de texto cortado é recusado também com três pontos ASCII (`...(cortado:`) ou só com o miolo
+  `(cortado:`. O `card move-step` (deprecated) também recusa, antes de ler qualquer coisa.
+
 ### Revisão do Alex antes da subida do lote de Agentes de IA (v9)
 
 Mudanças de comportamento desta rodada (CLI):
