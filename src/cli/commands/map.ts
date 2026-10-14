@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 
 import { extractFlowSteps } from "../../contracts/payload-builder.js";
+import type { NormalizedField } from "../../schemas/fields.js";
 import { dropEmpty } from "../../utils/lean.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
@@ -47,6 +48,7 @@ export function registerMapCommand(program: Command): void {
         const toDetail = wanted.slice(0, Number.isInteger(maxFlows) && maxFlows > 0 ? maxFlows : 15);
 
         const flowsOut = [];
+        const leanFlows: Array<Record<string, unknown>> = [];
         const relationships: Array<{
           fromFlowId: number;
           fieldId: number | string | undefined;
@@ -113,6 +115,19 @@ export function registerMapCommand(program: Command): void {
               return out;
             });
 
+          if (lean) {
+            leanFlows.push(
+              summarizeFlow({
+                id: flowId,
+                name: flow.title,
+                formInitId: flow.formInitId !== undefined ? Number(flow.formInitId) : undefined,
+                steps,
+                fields: fieldSet.fields.filter((f) => f.type !== "DIVIDER_FIELD"),
+                links: rawLinkById
+              })
+            );
+            continue;
+          }
           flowsOut.push({
             id: flowId,
             name: flow.title,
@@ -127,9 +142,9 @@ export function registerMapCommand(program: Command): void {
           // `registerId` que já está em cada campo; a dica vive no bloco do CLI.
           return dropEmpty({
             totalFlows: summaries.length,
-            mappedFlows: flowsOut.length,
+            mappedFlows: leanFlows.length,
             truncated: wanted.length > toDetail.length,
-            flows: flowsOut
+            flows: leanFlows
           });
         }
         return {
@@ -149,10 +164,11 @@ export function registerMapCommand(program: Command): void {
 
   annotateCommand(command, {
     envelope:
-      "Enxuto (padrão): { totalFlows, mappedFlows, truncated, flows[{id,name,formInitId,steps[],fields[{id,title,type,required,formId,linksToFlowId?,registerId?}]}] }. " +
+      "Enxuto (padrão, resumido): { totalFlows, mappedFlows, truncated, flows[{id, name, formInitId, startFields[campo], steps[{id, name, fields[campo]}], otherFields?[campo + formId]}] }, " +
+      `campo = {id, title, type, required? (só quando obrigatório), options? (rótulos, até ${MAP_OPTIONS_INLINE_MAX}) | optionsCount? (mais que isso: lista em \`fields by-flow\`), linksToFlowId?, registerId?}. ` +
       "Com --full: { totalFlows, mappedFlows, truncated, flows[{id,name,formInitId,steps[],fields[{id,name(hash),...}]}], relationships[], registersUsed[], dica }",
     fieldsLocation:
-      "flows[].fields[].formId × flows[].steps[].formId distingue campo de criação vs de etapa; relationships liga flows via COMBO_BOX_FLOW_FIELD",
+      "enxuto: startFields = formulário de criação; steps[].fields = campos de cada etapa. --full: flows[].fields[].formId × flows[].steps[].formId distingue criação e etapa; relationships liga flows via COMBO_BOX_FLOW_FIELD",
     example: "cange map            (ambiente inteiro)  ·  cange map --flow-id 22792   (um flow)"
   });
 }
@@ -204,4 +220,91 @@ function numberOrUndefined(value: unknown): number | undefined {
   if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
   if (typeof value === "string" && /^\d+$/.test(value)) return Number.parseInt(value, 10);
   return undefined;
+}
+
+/** C4: opções em linha só quando poucas; mais que isso, só a contagem. */
+const MAP_OPTIONS_INLINE_MAX = 8;
+
+/**
+ * C4 (card #1367459): mapa RESUMIDO. "Mapear os fluxos e as etapas" custava ~1.750
+ * tokens por vez e repetia no mesmo run (13 vezes em produção). Os campos ficam
+ * agrupados no formulário de criação e em cada etapa (sai o `formId` de cada campo e
+ * de cada etapa), `required` só aparece quando é obrigatório e a etapa leva id e nome.
+ */
+function summarizeFlow(input: {
+  id: number;
+  name: string | undefined;
+  formInitId: number | undefined;
+  steps: Array<{ id?: number; index?: number; name?: string; formId?: number }>;
+  fields: NormalizedField[];
+  links: Map<string, RawFieldLink>;
+}): Record<string, unknown> {
+  const byForm = new Map<string, Array<Record<string, unknown>>>();
+  for (const field of input.fields) {
+    const key = field.formId !== undefined ? String(field.formId) : "";
+    const bucket = byForm.get(key) ?? [];
+    bucket.push(leanField(field, input.links));
+    byForm.set(key, bucket);
+  }
+  const take = (formId: number | undefined): Array<Record<string, unknown>> => {
+    if (formId === undefined) return [];
+    const key = String(formId);
+    const list = byForm.get(key) ?? [];
+    byForm.delete(key);
+    return list;
+  };
+
+  const startFields = take(input.formInitId);
+  const steps = [...input.steps]
+    .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
+    .map((step) => ({ id: step.id, name: step.name, fields: take(step.formId) }));
+  const otherFields: Array<Record<string, unknown>> = [];
+  for (const [formId, list] of byForm) {
+    for (const field of list) otherFields.push({ ...field, formId: formId ? Number(formId) : undefined });
+  }
+  return {
+    id: input.id,
+    name: input.name,
+    formInitId: input.formInitId,
+    startFields,
+    steps,
+    otherFields
+  };
+}
+
+function leanField(field: NormalizedField, links: Map<string, RawFieldLink>): Record<string, unknown> {
+  const link = field.id !== undefined ? links.get(String(field.id)) : undefined;
+  const labels = optionLabels(field.options);
+  return {
+    id: field.id !== undefined ? Number(field.id) : undefined,
+    title: field.title,
+    type: field.type,
+    ...(field.required ? { required: true } : {}),
+    ...(labels.length > 0 && labels.length <= MAP_OPTIONS_INLINE_MAX ? { options: labels } : {}),
+    ...(labels.length > MAP_OPTIONS_INLINE_MAX ? { optionsCount: labels.length } : {}),
+    ...(link?.flowId !== undefined ? { linksToFlowId: link.flowId } : {}),
+    ...(link?.registerId !== undefined ? { registerId: link.registerId } : {})
+  };
+}
+
+/** Um rótulo por opção (título/rótulo; sem rótulo, o valor). */
+function optionLabels(options: unknown): string[] {
+  if (!Array.isArray(options)) return [];
+  const labels: string[] = [];
+  for (const option of options) {
+    let label: string | undefined;
+    if (typeof option === "string" || typeof option === "number") {
+      label = String(option);
+    } else if (isRecord(option)) {
+      for (const key of ["title", "label", "name", "text", "value", "id"]) {
+        const value = option[key];
+        if ((typeof value === "string" && value.trim() !== "") || typeof value === "number") {
+          label = String(value).trim();
+          break;
+        }
+      }
+    }
+    if (label !== undefined && !labels.includes(label)) labels.push(label);
+  }
+  return labels;
 }

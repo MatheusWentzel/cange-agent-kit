@@ -80,6 +80,8 @@ export interface ManifestOption {
 export interface ManifestCommand {
   path: string;
   name: string;
+  /** Outros nomes do mesmo comando (`register entry` = `register entries`). */
+  aliases?: string[];
   description?: string;
   mutates?: boolean;
   deprecatedInFavorOf?: string;
@@ -128,6 +130,8 @@ function walkCommand(cmd: Command, parentPath: string): ManifestCommand {
     options: cmd.options.map(describeOption),
     subcommands: cmd.commands.map((child) => walkCommand(child, path))
   };
+  const aliases = cmd.aliases();
+  if (aliases.length > 0) node.aliases = [...aliases];
   const description = cmd.description();
   if (description) {
     node.description = description;

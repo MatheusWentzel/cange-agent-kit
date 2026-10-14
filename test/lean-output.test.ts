@@ -61,7 +61,18 @@ describe("recipe (receitas sob demanda)", () => {
   });
 
   it("lista as receitas de escrita e a do anexo", () => {
-    expect(recipeNames()).toEqual(["anexo", "comentar", "criar-card", "mover-card", "publicar-artefato"]);
+    expect(recipeNames()).toEqual([
+      "anexo",
+      "comentar",
+      "mencionar",
+      "criar-card",
+      "mover-card",
+      "gravar-campos",
+      "publicar-artefato",
+      "cadastro-por-nome",
+      "contar-somar",
+      "ler-campos"
+    ]);
   });
 
   it("receita desconhecida falha com erro de uso", () => {
@@ -293,11 +304,13 @@ describe("saída enxuta x --full (CLI)", () => {
   it("map: enxuto sem o hash do campo e sem relationships/registersUsed repetidos", async () => {
     mapRoutes();
     const out = JSON.parse(await run(["map", "--flow-id", "316"]));
-    expect(out.flows[0].fields).toEqual([
-      { id: 10, title: "Resumo", type: "TEXT_SHORT_FIELD", required: true, formId: 900 },
-      { id: 11, title: "Fornecedor", type: "COMBO_BOX_FLOW_FIELD", required: false, formId: 900, linksToFlowId: 317 }
+    // C4: resumido, com os campos agrupados no formulário de criação e em cada etapa.
+    expect(out.flows[0].startFields).toEqual([
+      { id: 10, title: "Resumo", type: "TEXT_SHORT_FIELD", required: true },
+      { id: 11, title: "Fornecedor", type: "COMBO_BOX_FLOW_FIELD", linksToFlowId: 317 }
     ]);
-    expect(out.flows[0].steps).toEqual([{ id: 485, index: 1, name: "Priorizados", formId: 658 }]);
+    expect(out.flows[0].steps).toEqual([{ id: 485, name: "Priorizados" }]);
+    expect(out.flows[0]).not.toHaveProperty("fields");
     expect(out).not.toHaveProperty("relationships");
     expect(out).not.toHaveProperty("dica");
   });

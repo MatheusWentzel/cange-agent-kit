@@ -137,14 +137,16 @@ describe("flowViews contracts", () => {
 describe("flowCards switch (V1/V2)", () => {
   function deps(client: CangeClient) {
     const flowQuery = createFlowQueryContracts(client);
+    // EXE-K3: o V1 lê o /card/by-flow inteiro (segue o cursor do fluxo grande) pelo listAllCardsByFlow.
+    const all = [
+      { cardId: 10, currentStepId: 485 },
+      { cardId: 11, currentStepId: 486 }
+    ];
     const cards = {
-      listCardsByFlow: vi.fn(async () => ({
-        raw: {},
-        summaries: [
-          { cardId: 10, currentStepId: 485 },
-          { cardId: 11, currentStepId: 486 }
-        ]
-      }))
+      listAllCardsByFlow: vi.fn(async (input: { accept?: (summary: (typeof all)[number]) => boolean }) => {
+        const summaries = input.accept ? all.filter((item) => input.accept!(item)) : all;
+        return { raw: {}, cards: summaries, summaries, complete: true };
+      })
     } as unknown as CardsContracts;
     const flows = {
       getFlow: vi.fn(async () => ({ raw: { use_flow_query_v2: "N" }, summary: {} }))
@@ -163,7 +165,7 @@ describe("flowCards switch (V1/V2)", () => {
     const res = await flowCards.fetchFlowCards({ flowId: 192, engine: "auto" });
     expect(res.engine).toBe("v2");
     expect(res.summaries.map((c) => c.cardId)).toEqual([1]);
-    expect(cards.listCardsByFlow).not.toHaveBeenCalled();
+    expect(cards.listAllCardsByFlow).not.toHaveBeenCalled();
   });
 
   it("engine=auto cai para V1 quando motor desabilitado e flow sem flag", async () => {
@@ -188,7 +190,7 @@ describe("flowCards switch (V1/V2)", () => {
 
     const res = await flowCards.fetchFlowCards({ flowId: 192, flowViewId: 5 });
     expect(res.engine).toBe("v2");
-    expect(cards.listCardsByFlow).not.toHaveBeenCalled();
+    expect(cards.listAllCardsByFlow).not.toHaveBeenCalled();
   });
 
   it("fallback: V2 falha (sem params exclusivos) → cai para V1 marcando fellBackToV1", async () => {

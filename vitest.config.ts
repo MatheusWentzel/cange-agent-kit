@@ -5,6 +5,8 @@ export default defineConfig({
     include: ["test/**/*.test.ts"],
     environment: "node",
     clearMocks: true,
-    restoreMocks: true
+    restoreMocks: true,
+    // Bloqueia rede real: teste que escapa do mock de fetch falha (nunca bate em produção).
+    setupFiles: ["test/setup/no-real-network.ts"]
   }
 });

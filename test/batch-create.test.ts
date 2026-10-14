@@ -215,6 +215,26 @@ describe("card create em lote (CLI)", () => {
     );
   }
 
+  /**
+   * K-01: o --payload é convertido sempre, então o lote lê os campos do fluxo (1 GET por fluxo,
+   * em cache) antes de criar. O GET devolve o campo do payload; o handler responde só às escritas.
+   */
+  function routeFields(handler: () => Promise<Response>) {
+    return async (_input: unknown, init?: RequestInit): Promise<Response> => {
+      if ((init?.method ?? "GET").toUpperCase() === "GET") {
+        return new Response(
+          JSON.stringify([{ id_field: 1, name: "item_name", title: "Item", type: "TEXT_SHORT_FIELD", form_id: 662 }]),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return handler();
+    };
+  }
+
+  function writeCalls(fetchMock: { mock: { calls: unknown[][] } }): number {
+    return fetchMock.mock.calls.filter(([, init]) => ((init as RequestInit | undefined)?.method ?? "GET").toUpperCase() !== "GET").length;
+  }
+
   function rateLimitResponse(): Response {
     return new Response(JSON.stringify({ message: "Too many requests" }), {
       status: 429,
@@ -228,10 +248,12 @@ describe("card create em lote (CLI)", () => {
     }
 
     let call = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      call += 1;
-      return call <= 2 ? cardResponse(1281630 + call) : rateLimitResponse();
-    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      routeFields(async () => {
+        call += 1;
+        return call <= 2 ? cardResponse(1281630 + call) : rateLimitResponse();
+      })
+    );
 
     const program = createProgram();
     await program.parseAsync([
@@ -272,15 +294,17 @@ describe("card create em lote (CLI)", () => {
     await writePayload("item-02.json");
 
     let call = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      call += 1;
-      if (call === 1) {
-        // Timeout/queda de rede: o cliente embrulha em CangeApiError SEM status.
-        // Repetir aqui podia criar o card duas vezes.
-        throw new TypeError("fetch failed");
-      }
-      return cardResponse(1281650 + call);
-    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      routeFields(async () => {
+        call += 1;
+        if (call === 1) {
+          // Timeout/queda de rede: o cliente embrulha em CangeApiError SEM status.
+          // Repetir aqui podia criar o card duas vezes.
+          throw new TypeError("fetch failed");
+        }
+        return cardResponse(1281650 + call);
+      })
+    );
 
     const program = createProgram();
     await program.parseAsync([
@@ -341,10 +365,12 @@ describe("card create em lote (CLI)", () => {
     await writePayload("item-02.json");
 
     let call = 0;
-    vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-      call += 1;
-      return cardResponse(1281640 + call);
-    });
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      routeFields(async () => {
+        call += 1;
+        return cardResponse(1281640 + call);
+      })
+    );
 
     const program = createProgram();
     await program.parseAsync([
@@ -370,7 +396,7 @@ describe("card create em lote (CLI)", () => {
     await writePayload("item-01.json");
     await writePayload("item-02.json", { values: undefined });
 
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(cardResponse(1));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(routeFields(async () => cardResponse(1)));
 
     const program = createProgram();
     await program.parseAsync([
@@ -384,7 +410,7 @@ describe("card create em lote (CLI)", () => {
       dir
     ]);
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(writeCalls(fetchMock)).toBe(0);
     expect(stdout.join("")).toBe("");
     const error = JSON.parse(stderr.join(""));
     expect(error.message).toContain("NADA foi criado");
@@ -416,7 +442,7 @@ describe("card create em lote (CLI)", () => {
   it("--dry-run em lote mostra o plano sem mutar", async () => {
     await writePayload("item-01.json");
     await writePayload("item-02.json");
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(cardResponse(1));
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(routeFields(async () => cardResponse(1)));
 
     const program = createProgram();
     await program.parseAsync([
@@ -432,7 +458,7 @@ describe("card create em lote (CLI)", () => {
     ]);
 
     const result = JSON.parse(stdout.join(""));
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(writeCalls(fetchMock)).toBe(0);
     expect(result).toMatchObject({ dryRun: true, executed: false });
     expect(result.payload).toMatchObject({ batch: true, requested: 2, rps: 8, maxRetries: 3 });
   });

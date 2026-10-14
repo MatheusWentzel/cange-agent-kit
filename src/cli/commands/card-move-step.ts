@@ -3,13 +3,18 @@ import type { Command } from "commander";
 import { CangeValidationError } from "../../client/errors.js";
 import { moveCardStepPayloadSchema } from "../../schemas/cards.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
+import { truncatedValueIssues } from "../../utils/valueResolver.js";
 import { annotateCommand } from "../command-metadata.js";
-import { createCommandAction } from "../context.js";
+import { createCommandAction, withExitCode } from "../context.js";
+import { EXIT_CODES } from "../exit-codes.js";
 import { assertValidationResult, readPayloadFile } from "../helpers.js";
+import { checkPayloadMove } from "../move-required.js";
+import { authOnce, throwIfInvalid, validationSummary } from "../write-support.js";
 
 interface CardMoveStepOptions {
   payload: string;
   validateFields?: boolean;
+  allowDataLoss?: boolean;
   dryRun?: boolean;
 }
 
@@ -18,10 +23,14 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
     .command("move-step")
     .description("MUTAÇÃO (DEPRECATED): use `card move-step-with-values`")
     .requiredOption("--payload <path>", "Caminho do JSON de payload")
-    .option("--validate-fields", "Valida values contra fields do flow antes de mutar")
+    .option("--validate-fields", "Valida values contra fields do idForm (os obrigatórios da etapa atual são sempre exigidos)")
+    .option(
+      "--allow-data-loss",
+      "Perda de dados intencional NA ETAPA ATUAL: não reenvia o que o cartão já tem nela e aceita perder o rascunho dela (o rascunho do formulário gravado segue reenviado)"
+    )
     .option("--dry-run", "Exibe payload sem executar a mutação")
     .action(
-      createCommandAction(async ({ kit }, options: CardMoveStepOptions) => {
+      createCommandAction(async ({ kit, ensureAuth }, options: CardMoveStepOptions) => {
         // Item 6: aviso de deprecação em stderr (não polui stdout/JSON).
         process.stderr.write(
           "⚠️  `card move-step` está DEPRECATED — use `card move-step-with-values`. " +
@@ -35,6 +44,26 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
           });
         }
         const payload = parsed.data;
+        // K-04/N-4: o alias também recusa o texto cortado da leitura enxuta (antes de ler qualquer coisa).
+        throwIfInvalid(truncatedValueIssues(payload.values));
+        // O wrapper pula o login em --dry-run, mas este comando sempre lê (fluxo e cartão).
+        await authOnce(kit, ensureAuth)();
+
+        // Decisão 1 (06/10): o alias também exige os obrigatórios da etapa ATUAL do cartão,
+        // sempre (lê fluxo e cartão, inclusive em --dry-run).
+        // F3 (revisão 07/10): o bloqueio do rascunho manda repetir com --allow-data-loss; o
+        // alias aceita a flag, com o mesmo efeito do move-step-with-values.
+        const check = await checkPayloadMove(kit, payload, payload.values, undefined, {
+          resend: options.allowDataLoss !== true,
+          allowDataLoss: options.allowDataLoss === true
+        });
+        // EXTRA-06 D1: gravando a etapa atual, reenvia o que o cartão tem nela (o rascunho da tela).
+        // A2-F2: outro formulário, idem com o que a tela mostra nele (o back apaga o rascunho dele).
+        payload.values = check.values;
+        // idForm omitido: o form do destino (o mesmo do contrato), visível no dry-run e no --validate-fields.
+        if (payload.idForm === undefined && check.writtenFormId !== "" && check.writtenFormId !== check.ctx.formInitId) {
+          payload.idForm = Number(check.writtenFormId);
+        }
 
         if (options.validateFields) {
           const fieldsData = await kit.contracts.getFieldsByFlow({ flowId: payload.flowId });
@@ -63,18 +92,24 @@ export function registerCardMoveStepCommand(cardCommand: Command): void {
           assertValidationResult(validation.valid, validation);
         }
 
+        const validation = validationSummary(check.issues);
+
         if (options.dryRun) {
           const result = createDryRunResult(payload);
-          return {
+          const output = {
             ...result,
+            validation,
+            ...(check.warning ? { warning: check.warning } : {}),
             note: `${result.note} Comando deprecated: use card move-step-with-values.`
           };
+          return validation.valid ? output : withExitCode(output, EXIT_CODES.USAGE);
         }
+        throwIfInvalid(check.issues);
 
         const result = await kit.contracts.moveCardStepWithValues(payload);
         return {
           ...result,
-          warning: "Comando deprecated: use card move-step-with-values."
+          warning: [check.warning, "Comando deprecated: use card move-step-with-values."].filter(Boolean).join(" ")
         };
       })
     );

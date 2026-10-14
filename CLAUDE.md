@@ -13,8 +13,8 @@ Use este repositório como camada segura para operar o Cange via CLI.
 - Usar somente `pnpm cli ...` para operações do Cange.
 - **Antes de adivinhar comando/flag, rodar `pnpm cli manifest --output json`** (fonte de verdade gerada do registry) ou `pnpm cli <comando> --help`.
 - `--output json` para decisões automatizadas. **O JSON já sai limpo em pipe sem `--silent`** (banner do pnpm silenciado via `.npmrc`); sem `--output`, o modo é json em pipe e pretty em terminal.
-- **stdout = só o dado; stderr = logs/avisos/erros.** Exit codes: 0 ok, 2 uso/validação, 3 auth, 4 rede/API, 1 inesperado.
-- `--payload` sempre deve apontar para arquivo JSON (não usar JSON inline).
+- **stdout = só o dado; stderr = logs/avisos/erros.** Exit codes: 0 ok, 2 uso/validação, 3 auth, 4 rede/API, 5 lote parcial, 6 ferramenta de API falhou (`tool call` com `success:false`), 1 inesperado.
+- `--payload` (avançado) sempre aponta para arquivo JSON; valores inline vão em `--set "Campo=valor"` / `--values-json`.
 - Em payloads de mutação fora de `values`, usar chaves camelCase (`flowId`, `cardId`, `registerId` etc).
 - Sempre fazer discovery antes de mutações.
 - **Criar 2+ cards = LOTE em 1 comando**: `pnpm cli card create --payload-dir <dir>` (ou `--payloads a.json,b.json`). Nunca um loop de shell chamando `card create` N vezes — a rajada estoura o rate limit (20 req/s de escrita), a chave é bloqueada por 5 min e os creates seguintes falham. Ler 2+ cards: `card read --card-ids`.
@@ -29,7 +29,20 @@ Use este repositório como camada segura para operar o Cange via CLI.
   2. `--validate-fields` (quando disponível)
   3. `--dry-run`
   4. execução real
-- Para mover etapa de card, usar `card move-step-with-values` com `values` (usar `{}` quando não houver campos obrigatórios). O `idForm` é o form de uma **ETAPA** (`flow_step.form_id`) — o do **DESTINO** (`toStepId`) pela semântica do app; **pode ser omitido** (o contrato auto-resolve o form do destino). ⚠️ **NUNCA** passar o form de criação (`form_init`) num move: o contrato rejeita (guard), pois isso criaria um `form_answer` duplicado sob o `form_init` que vence o FlowQuery V2 (winning = max `id_form_answer`) e zera os campos do card no V2/Kanban.
+- Escrita em 1 passo é o padrão (ver `AGENTS.md`, "Escrita em 1 passo"): `card create --flow-id N --set ...`, `card update-values --card-id N --set ...`, `card move --card-id N --to <etapa> --set ...`, `comment create --card-id N --text ... --mention ...`. No mover, a origem é a etapa atual e o kit manda cada campo para o formulário certo (etapa atual vai no próprio mover, como a tela). Com `--payload` (avançado), o `idForm` do mover é o form da etapa ATUAL; ⚠️ **NUNCA** o form de criação (`form_init`): o contrato rejeita (guard), pois isso criaria um `form_answer` duplicado sob o `form_init` que vence o FlowQuery V2 e zera os campos do card no V2/Kanban. Nunca mover para a própria etapa para gravar campo: use `card update-values`.
+- **Mover exige os obrigatórios da etapa atual; peça os valores ao usuário se não estiverem no pedido.** O kit cobra
+  sempre, em todo caminho de mover (com ou sem `--validate-fields`/`--dry-run`); faltou = exit 2, nada gravado, com o
+  comando `card move ... --set` pronto. Igual à tela: não cobra ao voltar etapa em fluxo com "pular obrigatórios ao
+  voltar" nem campo oculto no formulário; obrigatório com condicional vazio não bloqueia e volta em `warning`.
+  Obrigatório = regra `required` do campo (como a tela; switch nunca), rich text `<p></p>` é vazio e check list
+  "exigir todos concluídos" com item sem marcar bloqueia (oculto e com condicional também). O que o cartão tem na etapa vem do rascunho da etapa
+  (`GET /form/pre-answer`, a fonte da tela) e o mover reenvia (o back apaga o rascunho do formulário que grava, o do
+  destino também); campo vazio com autocompletar recebe o valor que a tela poria (`autocompleted`, pelo mesmo
+  `POST /form/answers/by-cards` da tela); origem do autocompletar vazia no cartão = obrigatório cobrado, como na tela.
+  Valor gravado que a tela não mostra (usuário bloqueado, leitor ou fora do fluxo; cartão conectado excluído; opção
+  apagada ou "none"; anexo que não existe) conta como vazio: obrigatório bloqueia com o motivo, o resto sai do mover
+  e vai em `warning`. Documento e telefone com formato que a tela recusa (CPF/CNPJ pelo dígito e pela variation,
+  telefone com 10 ou 11 dígitos) bloqueiam o mover e o `--set`, obrigatório ou não.
 - Para marcar notificação como lida/arquivada, usar `notification read`.
 - Para construir fluxos (fluxo, etapas, campos, relacionamentos), usar `cange flow-build ...` (Flow V2 Build API):
   - bodies são **strict** — não enviar chaves extras.

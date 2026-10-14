@@ -49,3 +49,23 @@ export function envFlowId(): string | undefined {
 export function envChatSessionId(): string | undefined {
   return positiveIntFromEnv(["RUNNER_CHAT_SESSION_ID"], { processOnly: true });
 }
+
+/**
+ * C1 (v9, decisão (i) de 08/10): quem conversa com o agente (RUNNER_SPEAKER_USER_ID). O
+ * runner injeta só em conversa de chat com a pessoa conhecida e tira do ambiente em todo
+ * outro caso. Só o ambiente do PROCESSO conta, como o RUNNER_CARD_ID (um `.env` no
+ * diretório do agente não define quem conversa). Consumidores: `eu` no `card update
+ * --responsible`, no `comment create --mention` e em campo de usuário do `--set`.
+ * Não é fronteira de segurança: o agente já pode passar qualquer id; é atalho.
+ */
+export function envSpeakerUserId(): number | undefined {
+  const raw = positiveIntFromEnv(["RUNNER_SPEAKER_USER_ID"], { processOnly: true });
+  return raw === undefined ? undefined : Number(raw);
+}
+
+export { SPEAKER_OUTSIDE_CHAT_MESSAGE } from "../utils/valueResolver.js";
+
+/** `eu` (sem acento e caixa) = a pessoa que conversa com o agente. */
+export function isSpeakerRef(ref: string): boolean {
+  return ref.trim().replace(/^@/, "").toLowerCase() === "eu";
+}

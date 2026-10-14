@@ -35,9 +35,9 @@ export const JOURNEYS: Journey[] = [
     title: "Entender o ambiente (mapa de flows, etapas, campos e vínculos)",
     when: "início de QUALQUER tarefa em que você ainda não conhece a estrutura (qual flow, quais etapas, onde cada campo vive, como os flows se relacionam)",
     steps: [
-      "cange map — devolve em UMA chamada: flows acessíveis, etapas (id/nome/form), campos (id/hash/título/tipo/obrigatório/form) e os RELACIONAMENTOS entre flows (COMBO_BOX_FLOW_FIELD) + cadastros usados.",
-      "cange map --flow-id <f> — versão enxuta de um flow só.",
-      "Com o mapa em mãos: campo com formId == formInitId é do form de CRIAÇÃO; campo com formId de uma etapa (steps[].formId) é campo de ETAPA."
+      "cange map: devolve em UMA chamada, resumido, os flows acessíveis, os campos do formulário de criação (startFields) e cada etapa (id, nome) com os campos dela (título, tipo, obrigatório, opções quando até 8, vínculo).",
+      "cange map --flow-id <f>: um flow só. Rode UMA vez por run e reaproveite (não repita o mapa).",
+      "Com o mapa em mãos: campo em startFields é do form de CRIAÇÃO; campo em steps[].fields é campo daquela ETAPA (--full traz o formId de cada um)."
     ],
     pitfall:
       "NÃO reconstrua o ambiente na unha (my-flows + flow get + fields by-flow flow a flow + tentativa-e-erro): isso queima dezenas de turnos. `cange map` substitui essa exploração inteira."
@@ -60,7 +60,8 @@ export const JOURNEYS: Journey[] = [
     title: "Ler um card e seus campos",
     when: "precisa dos valores atuais de um card",
     steps: [
-      "cange card read --flow-id <f> --card-id <c> — leitura ENXUTA: etapa atual + fieldValues legíveis (chave = field id, valor textual). Use este por PADRÃO.",
+      "cange card read --card-id <c> --fields \"<título>,<título>\": SÓ os campos que você precisa, inteiros. Prefira assim.",
+      "cange card read --flow-id <f> --card-id <c>: o cartão inteiro, enxuto (fields [{id, title, value}]; valor acima de 600 caracteres sai cortado com a dica do --fields). Já leu? Não leia de novo: use o que tem.",
       "Vários cards do MESMO flow: cange card read --flow-id <f> --card-ids <a,b,c> (até 30) — 1 comando lê o lote inteiro; NUNCA um comando por card.",
       "cange card get --flow-id <f> --card-id <c> — só quando precisar do `raw` completo (pesado: pode passar de 700 KB)."
     ],
@@ -95,6 +96,19 @@ export const JOURNEYS: Journey[] = [
       "Confirme o id/tipo do field com `fields by-flow`/`step-form` ANTES de gravar."
   },
   {
+    id: "vencimento_responsavel_etiqueta",
+    title: "Mudar vencimento, responsável ou etiqueta de um cartão",
+    when: "o pedido é trocar a data de vencimento, quem é o responsável ou pôr/tirar uma etiqueta do cartão",
+    steps: [
+      "cange card update --card-id <c> --due 27/10/2026 (aceita dd/mm/aaaa com hora opcional, dd/mm, hoje, amanhã; `limpar` tira o vencimento).",
+      "cange card update --card-id <c> --responsible <nome|e-mail|id|eu> (`ninguém` tira). Vencimento e responsável podem ir no mesmo comando.",
+      "cange card update --card-id <c> --add-tag \"<etiqueta>\" (ou --remove-tag; uma etiqueta por comando, sempre separado do vencimento e do responsável).",
+      "cange card read --card-id <c> (para conferir: due, responsible e tags sempre vêm, null ou [] quando vazio)."
+    ],
+    pitfall:
+      "Não monte payload nem procure o fluxo: o comando acha o fluxo pelo cartão. O kit não cria etiqueta; se ela não existe, a mensagem lista as do fluxo."
+  },
+  {
     id: "comentar",
     title: "Entregar um resultado/comentário no card",
     when: "concluiu a análise e precisa registrar o resultado no card",
@@ -125,7 +139,7 @@ export const JOURNEYS: Journey[] = [
     title: "Gravar campo de ETAPA sem mover o card",
     when: "precisa escrever num campo que pertence ao form de uma etapa (não ao form de criação) sem mudar o card de etapa",
     steps: [
-      "Descubra o form da etapa dona do campo: `cange map --flow-id <f>` (steps[].formId × fields[].formId).",
+      "Descubra a etapa dona do campo: `cange map --flow-id <f>` (o campo aparece em steps[].fields da etapa).",
       "cange card update-values --payload <arq.json> com { flowId, cardId, idForm: <FORM DA ETAPA>, values: {\"<hash>\": <valor>} } — o endpoint aceita qualquer form do flow.",
       "NÃO use --validate-fields neste caso: a validação client-side compara com o form de criação e daria falso UNKNOWN_FIELD."
     ],
@@ -137,12 +151,12 @@ export const JOURNEYS: Journey[] = [
     title: "Mover um card de etapa",
     when: "avançar o card para outra etapa do fluxo",
     steps: [
-      "cange map --flow-id <f> (ou cange flow get --flow-id <f>) — descubra os ids das etapas de ORIGEM e DESTINO.",
-      "cange template step-move --flow-id <f> --from-step-id <origem> --to-step-id <destino> --card-id <c> — gera o payloadSkeleton PRONTO (com os campos obrigatórios do move e o cardId preenchido). Grave-o num arquivo .json e preencha os values.",
-      "cange card move-step-with-values --payload <arquivo.json> --dry-run — valide; depois rode sem --dry-run."
+      "cange card move --card-id <c> --to \"<etapa de destino>\" --set \"Campo=valor\" (1 passo: a origem é a etapa atual do cartão; o --set grava campos da etapa atual dentro do próprio mover).",
+      "Mover exige os obrigatórios da etapa atual (regra da plataforma, igual à tela). Se o pedido não traz os valores, pergunte ao usuário antes de mover; faltou, o kit não grava (exit 2) e devolve o comando pronto com os --set que faltam.",
+      "Avançado: cange template step-move --flow-id <f> --from-step-id <origem> --to-step-id <destino> --card-id <c> gera o payloadSkeleton para `card move-step-with-values --payload <arquivo.json>`."
     ],
     pitfall:
-      "O template exige --from-step-id E --to-step-id (não existe --step-id). O skeleton já sai com ids numéricos — use-o como base em vez de montar o payload do zero."
+      "Não invente valor de obrigatório para passar da validação. O obrigatório da etapa de DESTINO não é cobrado ao entrar (vale quando o cartão sair de lá). O template exige --from-step-id E --to-step-id (não existe --step-id)."
   },
   {
     id: "achar_estrutura",
@@ -155,21 +169,36 @@ export const JOURNEYS: Journey[] = [
     ]
   },
   {
+    id: "contar_somar",
+    title: "Contar ou somar cartões (quantos por etapa, total de um valor)",
+    when: "a tarefa pede contagem, total, soma ou distribuição de cartões de um fluxo",
+    steps: [
+      "cange cards count --flow-id <f> [--by etapa | --by campo:\"<título>\"] [--where \"<campo>=<valor>\"]: {total, groups}, só cartões ativos.",
+      "cange cards sum --flow-id <f> --field \"<título numérico>\" [--by etapa] [--where ...]: {total, cards, groups}."
+    ],
+    pitfall:
+      "NÃO liste os cartões para contar ou somar com python/jq: a lista pagina em 20 e o cálculo na mão erra e custa caro. `cards count`/`cards sum` já devolvem o número."
+  },
+  {
     id: "ler_cadastro",
     title: "Ler as entradas de um cadastro (register)",
     when: "listar registros (clientes, produtos, fornecedores…)",
     steps: [
       "cange my-registers — ache o cadastro e seu id.",
-      "cange register entries --register-id <r> — lê as entradas (roteia engine v1/v2 sozinho; use `--search` para filtrar)."
-    ]
+      "cange register entries --register-id <r> — lê as entradas (roteia engine v1/v2 sozinho; use `--search` para filtrar). `fieldTitles` lista todos os campos do cadastro: campo que não aparece na entrada está VAZIO.",
+      "cange register entries --register-id <r> --fields \"<título>,<título>\" (só esses campos, na ordem, null quando vazio).",
+      "cange register entries --entry-id <id> (uma entrada com todos os campos, null = vazio; o cadastro sai da entrada)."
+    ],
+    pitfall: "O valor solto não vira id: `register entries 183` é erro; use --register-id 183 (ou --entry-id para uma entrada)."
   }
 ];
 
 /** Regras de ouro — valem em quase toda interação de escrita/leitura. */
 export const GOLDEN_RULES: string[] = [
   "Comece pelo MAPA: `cange map` dá flows + etapas + campos + vínculos em 1 chamada — não reconstrua o ambiente na unha.",
-  "Ler card: `cange card read` (enxuto) por padrão; `card get` (com raw pesado) só quando precisar da estrutura crua.",
-  "Toda MUTAÇÃO (comment/update/move/add-child) usa `--payload <arquivo.json>` — caminho de ARQUIVO, NUNCA JSON inline. Leitura usa flags diretas.",
+  "Ler card: `cange card read --fields \"<títulos>\"` com só os campos que precisa (ou `card read` inteiro, enxuto); `card get` (com raw pesado) só quando precisar da estrutura crua. Não releia o mesmo cartão sem motivo.",
+  "Contar ou somar: `cange cards count` / `cange cards sum` (não python/jq sobre a lista). Listas vêm em páginas de 20 com `total` e `next`.",
+  "MUTAÇÃO com `--payload` recebe o CAMINHO de um arquivo .json, NUNCA JSON inline. Vencimento, responsável e etiqueta não precisam de arquivo: `card update --card-id <c> --due|--responsible|--add-tag`. Leitura usa flags diretas.",
   "Em `values`, a chave é o `id`/`name` do field (de `fields by-flow`/`step-form`), e o valor de um campo de opção é o CÓDIGO (`value`), não o texto.",
   "Ler texto de campo: use `valueString`; `value` costuma ser só o código da opção.",
   "Registro ativo vs deletado: olhe o campo `deleted` (\"N\"/\"S\"), não `dt_deleted`.",
@@ -186,7 +215,8 @@ export const GOTCHAS: string[] = [
   "Todo comando com exit != 0 vira 'ação que falhou' no log da execução. Antes de ler um arquivo que pode não existir, use `[ -f <path> ] && cat <path> || echo ausente` — não `cat` direto.",
   "Exit 5 é SUCESSO PARCIAL de lote (parte processada, parte não) — não é sucesso nem falha total: leia o resumo em stdout e reprocesse o que faltou antes de concluir a tarefa.",
   "Kit SEMPRE, MCP NUNCA: use o CLI `cange` (autentica como você). Nunca use um conector MCP do Cange — ele autentica como outro usuário e quebra fila/auditoria.",
-  "Se um comando falhar com `unknown command`/`required option`, PARE e consulte `cange manifest --output json` ou `cange guide` — não tente às cegas.",
+  "Erro de uso (exit 2) com `suggestion` (\"Você quis dizer: cange ...\"): rode o comando sugerido. Sem sugestão, a mensagem lista as opções do comando; só então consulte `cange <comando> --help` ou `cange manifest --output json`. Não tente às cegas.",
+  "Exit 6 = a ferramenta de API (`cange tool call`) falhou: o serviço externo recusou ou não respondeu. Conte como falha na resposta, com o nome e o motivo. Não busque o dado em outra fonte (site, outra API) por conta própria; só vale tentar outra ferramenta de API cadastrada com a mesma finalidade, uma vez.",
   "Antes de encerrar, ENTREGUE o resultado no card (`cange comment create` e/ou escrita de campos). Enquanto não entregar, a tarefa NÃO está concluída."
 ];
 

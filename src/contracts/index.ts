@@ -19,6 +19,7 @@ import { createRegisterQueryContracts } from "./registerQuery.js";
 import { createRegistersContracts } from "./registers.js";
 import { createResourceAccessContracts } from "./resourceAccess.js";
 import { createTimeTrackingContracts } from "./timeTracking.js";
+import { createUsersContracts } from "./users.js";
 
 export function createContracts(params: { client: CangeClient; config: CangeResolvedConfig }) {
   const discovery = createDiscoveryContracts(params);
@@ -34,6 +35,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const registers = createRegistersContracts(params.client);
   const registerQuery = createRegisterQueryContracts({ client: params.client, fields });
   const timeTracking = createTimeTrackingContracts(params.client);
+  const users = createUsersContracts(params.client);
   const flowV2Build = createFlowV2BuildContracts(params.client);
   const flowQuery = createFlowQueryContracts(params.client);
   const flowViews = createFlowViewsContracts(params.client);
@@ -52,6 +54,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getFlow: flows.getFlow,
     getRegister: registers.getRegister,
     getRegisterEntries: registerQuery.getRegisterEntries,
+    getRegisterEntry: registerQuery.getRegisterEntry,
+    locateRegisterEntry: registerQuery.locateRegisterEntry,
     getRegisterEngineStatus: registerQuery.getRegisterEngineStatus,
     getFieldsByFlow: fields.getFieldsByFlow,
     getFieldsByRegister: fields.getFieldsByRegister,
@@ -66,11 +70,18 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     buildRegisterCreationTemplate: payloadBuilder.buildRegisterCreationTemplate,
     validateValuesAgainstFields: payloadBuilder.validateValuesAgainstFields,
     getCard: cards.getCard,
+    locateCard: cards.locateCard,
     listCardsByFlow: cards.listCardsByFlow,
+    listAllCardsByFlow: cards.listAllCardsByFlow,
+    getPreAnswer: cards.getPreAnswer,
+    getCardMovements: cards.getCardMovements,
+    // R3-F4: POST, mas LEITURA (o autocompletar de vínculo da tela; liberado no dry-run forçado).
+    getAutoCompleteByRegister: cards.getAutoCompleteByRegister,
     fetchFlowCards: flowCards.fetchFlowCards,
     resolveQueryEngine: flowCards.resolveQueryEngine,
     queryFlowV2: flowQuery.queryFlowV2,
     queryFlowV2All: flowQuery.queryFlowV2All,
+    aggregateFlowV2: flowQuery.aggregateFlowV2,
     getQueryEngineStatus: flowQuery.getQueryEngineStatus,
     listFlowViews: flowViews.listFlowViews,
     getFlowView: flowViews.getFlowView,
@@ -86,7 +97,22 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getAgentHeadDoc: agentHead.getAgentHeadDoc,
     // Rodada 6: catálogo de NOMES de fluxos e cadastros (sem conteúdo).
     getAgentCatalog: resourceAccess.getAgentCatalog,
+    // Bancada F2-F6 (t06): o catálogo pelo número (lista do tipo filtrada pelo id).
+    findAgentCatalogById: resourceAccess.findAgentCatalogById,
     getRegisterFormAnswer: registers.getRegisterFormAnswer,
+    // P5 (05/10): usuários da empresa para campo de usuário e menção por nome/e-mail.
+    listCompanyUsers: users.listCompanyUsers,
+    // R4-P1: a lista do campo de usuário da tela (GET /user/by-flow?form_id).
+    listUsersByForm: users.listUsersByForm,
+    // v9 (g): o seletor de responsável do cartão (GET /user/by-flow?id_flow) e as etiquetas do fluxo.
+    listUsersByFlow: users.listUsersByFlow,
+    listFlowTags: cards.listFlowTags,
+    // POP-1 (revisão 4): os cartões conectados que o combo da tela carrega (POST, mas LEITURA).
+    getCardsByIds: cards.getCardsByIds,
+    // POP-2 (revisão 4): o autocompletar da tela ao abrir o cartão (POST, mas LEITURA).
+    getAutoCompleteByCards: cards.getAutoCompleteByCards,
+    // POP-1 (revisão 4): o anexo como o campo da tela o carrega (GET /attachment).
+    getAttachment: attachments.getAttachment,
     listCommentsByCard: comments.listCommentsByCard,
     flowBuildPing: flowV2Build.ping,
     listFlowBuildFieldTypes: flowV2Build.listFieldTypes,
@@ -102,6 +128,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     moveCardStep: cards.moveCardStep,
     moveCardStepWithValues: cards.moveCardStepWithValues,
     addCardLabel: cards.addCardLabel,
+    removeCardLabel: cards.removeCardLabel,
     addChildCard: cards.addChildCard,
     readNotification: notifications.readNotification,
     createCardComment: comments.createCardComment,

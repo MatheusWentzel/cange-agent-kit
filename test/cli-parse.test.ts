@@ -95,6 +95,14 @@ describe("cli parsing", () => {
       writes.push(String(chunk));
       return true;
     });
+    // K-01: o --payload é convertido sempre; o dry-run lê os campos do fluxo (só GET).
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify([{ id_field: 1, name: "customer_name", title: "Cliente", type: "TEXT_SHORT_FIELD", form_id: 662 }]),
+          { status: 200, headers: { "content-type": "application/json" } }
+        )
+    );
 
     try {
       const program = createProgram();
@@ -116,10 +124,56 @@ describe("cli parsing", () => {
     const output = writes.join("");
     expect(output).toContain("\"dryRun\":true");
     expect(output).toContain("\"executed\":false");
+    expect(fetchMock.mock.calls.every(([, init]) => ((init as RequestInit | undefined)?.method ?? "GET") === "GET")).toBe(true);
   });
 
   it("runs card move-step-with-values in dry-run without mutating", async () => {
     process.env.CANGE_ACCESS_TOKEN = "token";
+
+    // O dry-run do mover LÊ o fluxo e o cartão (tradução de campos e checagem de
+    // perda de dados). Sem mock, o teste batia em api.cange.me (produção) e
+    // estourava os 5 s quando a rede demorava. Rotas fixas; qualquer outra URL falha.
+    const MOCKED_ROUTES: Record<string, unknown> = {
+      // Decisão 1 (06/10): o mover confere os obrigatórios da etapa atual (lê o fluxo).
+      "GET /flow": {
+        id_flow: 192,
+        form_init_id: 600,
+        flow_steps: [
+          { id_step: 11, name: "Origem", form_id: 662, index: 1 },
+          { id_step: 12, name: "Destino", form_id: 663, index: 2, isEndStep: "1" }
+        ]
+      },
+      "GET /field/by-flow": [
+        { id_field: 501, name: "customer_name", title: "Cliente", type: "TEXT_SHORT_FIELD", form_id: 662, required: "0" }
+      ],
+      "GET /card": {
+        id_card: 7,
+        flow_id: 192,
+        flow_step_id: 11,
+        title: "Cartão de teste",
+        form_answers: []
+      },
+      // EXTRA-06 D1: o que o cartão tem na etapa atual vem da pré-resposta (a fonte da tela).
+      "GET /form/pre-answer": { fields: [], formsAnswers: null }
+    };
+    const calledUrls: string[] = [];
+    const unmocked: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const key = `${(init?.method ?? "GET").toUpperCase()} ${url.pathname.replace(/\/+$/, "")}`;
+      calledUrls.push(`${key}${url.search}`);
+      if (!(key in MOCKED_ROUTES)) {
+        unmocked.push(`${key}${url.search}`);
+        return new Response(JSON.stringify({ message: `rota não mockada: ${key}` }), {
+          status: 404,
+          headers: { "content-type": "application/json" }
+        });
+      }
+      return new Response(JSON.stringify(MOCKED_ROUTES[key]), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      });
+    });
 
     const payloadPath = join(tmpdir(), `cange-card-move-step-${Date.now()}.json`);
     await writeFile(
@@ -171,10 +225,29 @@ describe("cli parsing", () => {
     expect(output).toContain("\"dryRun\":true");
     expect(output).toContain("\"executed\":false");
     expect(output).toContain("\"flowId\":192");
+    // Nada fora do mock (nem produção) e nenhuma escrita.
+    expect(unmocked).toEqual([]);
+    expect(calledUrls.every((call) => call.startsWith("GET "))).toBe(true);
   });
 
   it("runs deprecated card move-step alias with idForm and values", async () => {
     process.env.CANGE_ACCESS_TOKEN = "token";
+    // O alias também confere os obrigatórios da etapa atual (decisão 1): lê fluxo, campos e cartão.
+    const routes: Record<string, unknown> = {
+      "/flow": { id_flow: 192, flow_steps: [{ id_step: 11, name: "Origem", form_id: 662, index: 1 }, { id_step: 12, name: "Destino", form_id: 663, index: 2 }] },
+      "/field/by-flow": [{ id_field: 501, name: "customer_name", title: "Cliente", type: "TEXT_SHORT_FIELD", form_id: 662 }],
+      "/card": { id_card: 7, flow_id: 192, flow_step_id: 11, form_answers: [] }
+    };
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const path = url.pathname.replace(/\/+$/, "");
+      const method = (init?.method ?? "GET").toUpperCase();
+      const body = method === "GET" ? routes[path] : undefined;
+      return new Response(JSON.stringify(body ?? { message: `rota não mockada: ${method} ${path}` }), {
+        status: body ? 200 : 404,
+        headers: { "content-type": "application/json" }
+      });
+    });
 
     const payloadPath = join(tmpdir(), `cange-card-move-step-alias-${Date.now()}.json`);
     await writeFile(

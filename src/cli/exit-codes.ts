@@ -2,6 +2,7 @@ import {
   CangeApiError,
   CangeAuthError,
   CangeCliUsageError,
+  CangeToolCallError,
   CangeValidationError
 } from "../client/errors.js";
 
@@ -27,12 +28,22 @@ export const EXIT_CODES = {
    * criados porque a rajada saiu com exit 0). Ao receber 5: leia o resumo em
    * stdout, use SÓ os ids retornados e reprocesse os payloads que faltaram.
    */
-  PARTIAL: 5
+  PARTIAL: 5,
+  /**
+   * v9 (conversa 859): a FERRAMENTA DE API do agente (`cange tool call`) falhou. O
+   * Cange disparou a chamada e o serviço externo recusou ou não respondeu
+   * (`success:false` no invoke). Não é erro do Cange (esse continua 4): conte como
+   * falha, com o nome e o motivo, e não troque por outra fonte por conta própria.
+   */
+  TOOL_FAILED: 6
 } as const;
 
 export type ExitCode = (typeof EXIT_CODES)[keyof typeof EXIT_CODES];
 
 export function exitCodeForError(error: unknown): ExitCode {
+  if (error instanceof CangeToolCallError) {
+    return EXIT_CODES.TOOL_FAILED;
+  }
   if (error instanceof CangeAuthError) {
     return EXIT_CODES.AUTH;
   }

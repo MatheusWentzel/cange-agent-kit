@@ -2,6 +2,8 @@ import type { CangeAgentKit } from "../index.js";
 import type { NormalizedField } from "../schemas/fields.js";
 import { asRecord } from "../contracts/raw-adapters.js";
 
+import type { CarryOverResult } from "./carryOver.js";
+
 /**
  * Detecção de perda de dados em move-step (read-before-write).
  *
@@ -32,12 +34,14 @@ interface DetectDataLossInput {
   payload: {
     flowId: number;
     cardId: number;
-    /** Opcional: quando omitido no move, o form da etapa de origem é resolvido no contrato. */
+    /** Opcional: quando omitido no move, o contrato grava o form da etapa de DESTINO (o comando já o resolve antes). */
     idForm?: number;
     values: Record<string, unknown>;
   };
   /** Fields do form alvo já carregados (reuso quando --validate-fields rodou antes). */
   targetFields?: NormalizedField[];
+  /** Cartão já lido (a conferência dos obrigatórios lê antes): evita o 2º GET /card. */
+  card?: { raw: unknown };
 }
 
 interface FilledValue {
@@ -49,13 +53,13 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
   const { kit, payload } = input;
   const idForm = payload.idForm;
 
-  // Sem idForm não há como escopar a checagem a um form. Nesse caso o form da etapa
-  // de origem é resolvido no contrato do move; aqui apenas pulamos (best-effort).
+  // Sem idForm não há como escopar a checagem a um form. O comando resolve o form do destino
+  // antes (o mesmo do contrato); só chega aqui sem ele quando a etapa de destino não tem form.
   if (idForm == null) {
     return {
       checked: false,
       orphans: [],
-      note: "idForm omitido — checagem de perda de dados pulada (form da etapa de origem resolvido no contrato)."
+      note: "idForm omitido e sem o form da etapa de destino: checagem de perda de dados pulada (o contrato resolve o form do destino)."
     };
   }
 
@@ -83,10 +87,12 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
       }
     }
 
-    const card = await kit.contracts.getCard({
-      flowId: payload.flowId,
-      cardId: payload.cardId
-    });
+    const card =
+      input.card ??
+      (await kit.contracts.getCard({
+        flowId: payload.flowId,
+        cardId: payload.cardId
+      }));
 
     const filled = extractFilledFields(card.raw, idForm, fieldById);
     const payloadNames = new Set(Object.keys(payload.values));
@@ -116,6 +122,39 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
       note: `Não foi possível verificar perda de dados (segue sem bloquear): ${message}`
     };
   }
+}
+
+/**
+ * EXTRA-06 D1: o mover grava a etapa atual e o kit já reenvia o que o cartão tem nela
+ * (fonte da tela: rascunho ou última passagem). Órfão é o preenchido que ficou fora do
+ * `values` (tipo que o kit não remonta, como fórmula, ID automático e anexo fora da pré-resposta).
+ * A2-F2: vale igual para outro formulário gravado pelo mover (o do destino), com a fonte da
+ * tela desse formulário: o back apaga o rascunho dele, e o detector pelo `GET /card` não o via.
+ */
+export function dataLossFromCarry(
+  carry: CarryOverResult,
+  values: Record<string, unknown>,
+  fields: NormalizedField[] | undefined,
+  formId: string | number
+): DataLossCheck {
+  const titles = new Map((fields ?? []).map((field) => [field.name, field.title]));
+  // POP-1/R4-P1: o valor que a tela não mostra o mover deixa de fora como ela (vai no aviso).
+  const dropped = new Set((carry.unresolved ?? []).filter((item) => item.emptied).map((item) => item.name));
+  const orphans: OrphanField[] = [];
+  for (const name of carry.filled) {
+    if (name in values || dropped.has(name)) continue;
+    const title = titles.get(name);
+    orphans.push({ fieldName: name, ...(title ? { fieldTitle: title } : {}), currentValue: carry.stored.get(name) ?? "" });
+  }
+  return {
+    checked: true,
+    orphans,
+    note:
+      orphans.length > 0
+        ? `O card tem ${orphans.length} campo(s) preenchido(s) no form ${formId} que o kit não consegue reenviar. ` +
+          "O move criará um snapshot SEM eles (perda de dados). Inclua-os no values ou confirme a perda com --allow-data-loss."
+        : "Nenhum campo preenchido seria perdido pelo move."
+  };
 }
 
 /**

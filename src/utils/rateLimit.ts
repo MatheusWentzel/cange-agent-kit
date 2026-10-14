@@ -1,4 +1,5 @@
 import { CangeApiError } from "../client/errors.js";
+import { readsHoldingWindow } from "../client/readWindow.js";
 
 /**
  * Throttle + retry para operações contra a API do Cange.
@@ -94,6 +95,85 @@ export function createThrottle(options: ThrottleOptions): Throttle {
       } finally {
         release();
       }
+    }
+  };
+}
+
+/** A leitura não começou porque o prazo de quem a pediu acabou (`createReadWindowPacer`). */
+export class ReadBudgetExceededError extends Error {
+  constructor() {
+    super("Prazo das leituras esgotado: a leitura não foi feita.");
+    this.name = "ReadBudgetExceededError";
+  }
+}
+
+export interface ReadWindowPacerOptions {
+  /** Máximo de GETs que podem cair na mesma janela de `windowMs`, contando os de fora do pacer. */
+  maxPerWindow: number;
+  /** Tamanho da janela (default 1000 ms, a do back). */
+  windowMs?: number;
+  /**
+   * Até quando cada GET ainda pode cair na janela de uma leitura que comece em `at` (em voo =
+   * `Infinity`), só os que ainda seguram. Default: os GETs sem credencial (`readsHoldingWindow`, o
+   * registro anônimo); quem lê com credencial passa os do cliente (`clientReadsHoldingWindow`, N-1).
+   */
+  holding?: (windowMs: number, at: number) => number[];
+  /** Instante (ms) a partir do qual nenhuma leitura nova começa: `run` rejeita com `ReadBudgetExceededError`. */
+  deadlineAt?: number;
+  /** Injetável em teste. */
+  sleep?: (ms: number) => Promise<void>;
+  /** Injetável em teste. */
+  now?: () => number;
+}
+
+/** Com a janela cheia de GETs em voo (outra leitura em paralelo), espera e olha de novo. */
+const IN_FLIGHT_POLL_MS = 20;
+
+/**
+ * REG-F1 (07/10/2026): leituras uma por vez, no ritmo que cabe no teto do back.
+ *
+ * O ritmo fixo (2 por segundo) não sabia das leituras feitas antes dele e, folgado demais, fazia o
+ * mover de um cartão com 43 anexos levar 22 s, mais que o prazo de 15 s da conferência do gate. Aqui
+ * cada leitura só começa quando menos de `maxPerWindow` GETs do processo ainda podem cair na mesma
+ * janela do back que ela: o que está em voo e o que terminou há menos de `windowMs` (o back conta a
+ * leitura quando ela chega, entre o início e o fim do GET; ver `readWindow`). Uma por vez. Assim, numa
+ * janela fixa do back, a última leitura do pacer que cai nela tem no máximo `maxPerWindow - 1` antes
+ * dela; depois dela, só um GET de fora do pacer (em paralelo) pode somar.
+ *
+ * Com `deadlineAt`, a leitura que não começaria a tempo nem espera: `run` rejeita com
+ * `ReadBudgetExceededError` e quem chamou decide o que fazer com o que não conferiu.
+ */
+export function createReadWindowPacer(options: ReadWindowPacerOptions): Throttle {
+  const maxPerWindow = Math.max(1, Math.trunc(options.maxPerWindow));
+  const windowMs = options.windowMs ?? 1000;
+  const holding = options.holding ?? readsHoldingWindow;
+  const sleep = options.sleep ?? defaultSleep;
+  const now = options.now ?? (() => Date.now());
+  const { deadlineAt } = options;
+  let chain: Promise<unknown> = Promise.resolve();
+
+  async function waitTurn(): Promise<void> {
+    for (;;) {
+      const at = now();
+      if (deadlineAt !== undefined && at >= deadlineAt) throw new ReadBudgetExceededError();
+      const until = holding(windowMs, at);
+      if (until.length < maxPerWindow) return;
+      // Quando o mais cedo dos `maxPerWindow` que mais seguram a janela a soltar, sobra vaga.
+      const releaseAt = until[until.length - maxPerWindow]!;
+      const wait = Number.isFinite(releaseAt) ? Math.max(1, releaseAt - at) : IN_FLIGHT_POLL_MS;
+      if (deadlineAt !== undefined && at + wait >= deadlineAt) throw new ReadBudgetExceededError();
+      await sleep(wait);
+    }
+  }
+
+  return {
+    run<T>(task: () => Promise<T>): Promise<T> {
+      const result = chain.then(async () => {
+        await waitTurn();
+        return task();
+      });
+      chain = result.catch(() => undefined);
+      return result;
     }
   };
 }

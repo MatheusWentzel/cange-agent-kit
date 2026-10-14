@@ -133,11 +133,13 @@ describe("card add-child: id numérico do campo vira hash antes de criar o filho
     expect(writes()).toEqual([]);
   });
 
-  it("hash já no payload: nenhuma consulta extra de fields", async () => {
+  it("hash já no payload: 1 leitura dos campos do filho para converter (N-3), nenhuma do pai", async () => {
     const file = await payloadFile("child.json", addChildPayload(HASH("k"), { [HASH("t")]: "Marco 1" }));
     await run(["card", "add-child", "--payload", file]);
 
-    expect(requests.filter((r) => r.path === "/field/by-flow")).toEqual([]);
+    // N-3 (2ª rodada do Alex): o payload só de hash também é convertido (K-01), ao custo de 1 GET.
+    expect(requests.filter((r) => r.path === "/field/by-flow")).toHaveLength(1);
+    expect((writes()[0]?.body as { values: unknown }).values).toEqual({ [HASH("t")]: "Marco 1" });
     expect((writes()[1]?.body as { values: unknown }).values).toEqual({ [HASH("k")]: [4001, 5005] });
   });
 

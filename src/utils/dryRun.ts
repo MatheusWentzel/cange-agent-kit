@@ -1,3 +1,5 @@
+import { FORCED_DRY_RUN_NOTE, isForceDryRun } from "./forceDryRun.js";
+
 export interface DryRunResult<TPayload> {
   dryRun: boolean;
   executed: boolean;
@@ -10,6 +12,6 @@ export function createDryRunResult<TPayload>(payload: TPayload): DryRunResult<TP
     dryRun: true,
     executed: false,
     payload,
-    note: "Mutação não executada porque --dry-run foi informado."
+    note: isForceDryRun() ? FORCED_DRY_RUN_NOTE : "Mutação não executada porque --dry-run foi informado."
   };
 }
