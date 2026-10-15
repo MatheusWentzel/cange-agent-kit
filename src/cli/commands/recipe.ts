@@ -21,8 +21,9 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
   anexo: {
     title: "Ler um anexo do cartão (proposta, documento, comprovante)",
     lines: [
-      "1) Veja os arquivos do cartão: `cange attachment list --card-id <id>`. Vêm os campos de anexo (com os tipos que",
-      "   cada um aceita) e os comentários com arquivo, cada arquivo com o seu `attachmentId`.",
+      "1) Veja os arquivos do cartão: `cange attachment list --card-id <id> --name \"<o que a pessoa disse>\"`. Procura nos",
+      "   campos de anexo E na colaboração (comentários); `files` diz de onde vem cada um. Um candidato: use direto. Veio",
+      "   `ask` (mais de um, ou nenhum com o nome dito): pergunte à pessoa com essa frase antes de baixar.",
       `2) Baixe pelo comando (rota autenticada): \`cange attachment download --card-id <id> --attachment-id <id> --out ${RUN_FOLDER}/anexos\``,
       "   (`--from comentarios`, `--from campos` ou `--from todos` baixa por origem). NUNCA baixe com curl na URL do blob: dá 404 ou 403.",
       "3) PDF ou DOCX: NUNCA use `Read` no arquivo binário (vira base64 e explode o contexto; 1,5 MB num run real).",

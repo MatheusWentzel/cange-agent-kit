@@ -4,6 +4,16 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ## 2026-10-15
 
+### "O arquivo do cartão": campo de anexo ou colaboração (onda 1b, item 6)
+
+- `attachment list` ganhou `files`: todos os arquivos do cartão numa lista só, cada um com `source` (`campo`,
+  `colaboracao` ou `aba_anexos`) e `where` em português (`campo "Contrato"`, `colaboração (comentário de Ana Souza em
+  01/10/2026 às 10:00)`). `fields`, `comments` e `cardTab` seguem iguais (aditivo).
+- `attachment list --name "<trecho>"`: procura o arquivo que a pessoa citou no nome e em onde ele está ("o contrato da
+  colaboração" separa o do comentário do do campo); sem acento, sem "arquivo", "do", "cartão". Volta `match` e, quando
+  não dá para saber qual é (mais de um candidato ou nenhum com o nome), `ask` com a pergunta pronta para a pessoa. Um
+  candidato só: sem `ask` e o `next` já baixa ele. Cartão sem arquivo: `hint`.
+
 ### Revisão do Alex na integração da onda 1 (arquivos do cartão)
 
 - **Mudança de saída do `attachment upload`:** antes devolvia o envelope cru do contrato (`{ raw }`, o id em
