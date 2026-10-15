@@ -13,6 +13,7 @@
  *    `PUT /form/answer` grava nele (`ensureStepFormAnswer`: a resposta mais recente);
  *  - `GET /field/by-flow` → título, formulário e tipos aceitos de cada campo de anexo;
  *  - `GET /card-comment/by-card` → comentários e os anexos de cada um;
+ *  - `GET /attachment/by-card` → os arquivos da aba Anexos (`card_attachment`);
  *  - `POST /attachment/batch` → nome, tipo e tamanho dos anexos dos campos (leitura).
  */
 import { CangeCliUsageError } from "../client/errors.js";
@@ -53,6 +54,8 @@ export interface CardAttachments {
   flowId: number;
   fields: CardFieldFiles[];
   comments: CardCommentFiles[];
+  /** M4: arquivos da aba Anexos do cartão (`attachment link-card`). */
+  cardTab: CardFile[];
   /** Campos de anexo do fluxo (para gravar: título, formulário, tipos aceitos). */
   attachFields: NormalizedField[];
   /** O cartão como o `GET /card/` devolveu (para o `link-field` ler a resposta do formulário). */
@@ -76,8 +79,14 @@ function records(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map(asRecord).filter((item): item is Record<string, unknown> => !!item) : [];
 }
 
-function isDeleted(record: Record<string, unknown>): boolean {
-  return typeof record.deleted === "string" && record.deleted.trim().toUpperCase() === "S";
+/**
+ * M4: o registro está excluído? Vivo = `deleted` NULL, "N" ou vazio (o back grava NULL nos
+ * registros antigos); só "S" é excluído. Uma regra só para o kit inteiro dos anexos.
+ */
+export function isDeleted(record: Record<string, unknown>): boolean {
+  const value = record.deleted;
+  if (value === null || value === undefined) return false;
+  return String(value).trim().toUpperCase() === "S";
 }
 
 function positiveInt(value: unknown): number | undefined {
@@ -242,10 +251,11 @@ export async function collectCardAttachments(
   kit: CangeAgentKit,
   input: { flowId: number; cardId: number; draftFormIds?: string[] }
 ): Promise<CardAttachments> {
-  const [card, fieldSet, comments] = await Promise.all([
+  const [card, fieldSet, comments, tab] = await Promise.all([
     kit.contracts.getCard({ flowId: input.flowId, cardId: input.cardId }),
     kit.contracts.getFieldsByFlow({ flowId: input.flowId }),
-    kit.contracts.listCommentsByCard({ flowId: input.flowId, cardId: input.cardId })
+    kit.contracts.listCommentsByCard({ flowId: input.flowId, cardId: input.cardId }),
+    kit.contracts.getCardTabAttachments({ flowId: input.flowId, cardId: input.cardId })
   ]);
 
   const attachFields = fieldSet.fields.filter(isAttachField);
@@ -314,11 +324,20 @@ export async function collectCardAttachments(
     });
   }
 
+  const cardTab: CardFile[] = [];
+  for (const item of tab.attachments) {
+    const file = fileOf(item);
+    if (!file || cardTab.some((other) => other.attachmentId === file.attachmentId)) continue;
+    cardTab.push(file);
+    if (positiveInt(item.user_id) !== undefined) uploaderById.set(file.attachmentId, Number(item.user_id));
+  }
+
   return {
     cardId: input.cardId,
     flowId: input.flowId,
     fields,
     comments: commentFiles,
+    cardTab,
     attachFields,
     cardRaw: card.raw,
     drafts,
@@ -326,7 +345,7 @@ export async function collectCardAttachments(
   };
 }
 
-/** Todos os anexos do cartão (campos e comentários), sem repetir, com a origem. */
+/** Todos os anexos do cartão (campos, comentários e aba Anexos), sem repetir, com a origem. */
 export function cardFilesIndex(attachments: CardAttachments): Map<number, { file: CardFile; where: string }> {
   const out = new Map<number, { file: CardFile; where: string }>();
   for (const field of attachments.fields) {
@@ -338,6 +357,10 @@ export function cardFilesIndex(attachments: CardAttachments): Map<number, { file
     for (const file of comment.files) {
       if (!out.has(file.attachmentId)) out.set(file.attachmentId, { file, where: `comentário ${comment.commentId}` });
     }
+  }
+  // M4: a aba Anexos do cartão também é do cartão (repassar, baixar por id, pôr num campo).
+  for (const file of attachments.cardTab) {
+    if (!out.has(file.attachmentId)) out.set(file.attachmentId, { file, where: "aba Anexos" });
   }
   return out;
 }

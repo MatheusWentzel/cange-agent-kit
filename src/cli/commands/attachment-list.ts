@@ -22,7 +22,7 @@ export function registerAttachmentListCommand(attachmentCommand: Command): void 
   const command = attachmentCommand
     .command("list")
     .description(
-      "LEITURA: lista os arquivos do cartão nos campos de anexo e nos comentários, com o attachmentId de cada um"
+      "LEITURA: lista os arquivos do cartão nos campos de anexo, nos comentários e na aba Anexos, com o attachmentId de cada um"
     )
     .option("--card-id <id>", "Cartão (número ou link; padrão: o cartão do run)")
     .option("--flow-id <id>", "Fluxo do cartão (opcional: vem do link, do número do cartão ou do run)")
@@ -38,13 +38,15 @@ export function registerAttachmentListCommand(attachmentCommand: Command): void 
         const found = await collectCardAttachments(kit, { flowId: Number(flowId), cardId: Number(cardId) });
         const total =
           found.fields.reduce((sum, field) => sum + field.files.length, 0) +
-          found.comments.reduce((sum, comment) => sum + comment.files.length, 0);
+          found.comments.reduce((sum, comment) => sum + comment.files.length, 0) +
+          found.cardTab.length;
         return {
           cardId: found.cardId,
           flowId: found.flowId,
           total,
           fields: found.fields,
           comments: found.comments,
+          ...(found.cardTab.length > 0 ? { cardTab: found.cardTab } : {}),
           next:
             total > 0
               ? `cange attachment download --card-id ${found.cardId} --attachment-id <id> --out <pasta>`
@@ -56,7 +58,7 @@ export function registerAttachmentListCommand(attachmentCommand: Command): void 
   annotateCommand(command, {
     envelope:
       "{ cardId, flowId, total, fields[{fieldId, title, allowedTypes?, files[{attachmentId, fileName, mimeType, sizeKb}]}], " +
-      "comments[{commentId, author, createdAt, files[...]}], next? }",
+      "comments[{commentId, author, createdAt, files[...]}], cardTab?[...] (aba Anexos), next? }",
     fieldsLocation:
       "Campo de anexo sem arquivo também aparece (o título e os tipos aceitos servem para o `attachment link-field`). " +
       "Comentário só aparece quando tem arquivo.",

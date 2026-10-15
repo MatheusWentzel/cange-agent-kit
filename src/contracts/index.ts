@@ -138,6 +138,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     readNotification: notifications.readNotification,
     createCardComment: comments.createCardComment,
     uploadAttachment: attachments.uploadAttachment,
+    getCardTabAttachments: attachments.getCardTabAttachments,
     linkAttachmentToCard: attachments.linkAttachmentToCard,
     publishArtifact: artifacts.publishArtifact,
     // Rodada 5: cria o PEDIDO de aprovação da mudança na própria cabeça (o dono aplica).

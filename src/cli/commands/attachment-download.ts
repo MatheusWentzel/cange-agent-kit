@@ -183,7 +183,7 @@ async function downloadSelected(
     const missing = ids.filter((id) => !index.has(id));
     if (missing.length > 0) {
       throw new CangeCliUsageError(
-        `O anexo ${missing.join(", ")} não está num campo nem num comentário do cartão ${cardId}. ` +
+        `O anexo ${missing.join(", ")} não está num campo, num comentário nem na aba Anexos do cartão ${cardId}. ` +
           `Veja os ids com \`cange attachment list --card-id ${cardId}\`.`
       );
     }
@@ -191,8 +191,9 @@ async function downloadSelected(
   } else {
     const fromFields = from === "campos" || from === "todos" ? found.fields.flatMap((field) => field.files) : [];
     const fromComments = from === "comentarios" || from === "todos" ? found.comments.flatMap((comment) => comment.files) : [];
+    const fromTab = from === "todos" ? found.cardTab : [];
     const seen = new Set<number>();
-    selected = [...fromFields, ...fromComments].filter((file) => !seen.has(file.attachmentId) && seen.add(file.attachmentId));
+    selected = [...fromFields, ...fromComments, ...fromTab].filter((file) => !seen.has(file.attachmentId) && seen.add(file.attachmentId));
   }
 
   if (outDir === undefined) {

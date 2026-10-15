@@ -11,6 +11,7 @@ import {
   cardRecordOf,
   collectCardAttachments,
   currentFieldAttachmentIds,
+  isDeleted,
   parseAttachmentIds,
   readFormDraft,
   resolveUsableAttachments,
@@ -227,8 +228,7 @@ function assertWritableForm(input: {
   const answered = Array.isArray(answers)
     ? answers.some((answer) => {
         const record = answer && typeof answer === "object" ? (answer as Record<string, unknown>) : {};
-        const deleted = typeof record.deleted === "string" && record.deleted.toUpperCase() === "S";
-        return !deleted && String(record.form_id ?? record.id_form ?? "") === input.formId;
+        return !isDeleted(record) && String(record.form_id ?? record.id_form ?? "") === input.formId;
       })
     : false;
   if (answered) return;

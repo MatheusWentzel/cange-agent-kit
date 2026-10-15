@@ -129,6 +129,8 @@ const stderr: string[] = [];
 const requests: Captured[] = [];
 let cardBody: Record<string, unknown> = CARD;
 let fieldsBody: Array<Record<string, unknown>> = FIELDS;
+/** Aba Anexos do cartão (`GET /attachment/by-card`). */
+let cardTabBody: Array<Record<string, unknown>> = [];
 /** `GET /form/pre-answer` por formulário (ausente = 404, a rota que não existe). */
 let preAnswers: Record<string, { status?: number; body: unknown }> = {};
 
@@ -165,6 +167,7 @@ beforeEach(() => {
   requests.length = 0;
   cardBody = CARD;
   fieldsBody = FIELDS;
+  cardTabBody = [];
   preAnswers = {};
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
     stdout.push(String(chunk));
@@ -184,6 +187,7 @@ beforeEach(() => {
     if (method === "GET" && path === "/card") return json(cardBody);
     if (method === "GET" && path === "/flow") return json(FLOW);
     if (method === "GET" && path === "/field/by-flow") return json(fieldsBody);
+    if (method === "GET" && path === "/attachment/by-card") return json(cardTabBody);
     if (method === "GET" && path === "/register") return json(REGISTER);
     if (method === "GET" && path === "/field/by-register") return json(REGISTER_FIELDS);
     if (method === "GET" && path === "/form/answer") {
@@ -348,7 +352,7 @@ describe("(a)(b) attachment download --attachment-id / --from", () => {
   it("anexo que não é do cartão: exit 2 e nada baixado", async () => {
     await run(["attachment", "download", ...CARD_ARGS, "--attachment-id", "8001", "--out", join(runDir, "anexos-3")]);
     expect(process.exitCode).toBe(2);
-    expect(errorMessage()).toContain("não está num campo nem num comentário do cartão 55");
+    expect(errorMessage()).toContain("não está num campo, num comentário nem na aba Anexos do cartão 55");
     expect(requests.some((request) => request.path === "/attachment/url-download")).toBe(false);
   });
 });
@@ -763,5 +767,63 @@ describe("M2/M3 (review do Alex): sob o runner, só a pasta do run", () => {
     const outDir = join(runDir, "run-anexos");
     const out = await run(["attachment", "download", ...CARD_ARGS, "--attachment-id", "6001", "--out", outDir]);
     expect(out?.files[0]).toMatchObject({ attachmentId: 6001, path: join(outDir, "6001-foto.png") });
+  });
+});
+
+describe("M4 (review do Alex): aba Anexos no índice do cartão e deleted só S", () => {
+  const TAB_FILE = { id_attachment: 8001, original_name: "segredo.pdf", mime_type: "application/pdf", blob_size: 5, user_id: 5 };
+
+  it("arquivo da aba Anexos entra no list, no download por id e no comentário", async () => {
+    cardTabBody = [TAB_FILE];
+    const list = await run(["attachment", "list", ...CARD_ARGS]);
+    expect(list?.cardTab).toEqual([{ attachmentId: 8001, fileName: "segredo.pdf", mimeType: "application/pdf", sizeKb: 5 }]);
+    expect(list?.total).toBe(3);
+    const tab = requests.find((request) => request.path === "/attachment/by-card");
+    expect(tab?.query.get("id_card")).toBe("55");
+    expect(tab?.query.get("flow_id")).toBe("316");
+    stdout.length = 0;
+    const byId = await run(["attachment", "download", ...CARD_ARGS, "--attachment-id", "8001"]);
+    expect(byId?.files.map((file: any) => file.attachmentId)).toEqual([8001]);
+    stdout.length = 0;
+    // O 8001 é de outra pessoa, mas está no cartão (aba Anexos): pode ir num comentário.
+    await run(["comment", "create", ...CARD_ARGS, "--text", "Reenviando", "--attachment-id", "8001"]);
+    expect(writes().find((request) => request.path === "/card-comment")?.body).toMatchObject({ attachment_ids: [8001] });
+  });
+
+  it("deleted NULL e vazio contam como vivos; só S fica de fora", async () => {
+    cardBody = {
+      ...CARD,
+      form_answers: [
+        {
+          id_form_answer: 1,
+          form_id: 900,
+          deleted: null,
+          dt_created: "2026-10-01T10:00:00.000Z",
+          form_answer_fields: [
+            { field_id: 701, value: "5001", deleted: null },
+            { field_id: 701, value: "5002", deleted: "" },
+            { field_id: 701, value: "6001", deleted: " s " }
+          ]
+        }
+      ]
+    };
+    const out = await run(["attachment", "list", ...CARD_ARGS]);
+    const contrato = out?.fields.find((field: any) => field.title === "Contrato");
+    expect(contrato.files.map((file: any) => file.attachmentId)).toEqual([5001, 5002]);
+  });
+
+  it("formulário só com resposta excluída (S com espaço) não conta como etapa por onde o cartão passou", async () => {
+    cardBody = {
+      ...CARD,
+      flow_step_id: 1,
+      form_answers: [
+        ...CARD.form_answers,
+        { id_form_answer: 9, form_id: 902, deleted: " S ", dt_created: "2026-10-02T10:00:00.000Z", form_answer_fields: [] }
+      ]
+    };
+    await run(["attachment", "link-field", ...CARD_ARGS, "--field", "Nota fiscal", "--attachment-id", "7001"]);
+    expect(process.exitCode).toBe(2);
+    expect(errorMessage()).toContain('é da etapa "Fiscal"');
+    expect(writes()).toEqual([]);
   });
 });

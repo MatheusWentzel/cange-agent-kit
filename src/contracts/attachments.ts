@@ -1,7 +1,7 @@
 import { basename } from "node:path";
 import { readFile } from "node:fs/promises";
 
-import { CangeValidationError } from "../client/errors.js";
+import { CangeApiError, CangeValidationError } from "../client/errors.js";
 import type { CangeClient } from "../client/http.js";
 import {
   downloadAttachmentsByCardParamsSchema,
@@ -42,6 +42,11 @@ export interface AttachmentsContracts {
    * `withBase64`, os bytes. 404 = não existe na empresa.
    */
   getAttachmentDownload: (input: { attachmentId: number; withBase64?: boolean }) => Promise<CardAttachmentFile>;
+  /**
+   * M4 (onda 1): os arquivos da aba Anexos do cartão (`card_attachment`, o que o
+   * `attachment link-card` põe), `GET /attachment/by-card`. 404 = rota ausente: lista vazia.
+   */
+  getCardTabAttachments: (input: { flowId: number | string; cardId: number | string }) => Promise<{ raw: unknown; attachments: AttachmentRecord[] }>;
   linkAttachmentToCard: (input: {
     attachmentId: number;
     flowId: number;
@@ -122,6 +127,26 @@ export function createAttachmentsContracts(client: CangeClient): AttachmentsCont
         mime_type: typeof record.mime_type === "string" ? record.mime_type : "",
         ...(typeof record.base64 === "string" ? { base64: record.base64 } : {})
       };
+    },
+
+    async getCardTabAttachments(input) {
+      const cardId = Number(String(input.cardId).trim());
+      const flowId = Number(String(input.flowId).trim());
+      if (!Number.isInteger(cardId) || cardId <= 0 || !Number.isInteger(flowId) || flowId <= 0) {
+        throw new CangeValidationError("Parâmetros inválidos para getCardTabAttachments.", { details: input });
+      }
+      let raw: unknown;
+      try {
+        raw = await client.get<unknown>("/attachment/by-card", { query: { id_card: cardId, flow_id: flowId } });
+      } catch (error) {
+        if (error instanceof CangeApiError && error.status === 404) return { raw: [], attachments: [] };
+        throw error;
+      }
+      const attachments = (Array.isArray(raw) ? raw : []).filter(
+        (item): item is AttachmentRecord =>
+          !!item && typeof item === "object" && Number.isInteger((item as AttachmentRecord).id_attachment)
+      );
+      return { raw, attachments };
     },
 
     async linkAttachmentToCard(input) {
