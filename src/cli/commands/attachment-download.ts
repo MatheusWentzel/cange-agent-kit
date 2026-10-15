@@ -6,6 +6,7 @@ import type { Command } from "commander";
 import { CangeCliUsageError, CangeValidationError } from "../../client/errors.js";
 import type { CangeAgentKit } from "../../index.js";
 import { cardFilesIndex, collectCardAttachments, parseAttachmentIds, type CardFile } from "../card-attachments.js";
+import { resolveRunOutDir } from "../../utils/runFile.js";
 import { createCommandAction } from "../context.js";
 import { envCardId, envFlowId } from "../env-defaults.js";
 import { FLOW_FROM_CARD_HINT } from "../resource-ref.js";
@@ -81,11 +82,13 @@ export function registerAttachmentDownloadCommand(attachmentCommand: Command): v
           throw new CangeCliUsageError(FLOW_FROM_CARD_HINT);
         }
         const wantsFiles = typeof options.out === "string" && options.out.trim().length > 0;
+        // M3: sob o runner, o --out só vale dentro da pasta do run (conferido antes de ler o cartão).
+        const outDir = wantsFiles ? await resolveRunOutDir(options.out!) : undefined;
 
         // C2 (onda 1): escolha por id ou por origem (campos e comentários). Sem as duas
         // opções, o comportamento de antes (campos de anexo e aba Anexos, numa chamada).
         if ((options.attachmentId && options.attachmentId.length > 0) || options.from !== undefined) {
-          return downloadSelected(kit, options, wantsFiles);
+          return downloadSelected(kit, options, outDir);
         }
 
         const { files } = await kit.contracts.getCardAttachmentDownloads({
@@ -95,7 +98,7 @@ export function registerAttachmentDownloadCommand(attachmentCommand: Command): v
         });
 
         // Sem --out: só metadados (nunca o base64).
-        if (!wantsFiles) {
+        if (outDir === undefined) {
           return {
             cardId: Number(options.cardId),
             count: files.length,
@@ -107,7 +110,6 @@ export function registerAttachmentDownloadCommand(attachmentCommand: Command): v
           };
         }
 
-        const outDir = options.out!.trim();
         await mkdir(outDir, { recursive: true });
 
         const written = [];
@@ -158,7 +160,7 @@ export function registerAttachmentDownloadCommand(attachmentCommand: Command): v
 async function downloadSelected(
   kit: CangeAgentKit,
   options: AttachmentDownloadOptions,
-  wantsFiles: boolean
+  outDir: string | undefined
 ): Promise<unknown> {
   let from: "campos" | "comentarios" | "todos" | undefined;
   if (options.from !== undefined) {
@@ -193,11 +195,10 @@ async function downloadSelected(
     selected = [...fromFields, ...fromComments].filter((file) => !seen.has(file.attachmentId) && seen.add(file.attachmentId));
   }
 
-  if (!wantsFiles) {
+  if (outDir === undefined) {
     return { cardId, count: selected.length, files: selected };
   }
 
-  const outDir = options.out!.trim();
   await mkdir(outDir, { recursive: true });
   const written: Array<{ attachmentId: number; file_name: string; mime_type?: string; path: string; bytes: number }> = [];
   for (const file of selected) {

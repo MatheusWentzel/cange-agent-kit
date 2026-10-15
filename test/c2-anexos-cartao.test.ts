@@ -696,3 +696,72 @@ describe("I1 (review do Alex): campo de anexo na criação de cartão e no cadas
     expect(writes()).toEqual([]);
   });
 });
+
+describe("M2/M3 (review do Alex): sob o runner, só a pasta do run", () => {
+  it("upload sob o runner sem TMPDIR: exit 2, não cai no tmp do sistema", async () => {
+    process.env.RUNNER_CARD_ID = "55";
+    delete process.env.TMPDIR;
+    const file = join(runDir, "sem-tmpdir.pdf");
+    await writeFile(file, "%PDF");
+    await run(["attachment", "upload", "--file", file]);
+    expect(process.exitCode).toBe(2);
+    expect(errorMessage()).toContain("TMPDIR");
+    expect(writes()).toEqual([]);
+  });
+
+  it("upload sob o runner com TMPDIR = /tmp do sistema: exit 2", async () => {
+    process.env.RUNNER_AGENT_ID = "206";
+    process.env.TMPDIR = "/tmp";
+    await run(["attachment", "upload", "--file", "/tmp/qualquer.pdf"]);
+    expect(process.exitCode).toBe(2);
+    expect(errorMessage()).toContain("TMPDIR");
+    expect(writes()).toEqual([]);
+  });
+
+  it("upload sob o runner com o TMPDIR do run segue valendo", async () => {
+    process.env.RUNNER_CARD_ID = "55";
+    const file = join(runDir, "com-tmpdir.pdf");
+    await writeFile(file, "%PDF");
+    const out = await run(["attachment", "upload", "--file", file]);
+    expect(out).toMatchObject({ ok: true, attachmentId: 9100 });
+  });
+
+  it("download --out fora da pasta do run: exit 2, nada lido nem baixado", async () => {
+    process.env.RUNNER_CARD_ID = "55";
+    const outside = await mkdtemp(join(BASE_TMP, "cange-c2-out-"));
+    try {
+      await run(["attachment", "download", ...CARD_ARGS, "--attachment-id", "6001", "--out", outside]);
+      expect(process.exitCode).toBe(2);
+      expect(errorMessage()).toContain("pasta desta execução");
+      expect(requests).toEqual([]);
+      stdout.length = 0;
+      stderr.length = 0;
+      process.exitCode = undefined;
+      await run(["attachment", "download", ...CARD_ARGS, "--out", join(runDir, "..", "fora")]);
+      expect(process.exitCode).toBe(2);
+      expect(requests).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("download --out com link para fora da pasta do run: exit 2", async () => {
+    process.env.RUNNER_CARD_ID = "55";
+    const outside = await mkdtemp(join(BASE_TMP, "cange-c2-link-"));
+    try {
+      await symlink(outside, join(runDir, "atalho"));
+      await run(["attachment", "download", ...CARD_ARGS, "--attachment-id", "6001", "--out", join(runDir, "atalho", "anexos")]);
+      expect(process.exitCode).toBe(2);
+      expect(requests).toEqual([]);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("download --out dentro da pasta do run baixa", async () => {
+    process.env.RUNNER_CARD_ID = "55";
+    const outDir = join(runDir, "run-anexos");
+    const out = await run(["attachment", "download", ...CARD_ARGS, "--attachment-id", "6001", "--out", outDir]);
+    expect(out?.files[0]).toMatchObject({ attachmentId: 6001, path: join(outDir, "6001-foto.png") });
+  });
+});

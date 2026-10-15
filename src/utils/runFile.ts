@@ -34,9 +34,38 @@ export interface RunFile {
   root: string;
 }
 
-/** Pasta de onde o agente pode subir arquivos. */
+/**
+ * M2 (review do Alex, onda 1): o kit está numa execução do runner? Alguma variável `RUNNER_*`
+ * do ambiente do PROCESSO (o runner injeta `RUNNER_CARD_ID`, `RUNNER_AGENT_ID` etc.); um `.env`
+ * no diretório não conta.
+ */
+export function underRunner(env: NodeJS.ProcessEnv = process.env): boolean {
+  return Object.entries(env).some(
+    ([key, value]) => key.startsWith("RUNNER_") && typeof value === "string" && value.trim() !== "" && !isFromDotenv(key)
+  );
+}
+
+/** Pastas temporárias do sistema: nunca são a pasta de uma execução. */
+const SYSTEM_TMP_DIRS = new Set(["/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp"]);
+
+/**
+ * Pasta de onde o agente pode subir arquivos (e, sob o runner, para onde baixa).
+ * M2: sob o runner, só o `TMPDIR` do processo vale, e ele tem de ser a pasta do run; sem
+ * ele (ausente, relativo, vindo de `.env` ou o tmp do sistema) o comando falha fechado em
+ * vez de cair no `/tmp` da máquina, que é dividido com outros runs.
+ */
 export function runFolder(env: NodeJS.ProcessEnv = process.env): string {
   const tmp = env.TMPDIR?.trim();
+  const own = tmp && path.isAbsolute(tmp) && !isFromDotenv("TMPDIR") ? path.resolve(tmp) : undefined;
+  if (underRunner(env)) {
+    if (!own || SYSTEM_TMP_DIRS.has(own)) {
+      throw new CangeCliUsageError(
+        "Nada foi feito: nesta execução a pasta de arquivos (TMPDIR) não veio do runner, e o kit não usa o tmp do sistema. " +
+          "Avise quem mantém o agente."
+      );
+    }
+    return own;
+  }
   if (tmp && path.isAbsolute(tmp)) return path.resolve(isFromDotenv("TMPDIR") ? "/tmp" : tmp);
   return path.resolve(os.tmpdir());
 }
@@ -106,4 +135,42 @@ export async function resolveRunFile(rawPath: string, options: { root?: string; 
   }
 
   return { realPath, fileName: path.basename(lexical), bytes: stat.size, root };
+}
+
+/**
+ * M3 (review do Alex, onda 1): pasta do `--out` de quem baixa arquivo. Sob o runner, só
+ * dentro da pasta do run (`runFolder`): sem `..`, sem link para fora (a parte que já existe
+ * do caminho é resolvida). Fora do runner, a pasta como veio. Lança `CangeCliUsageError`.
+ */
+export async function resolveRunOutDir(rawOut: string, options: { root?: string; env?: NodeJS.ProcessEnv } = {}): Promise<string> {
+  const given = String(rawOut ?? "").trim();
+  const env = options.env ?? process.env;
+  if (options.root === undefined && !underRunner(env)) return given;
+  const root = options.root ?? runFolder(env);
+  if (given.split(/[\\/]+/).includes("..")) {
+    throw new CangeCliUsageError(`Use o caminho completo da pasta, sem "..": ${given}.`);
+  }
+  const lexical = path.resolve(given);
+  const realRoot = await realpathOr(root);
+  const inside = (target: string, base: string): boolean => target === base || isInside(target, base);
+  const outside = (): CangeCliUsageError =>
+    new CangeCliUsageError(
+      `A pasta do --out precisa estar na pasta desta execução (${root}): use, por exemplo, --out ${path.join(root, "anexos")}.`
+    );
+  if (!inside(lexical, root) && !inside(lexical, realRoot)) throw outside();
+  // A parte do caminho que já existe não pode ser link para fora da pasta.
+  let existing = lexical;
+  for (;;) {
+    try {
+      const real = await fs.realpath(existing);
+      if (!inside(real, realRoot)) throw outside();
+      break;
+    } catch (error) {
+      if (error instanceof CangeCliUsageError) throw error;
+      const parent = path.dirname(existing);
+      if (parent === existing) break;
+      existing = parent;
+    }
+  }
+  return lexical;
 }
