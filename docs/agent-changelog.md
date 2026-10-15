@@ -2,6 +2,21 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-10-14
+
+### Arquivos do cartão: o agente lê e põe (C2 da onda 1)
+
+- `attachment list` (novo, leitura): arquivos dos campos de anexo e dos comentários, com `attachmentId` e os tipos
+  aceitos por campo.
+- `attachment download --attachment-id <id> | --from campos|comentarios|todos`: baixa só os do cartão.
+- `attachment upload`: arquivo só da pasta da execução (sem `..`, sem link para fora, até 25 MB), tipo pela
+  extensão, `--dry-run`. Devolve o `attachmentId` e os próximos comandos.
+- `comment create --attachment-id <id>`: comentário com arquivo (`attachment_ids`). No `--dry-run`, plano com
+  `action: "attachment"`.
+- `attachment link-field` (novo): põe o arquivo num campo de anexo somando aos que já estão; confere campo, etapa e
+  tipo aceito. Plano com `action: "attachment"`; `noop` quando já está.
+- `--set` em campo de anexo vira erro de uso com o comando certo.
+
 ## 2026-10-10
 
 ### Revisão do Alex, 2ª rodada (lote v9)

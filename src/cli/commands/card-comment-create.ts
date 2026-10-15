@@ -5,10 +5,12 @@ import type { CangeAgentKit } from "../../index.js";
 import { createCardCommentPayloadSchema } from "../../schemas/comments.js";
 import { createDryRunResult } from "../../utils/dryRun.js";
 import { describeUser, isAgentUser, pickByName, type CompanyUser } from "../../utils/valueResolver.js";
+import { parseAttachmentIds, resolveUsableAttachments, userIdFromToken, type CardFile } from "../card-attachments.js";
 import { annotateCommand } from "../command-metadata.js";
 import { createCommandAction } from "../context.js";
 import { SPEAKER_OUTSIDE_CHAT_MESSAGE, envFlowId, envSpeakerUserId, isSpeakerRef } from "../env-defaults.js";
 import { readPayloadFile } from "../helpers.js";
+import { FLOW_FROM_CARD_HINT } from "../resource-ref.js";
 import { authOnce } from "../write-support.js";
 
 interface CommentCreateOptions {
@@ -17,6 +19,7 @@ interface CommentCreateOptions {
   flowId?: string;
   text?: string;
   mention?: string[];
+  attachmentId?: string[];
   dryRun?: boolean;
 }
 
@@ -37,6 +40,11 @@ export function registerCardCommentCreateCommand(commentCommand: Command): void 
       'Menciona e notifica (repetível): id, e-mail ou nome do usuário ("eu" = quem conversa com o agente). Vira @[Nome](id) no texto e entra em `mentions`',
       collectRepeatable
     )
+    .option(
+      "--attachment-id <id>",
+      "Arquivo no comentário (repetível ou separado por vírgula, até 10): o attachmentId do `attachment upload` ou de um anexo do cartão",
+      collectRepeatable
+    )
     .option("--payload <path>", "AVANÇADO: arquivo JSON {cardId, flowId?, description, mentions?}")
     .option(
       "--flow-id <id>",
@@ -53,6 +61,10 @@ export function registerCardCommentCreateCommand(commentCommand: Command): void 
           );
         }
 
+        // C2: arquivo só pela flag (o runner decide a permissão de Anexos pela flag).
+        if ("attachmentIds" in fromFile || "attachment_ids" in fromFile) {
+          throw new CangeCliUsageError("Arquivo no comentário vai em --attachment-id <id>, não no --payload.");
+        }
         const merged: Record<string, unknown> = {
           ...fromFile,
           ...(options.cardId !== undefined ? { cardId: Number(options.cardId) } : {}),
@@ -92,8 +104,33 @@ export function registerCardCommentCreateCommand(commentCommand: Command): void 
           input.mentions = Array.from(new Set([...(input.mentions ?? []), ...mentioned.map((user) => user.id)]));
         }
 
+        // C2 (onda 1): comentário com arquivo. O back trata `POST /card-comment` com
+        // `attachment_ids` como a ação "Anexos" (permissão e aprovação de anexo), então a
+        // conferência aqui diz o arquivo e o plano sai com `action: attachment`.
+        let files: CardFile[] = [];
+        const ids = parseAttachmentIds(options.attachmentId);
+        if (!Array.isArray(ids)) {
+          throw new CangeCliUsageError(`--attachment-id espera o número do anexo (veio "${ids.invalid}").`);
+        }
+        const attachmentIds = ids;
+        if (attachmentIds.length > 10) {
+          throw new CangeCliUsageError("Um comentário leva até 10 arquivos.");
+        }
+        if (attachmentIds.length > 0) {
+          if (input.flowId === undefined) throw new CangeCliUsageError(FLOW_FROM_CARD_HINT);
+          await authOnce(kit, ensureAuth)();
+          const me = userIdFromToken(kit.client.getAccessToken());
+          ({ files } = await resolveUsableAttachments(kit, { flowId: input.flowId, cardId: input.cardId }, attachmentIds, me));
+          input.attachmentIds = attachmentIds;
+        }
+        const fileNames = files.map((file) => file.fileName);
+
         if (options.dryRun) {
-          return createDryRunResult(input);
+          if (attachmentIds.length === 0) return createDryRunResult(input);
+          return {
+            ...createDryRunResult({ ...input, fileNames }),
+            calls: [{ action: "attachment", payload: { ...input, fileNames } }]
+          };
         }
 
         const result = await kit.contracts.createCardComment(input);
@@ -107,17 +144,23 @@ export function registerCardCommentCreateCommand(commentCommand: Command): void 
           commentId: raw.id_card_comment ?? raw.id,
           cardId: input.cardId,
           ...(input.mentions && input.mentions.length > 0 ? { mentions: input.mentions } : {}),
+          ...(files.length > 0
+            ? { attachments: files.map((file) => ({ attachmentId: file.attachmentId, fileName: file.fileName })) }
+            : {}),
           summary:
-            `Comentário criado no cartão ${input.cardId}` + (names.length > 0 ? ` mencionando ${names.join(", ")}.` : ".")
+            `Comentário criado no cartão ${input.cardId}` +
+            (files.length > 0 ? ` com ${files.length === 1 ? `o arquivo "${fileNames[0]}"` : `${files.length} arquivos`}` : "") +
+            (names.length > 0 ? ` mencionando ${names.join(", ")}.` : ".")
         };
       })
     );
 
   annotateCommand(command, {
     mutates: true,
-    envelope: "{ ok, commentId, cardId, mentions?, summary } (modo --text). Com --payload: { raw }",
+    envelope: "{ ok, commentId, cardId, mentions?, attachments?, summary } (modo --text). Com --payload: { raw }",
     fieldsLocation:
-      "Menção: --mention <id|e-mail|nome> notifica a pessoa (mentions) E marca @[Nome](id) no texto. Se o texto já tem @Nome, ele vira a marcação.",
+      "Menção: --mention <id|e-mail|nome> notifica a pessoa (mentions) E marca @[Nome](id) no texto. Se o texto já tem @Nome, ele vira a marcação. " +
+      "Arquivo: --attachment-id <id> (suba antes com `attachment upload --file`); vale a permissão e a aprovação de Anexos.",
     example: 'comment create --card-id 1234 --text "Proposta enviada, @Ana confere?" --mention "Ana Souza"'
   });
 }

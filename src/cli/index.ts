@@ -24,6 +24,8 @@ import { registerAgentHeadCommands } from "./commands/agent-head.js";
 import { registerAccessCommands, registerCatalogCommand } from "./commands/access.js";
 import { registerAttachmentDownloadCommand } from "./commands/attachment-download.js";
 import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-card.js";
+import { registerAttachmentLinkFieldCommand } from "./commands/attachment-link-field.js";
+import { registerAttachmentListCommand } from "./commands/attachment-list.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
 import { registerToolCallCommand } from "./commands/tool-call.js";
 import { registerAuthCommand } from "./commands/auth.js";
@@ -158,6 +160,9 @@ export function createProgram(): Command {
   registerAttachmentUploadCommand(attachmentCommand);
   registerAttachmentLinkCardCommand(attachmentCommand);
   registerAttachmentDownloadCommand(attachmentCommand);
+  // C2 (onda 1): arquivos do cartão nos campos de anexo e nos comentários.
+  registerAttachmentListCommand(attachmentCommand);
+  registerAttachmentLinkFieldCommand(attachmentCommand);
 
   const artifactCommand = program
     .command("artifact")

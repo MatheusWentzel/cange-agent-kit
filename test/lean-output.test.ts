@@ -63,6 +63,8 @@ describe("recipe (receitas sob demanda)", () => {
   it("lista as receitas de escrita e a do anexo", () => {
     expect(recipeNames()).toEqual([
       "anexo",
+      // C2 (onda 1): pôr arquivo no cartão (comentário ou campo de anexo).
+      "enviar-anexo",
       "comentar",
       "mencionar",
       "criar-card",

@@ -113,6 +113,9 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     getAutoCompleteByCards: cards.getAutoCompleteByCards,
     // POP-1 (revisão 4): o anexo como o campo da tela o carrega (GET /attachment).
     getAttachment: attachments.getAttachment,
+    // C2 (onda 1): anexos por id (POST, mas LEITURA) e um anexo para baixar.
+    getAttachmentsByIds: attachments.getAttachmentsByIds,
+    getAttachmentDownload: attachments.getAttachmentDownload,
     listCommentsByCard: comments.listCommentsByCard,
     flowBuildPing: flowV2Build.ping,
     listFlowBuildFieldTypes: flowV2Build.listFieldTypes,
