@@ -109,6 +109,8 @@ const stdout: string[] = [];
 const stderr: string[] = [];
 const requests: Captured[] = [];
 let cardBody: Record<string, unknown> = CARD;
+/** `GET /form/pre-answer` por formulário (ausente = 404, a rota que não existe). */
+let preAnswers: Record<string, { status?: number; body: unknown }> = {};
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -142,6 +144,7 @@ beforeEach(() => {
   stderr.length = 0;
   requests.length = 0;
   cardBody = CARD;
+  preAnswers = {};
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
     stdout.push(String(chunk));
     return true;
@@ -161,6 +164,10 @@ beforeEach(() => {
     if (method === "GET" && path === "/flow") return json(FLOW);
     if (method === "GET" && path === "/field/by-flow") return json(FIELDS);
     if (method === "GET" && path === "/card-comment/by-card") return json(COMMENTS);
+    if (method === "GET" && path === "/form/pre-answer") {
+      const pre = preAnswers[String(url.searchParams.get("id_form"))];
+      if (pre) return json(pre.body, pre.status ?? 200);
+    }
     if (method === "POST" && path === "/attachment/batch") {
       const ids = ((body as { ids?: number[] })?.ids ?? []).map(Number);
       return json(ids.map((id) => ATTACHMENTS[id]).filter(Boolean));
@@ -471,6 +478,107 @@ describe("--set em campo de anexo é recusado (trocaria a lista inteira)", () =>
     await run(["card", "update-values", ...CARD_ARGS, "--set", "Contrato=7001"]);
     expect(process.exitCode).toBe(2);
     expect(errorMessage()).toContain("attachment link-field");
+    expect(writes()).toEqual([]);
+  });
+});
+
+describe("B1 (review do Alex): o rascunho da etapa atual entra na lista do campo", () => {
+  /** Cartão 55 na Triagem (form 901), com o rascunho da etapa: a pessoa anexou o 5001 pela tela. */
+  const CARD_ON_TRIAGEM = { ...CARD, flow_step: { id_step: 1, name: "Triagem", form_id: 901 } };
+  const DRAFT = {
+    fields: [],
+    formsAnswers: {
+      id_form_answer: 3,
+      form_id: 901,
+      card_id: 55,
+      flow_step_id: null,
+      deleted: "N",
+      dt_created: "2026-10-03T10:00:00.000Z",
+      form_answer_fields: [
+        { field_id: 702, value: "5001", deleted: "N", field: { id_field: 702, type: "INPUT_ATTACH_FIELD", name: "hashcomprovante" } }
+      ]
+    }
+  };
+
+  it("link-field do 7001 grava [5001, 7001]: o arquivo do rascunho não some", async () => {
+    cardBody = CARD_ON_TRIAGEM;
+    preAnswers = { "901": { body: DRAFT } };
+    const out = await run(["attachment", "link-field", ...CARD_ARGS, "--field", "Comprovante", "--attachment-id", "7001"]);
+    expect(out).toMatchObject({ ok: true, field: "Comprovante", added: [{ attachmentId: 7001 }] });
+    const put = writes().find((request) => request.path === "/form/answer");
+    expect(put?.body).toMatchObject({ id_form: 901, values: { hashcomprovante: [5001, 7001] } });
+  });
+
+  it("attachment list mostra o 5001 no campo da etapa atual", async () => {
+    cardBody = CARD_ON_TRIAGEM;
+    preAnswers = { "901": { body: DRAFT } };
+    const out = await run(["attachment", "list", ...CARD_ARGS]);
+    const comprovante = out?.fields.find((field: any) => field.title === "Comprovante");
+    expect(comprovante.files.map((file: any) => file.attachmentId)).toEqual([5001]);
+    const pre = requests.find((request) => request.path === "/form/pre-answer");
+    expect(pre?.query.get("card_id")).toBe("55");
+    expect(pre?.query.get("id_form")).toBe("901");
+  });
+
+  it("download --from campos e --attachment-id enxergam o arquivo do rascunho", async () => {
+    cardBody = CARD_ON_TRIAGEM;
+    preAnswers = { "901": { body: DRAFT } };
+    const byId = await run(["attachment", "download", ...CARD_ARGS, "--attachment-id", "5001"]);
+    expect(byId?.files.map((file: any) => file.attachmentId)).toEqual([5001]);
+    stdout.length = 0;
+    const fromFields = await run(["attachment", "download", ...CARD_ARGS, "--from", "campos"]);
+    expect(fromFields?.files.map((file: any) => file.attachmentId)).toEqual([5001]);
+  });
+
+  it("sem flow_step no cartão, acha o formulário da etapa pelo fluxo", async () => {
+    preAnswers = { "901": { body: DRAFT } };
+    await run(["attachment", "link-field", ...CARD_ARGS, "--field", "Comprovante", "--attachment-id", "7001"]);
+    const put = writes().find((request) => request.path === "/form/answer");
+    expect(put?.body).toMatchObject({ values: { hashcomprovante: [5001, 7001] } });
+  });
+
+  it("rascunho mais novo que a passagem confirmada: vale o rascunho (onde o back grava)", async () => {
+    cardBody = {
+      ...CARD_ON_TRIAGEM,
+      form_answers: [
+        ...CARD.form_answers,
+        {
+          id_form_answer: 4,
+          form_id: 901,
+          flow_step_id: 1,
+          deleted: "N",
+          dt_created: "2026-10-02T12:00:00.000Z",
+          form_answer_fields: [{ field_id: 702, value: "6001", deleted: "N" }]
+        }
+      ]
+    };
+    preAnswers = { "901": { body: DRAFT } };
+    await run(["attachment", "link-field", ...CARD_ARGS, "--field", "Comprovante", "--attachment-id", "7001"]);
+    const put = writes().find((request) => request.path === "/form/answer");
+    expect(put?.body).toMatchObject({ values: { hashcomprovante: [5001, 7001] } });
+  });
+
+  it("objeto montado da última passagem (sem id) não conta como rascunho", async () => {
+    cardBody = CARD_ON_TRIAGEM;
+    preAnswers = {
+      "901": {
+        body: {
+          fields: [],
+          formsAnswers: { form_id: 901, flow_step_id: null, deleted: "N", origin: "return-step-autocomplete", form_answer_fields: [{ field_id: 702, value: "5001" }] }
+        }
+      }
+    };
+    await run(["attachment", "link-field", ...CARD_ARGS, "--field", "Comprovante", "--attachment-id", "7001"]);
+    const put = writes().find((request) => request.path === "/form/answer");
+    expect(put?.body).toMatchObject({ values: { hashcomprovante: [7001] } });
+  });
+
+  it("falha ao ler o rascunho: exit diferente de 0 e nada gravado", async () => {
+    cardBody = CARD_ON_TRIAGEM;
+    preAnswers = { "901": { status: 403, body: { message: "sem acesso" } } };
+    await run(["attachment", "link-field", ...CARD_ARGS, "--field", "Comprovante", "--attachment-id", "7001"]);
+    expect(process.exitCode).not.toBe(0);
+    expect(process.exitCode).toBeDefined();
     expect(writes()).toEqual([]);
   });
 });

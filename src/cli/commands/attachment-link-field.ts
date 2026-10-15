@@ -12,6 +12,7 @@ import {
   collectCardAttachments,
   currentFieldAttachmentIds,
   parseAttachmentIds,
+  readFormDraft,
   resolveUsableAttachments,
   userIdFromToken
 } from "../card-attachments.js";
@@ -37,7 +38,8 @@ function collectRepeatable(value: string, previous: string[] | undefined): strin
  * C2 (onda 1): `cange attachment link-field --card-id <id> --field "<campo>" --attachment-id <id>`.
  * Põe o arquivo (já subido com `attachment upload`, ou que já está no cartão) num CAMPO de
  * anexo do cartão, SOMANDO aos arquivos que o campo já tem (o `PUT /form/answer` troca a
- * lista inteira: o kit manda a lista atual mais o novo).
+ * lista inteira: o kit manda a lista atual mais o novo). A lista atual é a da resposta em
+ * que o back grava: o rascunho da etapa (`GET /form/pre-answer`) ou a última passagem.
  *
  * É a ação "Anexos" do agente: o back trata o `PUT /form/answer` que grava campo de anexo
  * como `attachment` (permissão e aprovação de anexo, não de "Editar campos"). Por isso o
@@ -108,7 +110,11 @@ export function registerAttachmentLinkFieldCommand(attachmentCommand: Command): 
           );
         }
 
-        const current = currentFieldAttachmentIds(found.cardRaw, formId, String(field.id));
+        // B1: a lista atual vem da resposta em que o back grava (a mais recente do formulário,
+        // rascunho incluído). Lida só do `GET /card/`, o arquivo que a pessoa anexou pela tela
+        // na etapa atual (rascunho) sumia: o PUT troca a lista inteira.
+        const draft = found.drafts.has(formId) ? found.drafts.get(formId) : await readFormDraft(kit, cardId, formId);
+        const current = currentFieldAttachmentIds(found.cardRaw, formId, String(field.id), draft);
         const added = files.filter((file) => !current.includes(file.attachmentId));
         const values = { [field.name]: [...current, ...added.map((file) => file.attachmentId)] };
         const call = { idForm: Number(formId), flowId, cardId, values };

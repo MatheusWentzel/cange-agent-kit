@@ -7,6 +7,10 @@
  * Leituras (todas com a credencial de quem roda o kit, nenhuma grava):
  *  - `GET /card/` → valores dos campos de anexo em todas as respostas ativas do cartão
  *    (`deleted` = "S" fica de fora), como o `attachment download` sem filtro;
+ *  - `GET /form/pre-answer` do formulário da etapa atual → o RASCUNHO da etapa (a resposta
+ *    com `flow_step_id` NULL, onde fica o arquivo que a pessoa anexou pela tela antes de
+ *    mover). O `GET /card/` não traz o rascunho (`SelectOneFormAnswerService`), e o
+ *    `PUT /form/answer` grava nele (`ensureStepFormAnswer`: a resposta mais recente);
  *  - `GET /field/by-flow` → título, formulário e tipos aceitos de cada campo de anexo;
  *  - `GET /card-comment/by-card` → comentários e os anexos de cada um;
  *  - `POST /attachment/batch` → nome, tipo e tamanho dos anexos dos campos (leitura).
@@ -14,6 +18,7 @@
 import { CangeCliUsageError } from "../client/errors.js";
 import type { CangeAgentKit } from "../index.js";
 import type { AttachmentRecord } from "../contracts/attachments.js";
+import { extractFlowSteps } from "../contracts/payload-builder.js";
 import type { NormalizedField } from "../schemas/fields.js";
 import { describeAllowedFileTypes, parseAllowedFileTypes, type AttachFileTypePreset } from "../utils/attachFieldTypes.js";
 
@@ -52,6 +57,11 @@ export interface CardAttachments {
   attachFields: NormalizedField[];
   /** O cartão como o `GET /card/` devolveu (para o `link-field` ler a resposta do formulário). */
   cardRaw: unknown;
+  /**
+   * Rascunho lido por formulário (`GET /form/pre-answer`): o da etapa atual e os pedidos em
+   * `draftFormIds`. `undefined` no mapa = o formulário foi lido e não tem rascunho.
+   */
+  drafts: Map<string, Record<string, unknown> | undefined>;
   /** Quem subiu cada anexo do cartão (id do usuário), quando o back diz. */
   uploaderById: Map<number, number>;
 }
@@ -101,10 +111,18 @@ export function allowedTypesOf(field: NormalizedField): AttachFileTypePreset[] {
   return parseAllowedFileTypes(field.raw?.filter_schema);
 }
 
-/** Ids de anexo gravados em cada campo de anexo, em todas as respostas ativas do cartão (sem repetir). */
-export function attachmentIdsByField(cardRaw: unknown, fieldIds: ReadonlySet<string>): Map<string, number[]> {
+/**
+ * Ids de anexo gravados em cada campo de anexo, em todas as respostas ativas do cartão e nos
+ * rascunhos lidos (sem repetir).
+ */
+export function attachmentIdsByField(
+  cardRaw: unknown,
+  fieldIds: ReadonlySet<string>,
+  drafts: Iterable<Record<string, unknown> | undefined> = []
+): Map<string, number[]> {
   const out = new Map<string, number[]>();
-  for (const answer of records(cardRecordOf(cardRaw).form_answers)) {
+  const answers = [...records(cardRecordOf(cardRaw).form_answers), ...[...drafts].filter((d): d is Record<string, unknown> => !!d)];
+  for (const answer of answers) {
     if (isDeleted(answer)) continue;
     for (const row of records(answer.form_answer_fields)) {
       if (isDeleted(row)) continue;
@@ -122,14 +140,53 @@ export function attachmentIdsByField(cardRaw: unknown, fieldIds: ReadonlySet<str
 }
 
 /**
- * Ids gravados no campo pela resposta que o `PUT /form/answer` altera: a mais recente
- * do formulário (`dt_created`, depois o id), como o `ensureStepFormAnswer` do back.
- * Sem resposta do formulário: lista vazia.
+ * B1 (review do Alex, onda 1): o rascunho do formulário no cartão, como o
+ * `GET /form/pre-answer` devolve em `formsAnswers`. Só vale o rascunho de verdade (tem id e
+ * `flow_step_id` NULL). Sem rascunho, a rota devolve um objeto montado da última passagem
+ * confirmada (`origin: "return-step-autocomplete"`, sem id) e esse objeto deixa de fora os
+ * campos de anexo (`RETURN_STEP_AUTOCOMPLETE_BLOCKED_TYPES`); a passagem confirmada o kit lê
+ * do `GET /card/`.
  */
-export function currentFieldAttachmentIds(cardRaw: unknown, formId: string, fieldId: string): number[] {
+export function draftAnswerOf(preRaw: unknown, formId: string): Record<string, unknown> | undefined {
+  const answer = asRecord(asRecord(preRaw)?.formsAnswers);
+  if (!answer || isDeleted(answer)) return undefined;
+  if (answer.origin === "return-step-autocomplete") return undefined;
+  if (positiveInt(answer.id_form_answer) === undefined) return undefined;
+  if (answer.flow_step_id !== null && answer.flow_step_id !== undefined) return undefined;
+  const form = answer.form_id ?? answer.id_form;
+  if (form !== undefined && form !== null && String(form) !== formId) return undefined;
+  return answer;
+}
+
+/**
+ * O rascunho do formulário no cartão (`GET /form/pre-answer`). Erro da leitura propaga: sem
+ * saber do rascunho, o `link-field` não grava (trocaria a lista e apagaria o arquivo da tela).
+ */
+export async function readFormDraft(
+  kit: CangeAgentKit,
+  cardId: number,
+  formId: string
+): Promise<Record<string, unknown> | undefined> {
+  const pre = await kit.contracts.getPreAnswer({ cardId, formId });
+  return draftAnswerOf(pre?.raw, formId);
+}
+
+/**
+ * Ids gravados no campo pela resposta que o `PUT /form/answer` altera: a mais recente do
+ * formulário, rascunho incluído (`dt_created`, depois o id), como o `ensureStepFormAnswer`
+ * do back. Sem resposta do formulário: lista vazia.
+ */
+export function currentFieldAttachmentIds(
+  cardRaw: unknown,
+  formId: string,
+  fieldId: string,
+  draft?: Record<string, unknown>
+): number[] {
   const answers = records(cardRecordOf(cardRaw).form_answers).filter(
     (answer) => !isDeleted(answer) && String(answer.form_id ?? answer.id_form ?? "") === formId
   );
+  // O rascunho já foi conferido (`draftAnswerOf`: deste formulário, não excluído).
+  if (draft) answers.push(draft);
   answers.sort((a, b) => {
     const ta = Date.parse(String(a.dt_created ?? "")) || 0;
     const tb = Date.parse(String(b.dt_created ?? "")) || 0;
@@ -163,10 +220,27 @@ function fileOf(record: AttachmentRecord | Record<string, unknown>): CardFile | 
   };
 }
 
-/** Lê os arquivos do cartão (campos de anexo e comentários). */
+/** Formulário da etapa atual do cartão: o `flow_step` do `GET /card/` ou, sem ele, o fluxo. */
+async function currentStepFormId(kit: CangeAgentKit, flowId: number, cardRaw: unknown): Promise<string | undefined> {
+  const card = cardRecordOf(cardRaw);
+  const step = asRecord(card.flow_step);
+  const direct = positiveInt(step?.form_id);
+  if (direct !== undefined) return String(direct);
+  const stepId = card.flow_step_id ?? step?.id_step;
+  if (stepId === undefined || stepId === null) return undefined;
+  const flow = await kit.contracts.getFlow({ idFlow: String(flowId) });
+  const current = extractFlowSteps(flow.raw).find((item) => String(item.id) === String(stepId));
+  return current?.formId !== undefined ? String(current.formId) : undefined;
+}
+
+/**
+ * Lê os arquivos do cartão (campos de anexo, com o rascunho da etapa atual, e comentários).
+ * `draftFormIds`: outros formulários cujo rascunho também deve ser lido (o `link-field` pede
+ * o formulário do campo em que vai gravar).
+ */
 export async function collectCardAttachments(
   kit: CangeAgentKit,
-  input: { flowId: number; cardId: number }
+  input: { flowId: number; cardId: number; draftFormIds?: string[] }
 ): Promise<CardAttachments> {
   const [card, fieldSet, comments] = await Promise.all([
     kit.contracts.getCard({ flowId: input.flowId, cardId: input.cardId }),
@@ -175,7 +249,22 @@ export async function collectCardAttachments(
   ]);
 
   const attachFields = fieldSet.fields.filter(isAttachField);
-  const byField = attachmentIdsByField(card.raw, new Set(attachFields.map((field) => String(field.id))));
+  const attachForms = new Set(attachFields.map((field) => (field.formId !== undefined ? String(field.formId) : "")));
+  const draftForms = new Set(input.draftFormIds ?? []);
+  if (attachFields.length > 0) {
+    const current = await currentStepFormId(kit, input.flowId, card.raw);
+    if (current !== undefined) draftForms.add(current);
+  }
+  const drafts = new Map<string, Record<string, unknown> | undefined>();
+  await Promise.all(
+    [...draftForms]
+      .filter((formId) => formId !== "" && attachForms.has(formId))
+      .map(async (formId) => {
+        drafts.set(formId, await readFormDraft(kit, input.cardId, formId));
+      })
+  );
+
+  const byField = attachmentIdsByField(card.raw, new Set(attachFields.map((field) => String(field.id))), drafts.values());
   const ids = [...new Set([...byField.values()].flat())];
   const { attachments } = await kit.contracts.getAttachmentsByIds({ ids });
   const meta = new Map<number, AttachmentRecord>(attachments.map((item) => [item.id_attachment, item]));
@@ -232,6 +321,7 @@ export async function collectCardAttachments(
     comments: commentFiles,
     attachFields,
     cardRaw: card.raw,
+    drafts,
     uploaderById
   };
 }
