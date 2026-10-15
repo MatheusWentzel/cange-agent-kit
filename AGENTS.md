@@ -275,6 +275,17 @@ O cartão tem arquivos em dois lugares: os **campos de anexo** (formulário) e o
   Com `combinada`, diga que segue sozinho depois da aprovação; não peça ao usuário para avisar. Na cabeça, sem
   `--then` aprovar só avisa na conversa.
 
+## Rotina proposta pelo próprio agente (desde 14/10/2026, só com token de run)
+
+- `cange routine propose --name "<nome>" --frequency diaria|dias-uteis|semanal|mensal [--time HH:MM]
+  [--weekdays seg,qua] [--monthdays 1,ultimo] --instruction "<o que fazer a cada execução>" [--flow <id>] [--card <id>]`:
+  cria o PEDIDO de uma rotina para você mesmo. A rotina só passa a existir quando quem administra o agente aprova, em
+  qualquer nível de autonomia; negada, nada é criado. Não pausa a execução: não espere a decisão nem repita o comando.
+- Frequência: diária (um horário), dias úteis (sem sábado e domingo), semanal ou mensal. Mais de uma vez por dia não
+  existe. `--dry-run` mostra o pedido sem enviar.
+- Na resposta, use o `message` da saída (ele diz que a rotina depende da aprovação). Limites: até 3 propostas
+  esperando decisão e um teto de rotinas por agente; o erro diz o próximo passo.
+
 ## Sequência recomendada para mutações com values (modo avançado, `--payload`)
 
 1. `cange my-flows`, `cange my-registers`, `cange my-tasks` e `cange notifications --is-archived N`

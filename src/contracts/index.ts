@@ -18,6 +18,7 @@ import { createPayloadBuilderContracts } from "./payload-builder.js";
 import { createRegisterQueryContracts } from "./registerQuery.js";
 import { createRegistersContracts } from "./registers.js";
 import { createResourceAccessContracts } from "./resourceAccess.js";
+import { createScheduleProposalContracts } from "./scheduleProposal.js";
 import { createTimeTrackingContracts } from "./timeTracking.js";
 import { createUsersContracts } from "./users.js";
 
@@ -32,6 +33,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const artifacts = createArtifactsContracts(params.client);
   const agentHead = createAgentHeadContracts(params.client);
   const resourceAccess = createResourceAccessContracts(params.client);
+  const scheduleProposal = createScheduleProposalContracts(params.client);
   const registers = createRegistersContracts(params.client);
   const registerQuery = createRegisterQueryContracts({ client: params.client, fields });
   const timeTracking = createTimeTrackingContracts(params.client);
@@ -142,6 +144,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     proposeHeadChange: agentHead.proposeHeadChange,
     // Rodada 6: cria o PEDIDO de acesso a um fluxo ou cadastro (quem pode convidar decide).
     requestResourceAccess: resourceAccess.requestResourceAccess,
+    // D3: cria o PEDIDO de uma rotina do próprio agente (quem administra o agente aprova).
+    proposeSchedule: scheduleProposal.proposeSchedule,
     createRegister: registers.createRegister,
     updateRegister: registers.updateRegister,
     createTimeTracking: timeTracking.createTimeTracking,
