@@ -644,6 +644,19 @@ export async function coerceFieldValue(
   if (isEmptyValue(raw)) return { ok: true, value: raw };
   const type = normalizeFieldType(field.type);
 
+  // C2 (onda 1): o campo de anexo guarda a LISTA de arquivos e o `PUT /form/answer` troca
+  // a lista inteira (um `--set` apagava os arquivos que já estavam lá). Arquivo em campo
+  // tem comando próprio, que soma à lista e passa pela permissão de Anexos.
+  // Lista vazia (limpar o campo) segue como antes.
+  if (type === "INPUT_ATTACH_FIELD" && !(Array.isArray(raw) && raw.length === 0)) {
+    return {
+      ok: false,
+      error:
+        "campo de anexo não é gravado por --set: suba o arquivo com `cange attachment upload --file <arquivo>` " +
+        'e ponha no campo com `cange attachment link-field --card-id <id> --field "<campo>" --attachment-id <id>`'
+    };
+  }
+
   if (NUMBER_TYPES.has(type)) {
     if (typeof raw === "number") return { ok: true, value: raw };
     if (typeof raw !== "string") return { ok: false, error: "não é número" };

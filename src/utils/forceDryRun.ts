@@ -31,7 +31,8 @@ export const FORCED_DRY_RUN_NOTE =
  */
 export const FORCED_WRITE_COMMANDS: ReadonlySet<string> = new Set([
   "access request",
-  "attachment upload",
+  // C2 (onda 1): `attachment upload` ganhou `--dry-run` próprio (confere o arquivo e o
+  // campo sem subir), então sai desta lista e responde pelo dry-run dele.
   "tool call"
 ]);
 
@@ -50,7 +51,9 @@ const READ_VIA_POST_PATHS: ReadonlySet<string> = new Set([
   // Autocompletar da tela ao abrir o cartão (POP-2, revisão 4 do EXTRA-06).
   "/form/answers/by-cards",
   // Cartões conectados que o campo de cartão da tela carrega (POP-1, revisão 4).
-  "/card/by-cards"
+  "/card/by-cards",
+  // C2 (onda 1): nome, tipo e tamanho dos anexos por id (READ_VIA_POST no back).
+  "/attachment/batch"
 ]);
 
 /** True quando a chamada HTTP grava (com o env ligado ela é recusada). */

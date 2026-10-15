@@ -26,6 +26,8 @@ export interface CommentsContracts {
     cardId: number;
     description: string;
     mentions?: number[];
+    /** C2: ids de anexos já subidos que entram no comentário (`attachment_ids`). */
+    attachmentIds?: number[];
   }) => Promise<{ raw: unknown }>;
   listCommentsByCard: (input: {
     flowId?: number | string;
@@ -68,7 +70,10 @@ export function createCommentsContracts(client: CangeClient): CommentsContracts 
           card_id: parsed.data.cardId,
           flow_id: flowId,
           description: parsed.data.description,
-          mentions: parsed.data.mentions
+          mentions: parsed.data.mentions,
+          ...(parsed.data.attachmentIds && parsed.data.attachmentIds.length > 0
+            ? { attachment_ids: parsed.data.attachmentIds }
+            : {})
         }
       });
       return { raw };

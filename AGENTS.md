@@ -179,6 +179,36 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   `cange card move --to "<etapa>"` certo. Cartão excluído: 404 `CARD_DELETED`, mensagem repassada como veio.
 - Receitas: `cange recipe criar-card | gravar-campos | mover-card | comentar | mencionar`.
 
+## Arquivos do cartão: ler e pôr (desde 14/10/2026, C2 da onda 1)
+
+O cartão tem arquivos em dois lugares: os **campos de anexo** (formulário) e os **comentários** (colaboração).
+
+- **Ler:** `cange attachment list --card-id <id>` lista os campos de anexo (com `allowedTypes`, os tipos que cada
+  campo aceita) e os comentários com arquivo; cada arquivo traz o `attachmentId`. Baixe com
+  `cange attachment download --card-id <id> --attachment-id <id> --out <pasta>` (id repetível ou separado por
+  vírgula; só arquivo DESTE cartão) ou por origem com `--from campos|comentarios|todos`. O arquivo vai para
+  `<pasta>/<attachmentId>-<nome>`. Sem as duas opções, o `download` faz o de antes (campos e aba Anexos).
+- **Pôr:** sempre 2 passos.
+  1. `cange attachment upload --file <arquivo>` sobe e devolve o `attachmentId`. O arquivo ainda não aparece para
+     ninguém. Só arquivo da **pasta desta execução** (o `TMPDIR` do run; fora do runner, o tmp do sistema), com
+     caminho completo, sem `..`, sem link simbólico para fora, não vazio, até **25 MB**. Tipo pela extensão (PDF e
+     imagem com prévia na tela). `--dry-run` confere sem subir.
+  2. Num comentário: `cange comment create --card-id <id> --text "..." --attachment-id <id>` (até 10 arquivos).
+     Num campo de anexo: `cange attachment link-field --card-id <id> --field "<campo>" --attachment-id <id>`
+     (soma ao que o campo já tem; arquivo que já está lá = `noop`).
+- O passo 2 é a ação **Anexos** do agente (o back trata `POST /card-comment` com arquivo e o `PUT /form/answer` de
+  campo de anexo como `attachment`): pede a permissão Anexos e, no agente semi-autônomo ou assistido, aprovação.
+  Depois de aprovado, rode o MESMO comando (o `attachmentId` não muda; não suba de novo).
+- O passo 2 só aceita arquivo que você mesmo subiu ou que já está neste cartão (campo ou comentário). Id de outro
+  lugar da empresa = exit 2, nada gravado.
+- `link-field` confere antes (exit 2, nada gravado): campo de anexo do fluxo (título, id ou hash), formulário que o
+  cartão grava (inicial, etapa atual ou etapa por onde já passou), tipo aceito pelo campo (`filter_schema`,
+  espelho de `config/attachFieldTypes.ts` do back).
+- Campo de anexo **não** se grava por `--set` (`card update-values`, `card move`, `card create`): a lista inteira seria
+  trocada. Lista vazia (limpar) segue valendo.
+- `CANGE_FORCE_DRY_RUN`: `upload`, `link-field` e `comment create` respondem dry-run; `POST /attachment/batch` é
+  leitura. Receitas: `cange recipe anexo` (ler) e `cange recipe enviar-anexo` (pôr).
+
 ## Sinônimos e ids flexíveis (desde 05/10/2026)
 
 - Busca: `--q` e `--search` são sinônimos em toda listagem com busca (`catalog`, `register entries`, `flow query`,

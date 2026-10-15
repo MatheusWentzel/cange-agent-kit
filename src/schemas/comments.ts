@@ -9,7 +9,9 @@ export const createCardCommentPayloadSchema = z.object({
   // agente não precisa saber/adivinhar o fluxo — evita o 404 por flow_id errado.
   flowId: z.number().int().positive().optional(),
   description: z.string().trim().min(1),
-  mentions: z.array(z.number().int().positive()).default([])
+  mentions: z.array(z.number().int().positive()).default([]),
+  // C2 (onda 1): anexos já subidos (`attachment upload`) que entram no comentário.
+  attachmentIds: z.array(z.number().int().positive()).max(10).optional()
 });
 
 export const listCommentsByCardParamsSchema = z.object({
