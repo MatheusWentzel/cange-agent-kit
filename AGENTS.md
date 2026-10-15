@@ -183,6 +183,12 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
 
 O cartão tem arquivos em dois lugares: os **campos de anexo** (formulário) e os **comentários** (colaboração).
 
+- **"O arquivo do cartão":** quando a pessoa fala de um arquivo do cartão (o contrato, a nota, o PDF), ele está num
+  campo de anexo **ou** na colaboração (anexos dos comentários). Procure nos dois de uma vez:
+  `cange attachment list --card-id <id> --name "<o que a pessoa disse>"`. `files` traz cada arquivo com `source`
+  (`campo`, `colaboracao` ou `aba_anexos`) e `where` (`campo "Contrato"`, `colaboração (comentário de Ana em 01/10)`).
+  Um candidato: use direto (o `next` já baixa ele). Veio `ask` (mais de um candidato, ou nenhum com o nome dito):
+  pergunte à pessoa antes, com essa frase, e não escolha sozinho.
 - **Ler:** `cange attachment list --card-id <id>` lista os campos de anexo (com `allowedTypes`, os tipos que cada
   campo aceita) e os comentários com arquivo; cada arquivo traz o `attachmentId`. Baixe com
   `cange attachment download --card-id <id> --attachment-id <id> --out <pasta>` (id repetível ou separado por

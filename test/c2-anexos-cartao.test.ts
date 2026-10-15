@@ -331,6 +331,105 @@ describe("(a)(b) attachment list: arquivos dos campos de anexo e dos comentário
   });
 });
 
+describe("onda 1b (item 6): o arquivo que a pessoa citou, no campo ou na colaboração", () => {
+  /** O cartão 55 com um contrato no campo e outro na colaboração (comentário da Ana). */
+  const TWO_CONTRACTS = [
+    ...COMMENTS,
+    {
+      id_card_comment: 79,
+      card_id: 55,
+      description: "versão assinada",
+      dt_created_string: "02/10/2026 às 09:00",
+      user: { id_user: 7, name: "Ana Souza" },
+      attachments: [{ id_attachment: 6002, original_name: "Contrato assinado.pdf", mime_type: "application/pdf", blob_size: 80, user_id: 7 }]
+    }
+  ];
+
+  it("files junta campo e colaboração numa lista só, cada um dizendo de onde vem", async () => {
+    const out = await run(["attachment", "list", ...CARD_ARGS]);
+    expect(out?.files).toEqual([
+      { attachmentId: 5001, fileName: "contrato.pdf", source: "campo", where: 'campo "Contrato"', field: "Contrato", mimeType: "application/pdf", sizeKb: 100 },
+      {
+        attachmentId: 6001,
+        fileName: "foto.png",
+        source: "colaboracao",
+        where: "colaboração (comentário de Ana Souza em 01/10/2026 às 10:00)",
+        author: "Ana Souza",
+        createdAt: "01/10/2026 às 10:00",
+        mimeType: "image/png",
+        sizeKb: 12
+      }
+    ]);
+    // Dois arquivos e a pessoa não disse qual: pergunta pronta.
+    expect(out?.ask).toBe(
+      'Encontrei o arquivo contrato.pdf no campo "Contrato" e o arquivo foto.png na colaboração (comentário de Ana Souza em 01/10/2026 às 10:00). De qual você está falando?'
+    );
+  });
+
+  it("--name com um só candidato: usa direto (sem pergunta, o next já baixa ele)", async () => {
+    const out = await run(["attachment", "list", ...CARD_ARGS, "--name", "a foto do cartão"]);
+    expect(out?.files.map((f: any) => f.attachmentId)).toEqual([6001]);
+    expect(out?.match).toEqual({ name: "a foto do cartão", found: 1, exact: true });
+    expect(out?.ask).toBeUndefined();
+    expect(out?.next).toBe("cange attachment download --card-id 55 --attachment-id 6001 --out <pasta>");
+  });
+
+  it("--name que bate no campo E na colaboração: pergunta qual, citando os dois", async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      if ((init?.method ?? "GET") === "GET" && url.pathname.replace(/\/+$/, "") === "/card-comment/by-card") return json(TWO_CONTRACTS);
+      if ((init?.method ?? "GET") === "GET" && url.pathname.replace(/\/+$/, "") === "/card") return json(CARD);
+      if ((init?.method ?? "GET") === "GET" && url.pathname.replace(/\/+$/, "") === "/field/by-flow") return json(FIELDS);
+      if ((init?.method ?? "GET") === "GET" && url.pathname.replace(/\/+$/, "") === "/attachment/by-card") return json([]);
+      if ((init?.method ?? "GET") === "GET" && url.pathname.replace(/\/+$/, "") === "/flow") return json(FLOW);
+      if (url.pathname.replace(/\/+$/, "") === "/attachment/batch") {
+        const ids = (JSON.parse(String(init?.body)).ids ?? []).map(Number);
+        return json(ids.map((id: number) => ATTACHMENTS[id]).filter(Boolean));
+      }
+      return json({ message: "rota não mockada" }, 404);
+    });
+    const out = await run(["attachment", "list", ...CARD_ARGS, "--name", "o contrato"]);
+    expect(out?.files.map((f: any) => f.attachmentId)).toEqual([5001, 6002]);
+    expect(out?.ask).toBe(
+      'Encontrei o arquivo contrato.pdf no campo "Contrato" e o arquivo Contrato assinado.pdf na colaboração (comentário de Ana Souza em 02/10/2026 às 09:00). De qual você está falando?'
+    );
+    expect(out?.next).toBe("cange attachment download --card-id 55 --attachment-id <id> --out <pasta>");
+    // "o contrato da colaboração" separa os dois pelo lugar.
+    stdout.length = 0;
+    const narrowed = await run(["attachment", "list", ...CARD_ARGS, "--name", "o contrato da colaboração"]);
+    expect(narrowed?.files.map((f: any) => f.attachmentId)).toEqual([6002]);
+    expect(narrowed?.ask).toBeUndefined();
+  });
+
+  it("--name que não bate com nenhum: devolve todos e pergunta qual é", async () => {
+    const out = await run(["attachment", "list", ...CARD_ARGS, "--name", "planilha de custos"]);
+    expect(out?.match).toEqual({ name: "planilha de custos", found: 0, exact: false });
+    expect(out?.files.map((f: any) => f.attachmentId)).toEqual([5001, 6001]);
+    expect(out?.ask).toBe(
+      'Não encontrei arquivo com o nome "planilha de custos" neste cartão. Os arquivos dele são: o arquivo contrato.pdf no campo "Contrato" e o arquivo foto.png na colaboração (comentário de Ana Souza em 01/10/2026 às 10:00). De qual você está falando?'
+    );
+  });
+
+  it("cartão sem arquivo nenhum: hint, sem pergunta", async () => {
+    cardBody = { ...CARD, form_answers: [] };
+    vi.mocked(globalThis.fetch).mockImplementation(async (input, init) => {
+      const url = new URL(String(input));
+      const path = url.pathname.replace(/\/+$/, "");
+      if (path === "/card") return json(cardBody);
+      if (path === "/field/by-flow") return json(FIELDS);
+      if (path === "/card-comment/by-card") return json([]);
+      if (path === "/attachment/by-card") return json([]);
+      if (path === "/flow") return json(FLOW);
+      if (path === "/attachment/batch") return json([]);
+      return json({ message: "rota não mockada" }, 404);
+    });
+    const out = await run(["attachment", "list", ...CARD_ARGS, "--name", "contrato"]);
+    expect(out?.total).toBe(0);
+    expect(out?.ask).toBeUndefined();
+    expect(out?.hint).toMatch(/não tem arquivo nos campos de anexo nem na colaboração/);
+  });
+});
+
 describe("(a)(b) attachment download --attachment-id / --from", () => {
   it("baixa o anexo do comentário pelo id, com o id na frente do nome", async () => {
     const outDir = join(runDir, "anexos-1");
