@@ -422,3 +422,64 @@ export async function resolveUsableAttachments(
   }
   return { files, ...(attachments ? { attachments } : {}) };
 }
+
+/**
+ * I1 (review do Alex, onda 1): ids de anexo que a criação de cartão e o cadastro gravam num
+ * campo de anexo (`--set` ou `--payload`). Mesma regra do `resolveUsableAttachments`: o
+ * anexo existe na empresa e foi o usuário da credencial que subiu (o bot do agente, no run)
+ * ou já está no registro (`alreadyThere`: os anexos do cadastro, no update). Qualquer id fora
+ * da regra = exit 2, nada gravado.
+ */
+export async function assertUsableAttachmentIds(
+  kit: CangeAgentKit,
+  ids: number[],
+  options: { me: number | undefined; alreadyThere?: ReadonlySet<number>; where: string }
+): Promise<void> {
+  if (ids.length === 0) return;
+  const { attachments: found } = await kit.contracts.getAttachmentsByIds({ ids });
+  const byId = new Map<number, AttachmentRecord>(found.map((item) => [item.id_attachment, item]));
+  const problems: string[] = [];
+  for (const id of ids) {
+    const record = byId.get(id);
+    if (!record) {
+      problems.push(`o anexo ${id} não existe (ou é de outra empresa)`);
+      continue;
+    }
+    const own = options.me !== undefined && positiveInt(record.user_id) === options.me;
+    if (!own && !options.alreadyThere?.has(id)) {
+      problems.push(
+        options.alreadyThere
+          ? `o anexo ${id} não está ${options.where} e não foi você que subiu`
+          : `o anexo ${id} não foi você que subiu`
+      );
+    }
+  }
+  if (problems.length > 0) {
+    throw new CangeCliUsageError(
+      `Nada foi gravado: ${problems.join("; ")}. Para um arquivo novo, suba com \`cange attachment upload --file <arquivo>\` ` +
+        "e use o attachmentId que ele devolve."
+    );
+  }
+}
+
+/**
+ * Ids de anexo por campo numa resposta de formulário (`GET /form/answer`, a entrada do
+ * cadastro): só as linhas vivas dos campos pedidos, sem repetir.
+ */
+export function attachmentIdsInAnswer(answer: unknown, fieldIds: ReadonlySet<string>): Map<string, number[]> {
+  const out = new Map<string, number[]>();
+  const record = asRecord(answer);
+  if (!record || isDeleted(record)) return out;
+  for (const row of records(record.form_answer_fields)) {
+    if (isDeleted(row)) continue;
+    const field = asRecord(row.field);
+    const fieldId = row.field_id ?? row.id_field ?? field?.id_field;
+    if (fieldId === undefined || !fieldIds.has(String(fieldId))) continue;
+    const id = positiveInt(row.value);
+    if (id === undefined) continue;
+    const list = out.get(String(fieldId)) ?? [];
+    if (!list.includes(id)) list.push(id);
+    out.set(String(fieldId), list);
+  }
+  return out;
+}

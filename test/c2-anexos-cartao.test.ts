@@ -47,6 +47,25 @@ const FIELDS = [
   { id_field: 704, name: "hashobs", title: "Observação", type: "TEXT_SHORT_FIELD", form_id: 900 }
 ];
 
+/** Cadastro 175 (form 950) com um campo de anexo; a entrada 8812 já tem o 8001 (de outra pessoa). */
+const REGISTER = { id_register: 175, name: "Fornecedores", form_id: 950 };
+const REGISTER_FIELDS = [
+  { id_field: 801, name: "hashdocfornec", title: "Documento", type: "INPUT_ATTACH_FIELD", form_id: 950 },
+  { id_field: 802, name: "hashnomefornec", title: "Nome", type: "TEXT_SHORT_FIELD", form_id: 950 }
+];
+const REGISTER_ENTRY = [
+  {
+    id_form_answer: 8812,
+    register_id: 175,
+    form_id: 950,
+    deleted: "N",
+    form_answer_fields: [
+      { field_id: 801, value: "8001", deleted: "N", field: { id_field: 801, type: "INPUT_ATTACH_FIELD", name: "hashdocfornec" } },
+      { field_id: 802, value: "ACME", deleted: "N" }
+    ]
+  }
+];
+
 /** Cartão 55 na etapa Triagem. O 5002 foi tirado do campo; a resposta 2 foi apagada. */
 const CARD = {
   id_card: 55,
@@ -109,6 +128,7 @@ const stdout: string[] = [];
 const stderr: string[] = [];
 const requests: Captured[] = [];
 let cardBody: Record<string, unknown> = CARD;
+let fieldsBody: Array<Record<string, unknown>> = FIELDS;
 /** `GET /form/pre-answer` por formulário (ausente = 404, a rota que não existe). */
 let preAnswers: Record<string, { status?: number; body: unknown }> = {};
 
@@ -144,6 +164,7 @@ beforeEach(() => {
   stderr.length = 0;
   requests.length = 0;
   cardBody = CARD;
+  fieldsBody = FIELDS;
   preAnswers = {};
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
     stdout.push(String(chunk));
@@ -162,7 +183,13 @@ beforeEach(() => {
     const path = url.pathname.replace(/\/+$/, "") || "/";
     if (method === "GET" && path === "/card") return json(cardBody);
     if (method === "GET" && path === "/flow") return json(FLOW);
-    if (method === "GET" && path === "/field/by-flow") return json(FIELDS);
+    if (method === "GET" && path === "/field/by-flow") return json(fieldsBody);
+    if (method === "GET" && path === "/register") return json(REGISTER);
+    if (method === "GET" && path === "/field/by-register") return json(REGISTER_FIELDS);
+    if (method === "GET" && path === "/form/answer") {
+      return url.searchParams.get("id_form_answer") === "8812" ? json(REGISTER_ENTRY) : json([]);
+    }
+    if (method === "POST" && path === "/form/new-answer") return json({ id_form_answer: 9300, id_card: 990, flow_id: 316, flow_step_id: 1 });
     if (method === "GET" && path === "/card-comment/by-card") return json(COMMENTS);
     if (method === "GET" && path === "/form/pre-answer") {
       const pre = preAnswers[String(url.searchParams.get("id_form"))];
@@ -579,6 +606,93 @@ describe("B1 (review do Alex): o rascunho da etapa atual entra na lista do campo
     await run(["attachment", "link-field", ...CARD_ARGS, "--field", "Comprovante", "--attachment-id", "7001"]);
     expect(process.exitCode).not.toBe(0);
     expect(process.exitCode).toBeDefined();
+    expect(writes()).toEqual([]);
+  });
+});
+
+describe("I1 (review do Alex): campo de anexo na criação de cartão e no cadastro aceita o id", () => {
+  function newAnswer(): Record<string, any> | undefined {
+    return writes().find((request) => request.method === "POST" && request.path === "/form/new-answer")?.body as any;
+  }
+
+  it("card create --set no campo de anexo do formulário inicial grava o id que o bot subiu", async () => {
+    const out = await run(["card", "create", "--flow-id", "316", "--set", "Contrato=7001"]);
+    expect(out).toMatchObject({ ok: true });
+    expect(newAnswer()).toMatchObject({ id_form: 900, flow_id: 316, values: { hashcontrato: [7001] } });
+  });
+
+  it("card create --payload com o id no campo de anexo (hash) também vale", async () => {
+    const payload = join(runDir, "cartao-anexo.json");
+    await writeFile(payload, JSON.stringify({ flowId: 316, idForm: 900, origin: "/x", values: { hashcontrato: "7001,7002" } }));
+    await run(["card", "create", "--payload", payload]);
+    expect(newAnswer()).toMatchObject({ values: { hashcontrato: [7001, 7002] } });
+  });
+
+  it("anexo obrigatório no formulário inicial: o id conta como preenchido", async () => {
+    fieldsBody = FIELDS.map((field) => (field.id_field === 701 ? { ...field, required: true } : field));
+    const out = await run(["card", "create", "--flow-id", "316", "--set", "Contrato=7001", "--validate-fields", "--dry-run"]);
+    expect(out?.validation).toEqual({ valid: true });
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
+  it("card create com anexo de outra pessoa: exit 2, nada gravado", async () => {
+    await run(["card", "create", "--flow-id", "316", "--set", "Contrato=8001"]);
+    expect(process.exitCode).toBe(2);
+    expect(errorMessage()).toContain("o anexo 8001 não foi você que subiu");
+    expect(writes()).toEqual([]);
+  });
+
+  it("card create com texto no campo de anexo: exit 2 com o comando de subir", async () => {
+    await run(["card", "create", "--flow-id", "316", "--set", "Contrato=contrato.pdf"]);
+    expect(process.exitCode).toBe(2);
+    expect(errorMessage()).toContain("attachment upload");
+    expect(writes()).toEqual([]);
+  });
+
+  it("register create grava o id que o bot subiu", async () => {
+    await run(["register", "create", "--register-id", "175", "--set", "Documento=7001", "--set", "Nome=Beta"]);
+    expect(newAnswer()).toMatchObject({ id_form: 950, register_id: 175, values: { hashdocfornec: [7001], hashnomefornec: "Beta" } });
+  });
+
+  it("register create com anexo de outra pessoa: exit 2, nada gravado", async () => {
+    await run(["register", "create", "--register-id", "175", "--set", "Documento=8001"]);
+    expect(process.exitCode).toBe(2);
+    expect(writes()).toEqual([]);
+  });
+
+  it("register update soma à lista da entrada (o PUT troca a lista inteira)", async () => {
+    await run(["register", "update", "--register-id", "175", "--form-answer-id", "8812", "--set", "Documento=7001"]);
+    const read = requests.find((request) => request.method === "GET" && request.path.replace(/\/+$/, "") === "/form/answer");
+    expect(read?.query.get("id_form_answer")).toBe("8812");
+    const put = writes().find((request) => request.method === "PUT" && request.path === "/form/answer");
+    expect(put?.body).toMatchObject({ id_form: 950, register_id: 175, form_answer_id: 8812, values: { hashdocfornec: [8001, 7001] } });
+  });
+
+  it("register update com o anexo que já está na entrada (de outra pessoa) passa e não repete", async () => {
+    await run(["register", "update", "--register-id", "175", "--form-answer-id", "8812", "--set", "Documento=8001"]);
+    const put = writes().find((request) => request.method === "PUT" && request.path === "/form/answer");
+    expect(put?.body).toMatchObject({ values: { hashdocfornec: [8001] } });
+  });
+
+  it("register update --payload soma do mesmo jeito", async () => {
+    const payload = join(runDir, "cadastro-anexo.json");
+    await writeFile(payload, JSON.stringify({ idForm: 950, registerId: 175, formAnswerId: 8812, values: { hashdocfornec: [7002] } }));
+    await run(["register", "update", "--payload", payload]);
+    const put = writes().find((request) => request.method === "PUT" && request.path === "/form/answer");
+    expect(put?.body).toMatchObject({ values: { hashdocfornec: [8001, 7002] } });
+  });
+
+  it("register update de entrada que não existe: exit 2, nada gravado", async () => {
+    await run(["register", "update", "--register-id", "175", "--form-answer-id", "1", "--set", "Documento=7001"]);
+    expect(process.exitCode).toBe(2);
+    expect(errorMessage()).toContain("não achei a entrada 1");
+    expect(writes()).toEqual([]);
+  });
+
+  it("card move segue recusando campo de anexo, apontando o link-field", async () => {
+    await run(["card", "move", ...CARD_ARGS, "--to", "Fiscal", "--set", "Nota fiscal=7001"]);
+    expect(process.exitCode).toBe(2);
+    expect(errorMessage()).toContain("attachment link-field");
     expect(writes()).toEqual([]);
   });
 });
