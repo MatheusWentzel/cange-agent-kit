@@ -5,10 +5,12 @@
  * numa lista só, cada um dizendo de onde vem, e com `--name` acha o que a pessoa citou.
  *
  * Regra de decisão (para o agente não adivinhar):
- *  - um candidato que bate com o nome (ou o cartão só tem um arquivo): usa direto;
- *  - mais de um candidato, ou nenhum com o nome dito: a saída traz `ask`, a pergunta
- *    pronta citando cada arquivo e onde está ("Encontrei o arquivo X no campo Y e o
- *    arquivo Z na colaboração. De qual você está falando?").
+ *  - sem nome (`--name` ausente): é listagem, nunca pergunta. Automação e rotina leem
+ *    os anexos sem ninguém para responder (revisão do Alex, onda 1i);
+ *  - com nome, um candidato que bate: usa direto;
+ *  - com nome, mais de um candidato, ou nenhum com o nome dito: a saída traz `ask`, a
+ *    pergunta pronta citando cada arquivo e onde está ("Encontrei o arquivo X no campo Y
+ *    e o arquivo Z na colaboração. De qual você está falando?").
  *
  * Puro: sem rede, testável direto.
  */
@@ -122,16 +124,35 @@ export function cardFileRefs(found: Pick<CardAttachments, "fields" | "comments" 
 }
 
 /**
+ * Onde o arquivo está, só para a busca: origem, título do campo e autor do comentário.
+ * Sem a data do comentário: "01/10 às 10:00" fazia "10" ou "2026" achar qualquer
+ * arquivo da colaboração (revisão do Alex, onda 1i).
+ */
+function searchableWhere(ref: CardFileRef): string {
+  if (ref.source === "campo") return `campo ${ref.field ?? ""}`;
+  if (ref.source === "aba_anexos") return "aba anexos";
+  return `colaboracao comentario ${ref.author ?? ""}`;
+}
+
+/** As palavras em que a busca procura (nome do arquivo + onde está, sem a data). */
+export function fileSearchWords(ref: CardFileRef): string[] {
+  return foldFileText(`${ref.fileName} ${searchableWhere(ref)}`).split(" ").filter(Boolean);
+}
+
+/**
  * Acha os arquivos que batem com o nome dito pela pessoa. Compara as palavras do nome
  * (sem acento, sem "arquivo", "do", "cartão") com o nome do arquivo E com onde ele está
  * ("o contrato da colaboração" acha o contrato.pdf do comentário, não o do campo).
+ * Cada palavra bate com uma palavra inteira ou com o começo de uma ("contr" acha
+ * "contrato"; "trato" não acha "contrato", "ota" não acha "nota").
  * Todas as palavras = exato; senão, os que têm alguma palavra (parcial); nenhum = todos.
  */
 export function matchCardFiles(refs: CardFileRef[], name: string | undefined): CardFileMatch {
   const tokens = name === undefined ? [] : fileNameTokens(name);
   if (tokens.length === 0) return { candidates: refs, exact: true, found: refs.length };
-  const hay = new Map(refs.map((ref) => [ref.attachmentId, ` ${foldFileText(`${ref.fileName} ${ref.where}`)} `]));
-  const has = (ref: CardFileRef, token: string): boolean => (hay.get(ref.attachmentId) ?? "").includes(token);
+  const words = new Map(refs.map((ref) => [ref.attachmentId, fileSearchWords(ref)]));
+  const has = (ref: CardFileRef, token: string): boolean =>
+    (words.get(ref.attachmentId) ?? []).some((word) => word.startsWith(token));
   const full = refs.filter((ref) => tokens.every((token) => has(ref, token)));
   if (full.length > 0) return { candidates: full, exact: true, found: full.length };
   const partial = refs.filter((ref) => tokens.some((token) => has(ref, token)));
@@ -154,21 +175,23 @@ function joinPt(items: string[]): string {
 }
 
 /**
- * A pergunta para a pessoa quando não dá para saber qual é o arquivo; `undefined` quando dá
- * (um candidato exato, ou o cartão sem arquivo).
+ * A pergunta para a pessoa quando ela citou um arquivo e não dá para saber qual é;
+ * `undefined` sem nome (listagem: automação e rotina não têm a quem perguntar), com um
+ * candidato exato, ou com o cartão sem arquivo.
  */
 export function askWhichFile(match: CardFileMatch, name: string | undefined): string | undefined {
   const { candidates } = match;
   if (candidates.length === 0) return undefined;
-  const named = name !== undefined && fileNameTokens(name).length > 0;
+  // Veio nome (mesmo só "o arquivo do cartão"): a pessoa citou um arquivo, dá para perguntar.
+  if (name === undefined || name.trim() === "") return undefined;
   if (candidates.length === 1 && match.exact) return undefined;
   const listed = candidates.slice(0, ASK_MAX_FILES).map((ref) => `o arquivo ${ref.fileName} ${onde(ref)}`);
   const more = candidates.length > ASK_MAX_FILES ? ` (e mais ${candidates.length - ASK_MAX_FILES})` : "";
-  if (named && match.found === 0) {
-    return `Não encontrei arquivo com o nome "${name!.trim()}" neste cartão. Os arquivos dele são: ${joinPt(listed)}${more}. De qual você está falando?`;
+  if (match.found === 0) {
+    return `Não encontrei arquivo com o nome "${name.trim()}" neste cartão. Os arquivos dele são: ${joinPt(listed)}${more}. De qual você está falando?`;
   }
   if (candidates.length === 1) {
-    return `Encontrei só ${listed[0]}, que não bate exatamente com "${name!.trim()}". É esse?`;
+    return `Encontrei só ${listed[0]}, que não bate exatamente com "${name.trim()}". É esse?`;
   }
   return `Encontrei ${joinPt(listed)}${more}. De qual você está falando?`;
 }

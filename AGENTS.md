@@ -188,7 +188,11 @@ O cartão tem arquivos em dois lugares: os **campos de anexo** (formulário) e o
   `cange attachment list --card-id <id> --name "<o que a pessoa disse>"`. `files` traz cada arquivo com `source`
   (`campo`, `colaboracao` ou `aba_anexos`) e `where` (`campo "Contrato"`, `colaboração (comentário de Ana em 01/10)`).
   Um candidato: use direto (o `next` já baixa ele). Veio `ask` (mais de um candidato, ou nenhum com o nome dito):
-  pergunte à pessoa antes, com essa frase, e não escolha sozinho.
+  pergunte à pessoa antes, com essa frase, e não escolha sozinho. A busca compara palavra inteira ou começo de palavra
+  ("contr" acha "contrato"; "trato" não), no nome do arquivo e em onde ele está (campo, colaboração, autor), sem a data.
+- **Sem `--name` é só a lista, nunca `ask`.** Automação e rotina (ninguém para responder): não pergunte; use o arquivo
+  do campo de anexo que a instrução ou o playbook cita (o mais recente, se nada indicar) e diga no comentário qual
+  arquivo usou e de onde veio.
 - **Ler:** `cange attachment list --card-id <id>` lista os campos de anexo (com `allowedTypes`, os tipos que cada
   campo aceita) e os comentários com arquivo; cada arquivo traz o `attachmentId`. Baixe com
   `cange attachment download --card-id <id> --attachment-id <id> --out <pasta>` (id repetível ou separado por

@@ -360,10 +360,34 @@ describe("onda 1b (item 6): o arquivo que a pessoa citou, no campo ou na colabor
         sizeKb: 12
       }
     ]);
-    // Dois arquivos e a pessoa não disse qual: pergunta pronta.
+    // Onda 1i (revisão do Alex): sem --name é listagem. Dois arquivos não viram pergunta:
+    // automação e rotina leem os anexos sem ter a quem perguntar.
+    expect(out?.ask).toBeUndefined();
+    expect(out?.match).toBeUndefined();
+    expect(out?.next).toBe("cange attachment download --card-id 55 --attachment-id <id> --out <pasta>");
+  });
+
+  it("--name que só diz \"o arquivo do cartão\" com dois arquivos: a pessoa citou, então pergunta", async () => {
+    const out = await run(["attachment", "list", ...CARD_ARGS, "--name", "o arquivo do cartão"]);
     expect(out?.ask).toBe(
       'Encontrei o arquivo contrato.pdf no campo "Contrato" e o arquivo foto.png na colaboração (comentário de Ana Souza em 01/10/2026 às 10:00). De qual você está falando?'
     );
+  });
+
+  it("--name compara palavra inteira ou começo de palavra, sem a data do comentário", async () => {
+    // "10" estava na data do comentário (01/10/2026 às 10:00): achava a foto sozinha e o agente usava direto.
+    const byDate = await run(["attachment", "list", ...CARD_ARGS, "--name", "10"]);
+    expect(byDate?.match).toEqual({ name: "10", found: 0, exact: false });
+    expect(byDate?.ask).toMatch(/^Não encontrei arquivo com o nome "10"/);
+    // Pedaço do meio da palavra não acha ("trato" dentro de "contrato").
+    stdout.length = 0;
+    const middle = await run(["attachment", "list", ...CARD_ARGS, "--name", "trato"]);
+    expect(middle?.match).toEqual({ name: "trato", found: 0, exact: false });
+    // Começo de palavra acha.
+    stdout.length = 0;
+    const prefix = await run(["attachment", "list", ...CARD_ARGS, "--name", "contr"]);
+    expect(prefix?.files.map((f: any) => f.attachmentId)).toEqual([5001]);
+    expect(prefix?.ask).toBeUndefined();
   });
 
   it("--name com um só candidato: usa direto (sem pergunta, o next já baixa ele)", async () => {
