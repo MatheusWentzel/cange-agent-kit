@@ -2,6 +2,17 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-10-24
+
+### `attachment list`: `ask` só com `--name`; busca por palavra (onda 1i, revisão do Alex)
+
+- **Sem `--name` não vem mais `ask`.** Antes, todo cartão com 2 ou mais arquivos trazia a pergunta, e automação e rotina
+  (sem ninguém para responder) travavam. Agora sem nome é listagem; `ask` só quando a pessoa citou um arquivo e não dá
+  para saber qual é.
+- **Busca por palavra inteira ou começo de palavra:** "contr" acha "contrato", "trato" não acha mais "contrato" e "ota"
+  não acha "nota". A data do comentário saiu do texto pesquisado ("10" ou "2026" não acham mais todo arquivo da
+  colaboração); o `where` mostrado continua com a data.
+
 ## 2026-10-15
 
 ### "O arquivo do cartão": campo de anexo ou colaboração (onda 1b, item 6)

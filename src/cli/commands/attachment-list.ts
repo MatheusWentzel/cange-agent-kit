@@ -24,6 +24,10 @@ interface AttachmentListOptions {
  * campo, colaboração ou aba Anexos) e o `where` em português; `--name` acha o arquivo que
  * a pessoa citou nos dois lugares. Quando não dá para saber qual é (mais de um candidato,
  * ou nenhum com o nome dito), `ask` traz a pergunta pronta para a pessoa.
+ *
+ * Onda 1i (revisão do Alex): `ask` só com `--name`. Sem nome é listagem: automação e
+ * rotina leem os anexos sem ter a quem perguntar, e um cartão com 2 arquivos não pode
+ * travar o trabalho delas.
  */
 export function registerAttachmentListCommand(attachmentCommand: Command): void {
   const command = attachmentCommand
@@ -85,8 +89,9 @@ export function registerAttachmentListCommand(attachmentCommand: Command): void 
       "createdAt?}], match?{name, found, exact}, ask?, hint?, fields[{fieldId, title, allowedTypes?, files[{attachmentId, " +
       "fileName, mimeType, sizeKb}]}], comments[{commentId, author, createdAt, files[...]}], cardTab?[...] (aba Anexos), next? }",
     fieldsLocation:
-      "`files` = todos os arquivos do cartão (com --name, só os que batem; nenhum bateu = todos). `ask` vem quando não dá " +
-      "para saber qual é: mais de um candidato ou nenhum com o nome dito; pergunte à pessoa antes de usar. " +
+      "`files` = todos os arquivos do cartão (com --name, só os que batem; nenhum bateu = todos). `ask` só vem com --name, " +
+      "quando não dá para saber qual é: mais de um candidato ou nenhum com o nome dito; pergunte à pessoa antes de usar. " +
+      "Sem --name é só a lista (nunca `ask`). " +
       "Campo de anexo sem arquivo também aparece em `fields` (o título e os tipos aceitos servem para o `attachment " +
       "link-field`). Comentário só aparece quando tem arquivo.",
     example: 'attachment list --card-id 1234 --name "contrato"'
