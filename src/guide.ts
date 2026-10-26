@@ -47,13 +47,26 @@ export const JOURNEYS: Journey[] = [
     title: "Ler um anexo/arquivo de um card (PDF, imagem, etc.)",
     when: "a tarefa depende de um arquivo anexado no card (proposta, documento, comprovante…)",
     steps: [
-      "cange card get --flow-id <f> --card-id <c> — o anexo vive num CAMPO do card (tipo INPUT_ATTACH_FIELD), NÃO na colaboração/relacionamento do card.",
-      "cange attachment download --flow-id <f> --card-id <c> --out <dir> — baixa TODOS os anexos do card para <dir> e devolve os CAMINHOS (nunca o base64). Sem --out, só lista.",
-      "Read <dir>/<arquivo> — leia o arquivo baixado (o Read renderiza PDF/imagem)."
+      "cange attachment list --card-id <c>: os arquivos do card nos CAMPOS de anexo e nos COMENTÁRIOS, cada um com o attachmentId.",
+      "cange attachment download --card-id <c> --attachment-id <id> --out <dir>: baixa só esse arquivo (ou --from campos|comentarios|todos). Sem filtro, baixa os dos campos e da aba Anexos. Devolve os CAMINHOS (nunca o base64); sem --out, só lista.",
+      "Leia o arquivo baixado (PDF/DOCX: extraia o texto antes, `cange recipe anexo`)."
     ],
     pitfall:
       "NUNCA baixe o anexo com curl na URL do blob (Azure): ela é privada/expira e dá 404/403. " +
       "SEMPRE use `cange attachment download` — ele passa pela rota autenticada do Cange, que lê o arquivo no servidor."
+  },
+  {
+    id: "enviar_anexo",
+    title: "Pôr um arquivo no card (comentário ou campo de anexo)",
+    when: "a tarefa pede para anexar um arquivo (relatório, proposta, planilha) num comentário ou num campo de anexo do card",
+    steps: [
+      "Grave o arquivo na pasta desta execução (TMPDIR do run), com caminho completo.",
+      "cange attachment upload --file <arquivo>: sobe e devolve o attachmentId (ainda não aparece para ninguém).",
+      "Comentário: cange comment create --card-id <c> --text \"...\" --attachment-id <id>. Campo: cange attachment link-field --card-id <c> --field \"<campo>\" --attachment-id <id>."
+    ],
+    pitfall:
+      "Arquivo fora da pasta da execução, com \"..\" ou link para fora é recusado (limite 25 MB). " +
+      "NÃO grave campo de anexo com `card update-values --set`: a lista do campo seria trocada; o `link-field` soma ao que já existe."
   },
   {
     id: "ler_card",

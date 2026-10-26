@@ -229,8 +229,8 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
               { sessionId: owner.sessionId }
             : {
                 cardId: owner.cardId,
-                // Id do ANEXO cunhado: grave-o num campo de anexo (INPUT_ATTACH_FIELD)
-                // via `card update-values` para o artefato aparecer NAQUELE campo.
+                // Id do ANEXO cunhado: ponha num campo de anexo (INPUT_ATTACH_FIELD) com
+                // `attachment link-field` para o artefato aparecer NAQUELE campo (C2).
                 attachmentId: r.attachment_id
               }),
           ...(Array.isArray(r.warnings) && r.warnings.length > 0 ? { warnings: r.warnings } : {})
@@ -248,7 +248,7 @@ export function registerArtifactPublishCommand(artifactCommand: Command): void {
       ARTIFACT_HTML_RULES + " " +
       "Mudar SÓ o visual de um artefato publicado: `artifact get --id <id> --out <arquivo>`, edite, confira com --dry-run e publique com o MESMO --type no MESMO dono (nova versão), sem reler os dados. " +
       "Dono: --card-id (cartão) OU --session-id (conversa do agente, sem cartão); sem flag, usa RUNNER_CARD_ID e, sem cartão, RUNNER_CHAT_SESSION_ID (do ambiente do processo; o .env do diretório não define o dono). " +
-      "Para pôr o artefato num CAMPO de anexo do card, grave o `attachmentId` no valor do campo (INPUT_ATTACH_FIELD) via `card update-values` (artefato de conversa não tem anexo).",
+      "Para pôr o artefato num CAMPO de anexo do card: `attachment link-field --card-id <id> --field \"<campo>\" --attachment-id <attachmentId>` (soma aos arquivos do campo; artefato de conversa não tem anexo).",
     example: 'artifact publish --card-id 1226170 --type mapa-cotacao --title "Mapa, Pedido 123" --file /tmp/mapa.html'
   });
 }

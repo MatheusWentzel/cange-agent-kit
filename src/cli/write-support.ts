@@ -23,6 +23,7 @@ import {
 
 import { ReadBudgetExceededError, type Throttle } from "../utils/rateLimit.js";
 
+import { assertUsableAttachmentIds, attachmentIdsInAnswer, userIdFromToken } from "./card-attachments.js";
 import { envCardId, envFlowId, envSpeakerUserId } from "./env-defaults.js";
 import { FLOW_FROM_CARD_HINT } from "./resource-ref.js";
 
@@ -95,11 +96,20 @@ export function needsFieldResolution(values: Record<string, unknown>, force: boo
   return Object.keys(values).some((key) => /^#?\d+$/.test(key.trim()) || looksLikeTitleKey(key));
 }
 
-/** Busca de entrada de cadastro e lista de usuários sob demanda, com cache. */
-export function createWriteLookups(kit: CangeAgentKit, ensureAuth: () => Promise<unknown>): ResolverLookups {
+/**
+ * Busca de entrada de cadastro e lista de usuários sob demanda, com cache.
+ * `acceptAttachmentIds` (I1): só a criação de cartão e o cadastro, que conferem os ids com
+ * `checkAttachmentValues` antes de gravar.
+ */
+export function createWriteLookups(
+  kit: CangeAgentKit,
+  ensureAuth: () => Promise<unknown>,
+  options: { acceptAttachmentIds?: boolean } = {}
+): ResolverLookups {
   let usersPromise: Promise<CompanyUser[]> | undefined;
   const screenLists = new Map<string, Promise<ReadonlySet<number> | undefined>>();
   return {
+    ...(options.acceptAttachmentIds ? { acceptAttachmentIds: true } : {}),
     // v9 (C1): `eu` num campo de usuário = quem conversa com o agente.
     speakerUserId: envSpeakerUserId,
     screenUsers(field) {
@@ -416,6 +426,80 @@ export function fieldTitles(resolved: ResolvedValue[]): string {
 }
 
 // ---------------------------------------------------------------------------
+// I1: ids de anexo em campo de anexo (criação de cartão e cadastro)
+// ---------------------------------------------------------------------------
+
+const ATTACH_TYPE = "INPUT_ATTACH_FIELD";
+
+function attachItems(resolved: ResolvedValue[]): Array<ResolvedValue & { value: number[] }> {
+  return resolved.filter(
+    (item): item is ResolvedValue & { value: number[] } =>
+      String(item.field.type).toUpperCase() === ATTACH_TYPE && Array.isArray(item.value) && item.value.length > 0
+  );
+}
+
+/**
+ * I1 (review do Alex, onda 1): confere os ids de anexo que a criação de cartão (`where`: o
+ * cartão novo) e o cadastro gravam. Regra do `resolveUsableAttachments`: o anexo foi o
+ * usuário da credencial que subiu (o bot, no run) ou já está no registro.
+ *
+ * `entry` (register update): o `PUT /form/answer` troca a lista inteira do campo, então o kit
+ * lê a entrada e SOMA, como o `attachment link-field` (o `value` do item vira a lista atual
+ * mais os novos). Sem conseguir ler a entrada, nada é gravado.
+ */
+export async function checkAttachmentValues(
+  kit: CangeAgentKit,
+  resolved: ResolvedValue[],
+  options: { where: string; entry?: { formAnswerId?: number | string } }
+): Promise<void> {
+  const items = attachItems(resolved);
+  if (items.length === 0) return;
+  const me = userIdFromToken(kit.client.getAccessToken());
+  let current = new Map<string, number[]>();
+  let alreadyThere: Set<number> | undefined;
+  if (options.entry) {
+    if (options.entry.formAnswerId === undefined) {
+      throw new CangeCliUsageError(
+        "Nada foi gravado: para pôr arquivo no campo de anexo de uma entrada, informe a entrada (--form-answer-id ou formAnswerId): " +
+          "o kit soma aos arquivos que ela já tem."
+      );
+    }
+    const formAnswerId = options.entry.formAnswerId;
+    const answer = registerEntryAnswer((await kit.contracts.getRegisterFormAnswer({ formAnswerId })).raw, formAnswerId);
+    if (!answer) {
+      throw new CangeCliUsageError(
+        `Nada foi gravado: não achei a entrada ${String(formAnswerId)} para somar os arquivos do campo de anexo. ` +
+          "Confira o id em `cange register entries --register-id <id>`."
+      );
+    }
+    const fieldIds = new Set(resolved.filter((item) => String(item.field.type).toUpperCase() === ATTACH_TYPE).map((item) => String(item.field.id)));
+    current = attachmentIdsInAnswer(answer, fieldIds);
+    alreadyThere = new Set([...current.values()].flat());
+  }
+  const sent = [...new Set(items.flatMap((item) => item.value))];
+  await assertUsableAttachmentIds(kit, sent, {
+    me,
+    ...(alreadyThere ? { alreadyThere } : {}),
+    where: options.where
+  });
+  if (!options.entry) return;
+  for (const item of items) {
+    const before = current.get(String(item.field.id)) ?? [];
+    item.value = [...before, ...item.value.filter((id) => !before.includes(id))];
+  }
+}
+
+/** A entrada do cadastro no `GET /form/answer` (o back devolve a lista ou a resposta). */
+function registerEntryAnswer(raw: unknown, formAnswerId: number | string): Record<string, unknown> | undefined {
+  const list = Array.isArray(raw) ? raw : raw !== null && raw !== undefined ? [raw] : [];
+  const answers = list.map(asRecord).filter((item): item is Record<string, unknown> => item !== undefined);
+  return (
+    answers.find((answer) => String(answer.id_form_answer ?? answer.id ?? "") === String(formAnswerId)) ??
+    (answers.length === 1 && answers[0]!.id_form_answer === undefined ? answers[0] : undefined)
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Cadastro (register create/update)
 // ---------------------------------------------------------------------------
 
@@ -432,6 +516,8 @@ export async function resolveRegisterValues(input: {
   validate: boolean;
   requireRequired: boolean;
   passthroughUnknown: boolean;
+  /** I1: register update, a entrada que recebe os valores (o campo de anexo soma à lista dela). */
+  entry?: { formAnswerId?: number | string };
 }): Promise<{ formId: string; values: Record<string, unknown>; issues: ValueIssue[]; resolved: ResolvedValue[] }> {
   await input.auth();
   let formId = input.formId !== undefined ? String(input.formId) : undefined;
@@ -457,8 +543,15 @@ export async function resolveRegisterValues(input: {
     layers: input.layers,
     forms: [scope],
     outOfScope: others,
-    lookups: createWriteLookups(input.kit, input.auth),
+    lookups: createWriteLookups(input.kit, input.auth, { acceptAttachmentIds: true }),
     passthroughUnknown: input.passthroughUnknown
+  });
+  // I1: anexo no cadastro aceita o id (o bot subiu, ou já está na entrada); no update, soma.
+  await checkAttachmentValues(input.kit, result.resolved, {
+    where: input.entry
+      ? `na entrada ${String(input.entry.formAnswerId ?? "?")} do cadastro ${String(input.registerId)}`
+      : `no cadastro ${String(input.registerId)}`,
+    ...(input.entry ? { entry: input.entry } : {})
   });
   const values = mergedValues(result);
   const issues = input.requireRequired

@@ -179,6 +179,46 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   `cange card move --to "<etapa>"` certo. Cartão excluído: 404 `CARD_DELETED`, mensagem repassada como veio.
 - Receitas: `cange recipe criar-card | gravar-campos | mover-card | comentar | mencionar`.
 
+## Arquivos do cartão: ler e pôr (desde 14/10/2026, C2 da onda 1)
+
+O cartão tem arquivos em dois lugares: os **campos de anexo** (formulário) e os **comentários** (colaboração).
+
+- **"O arquivo do cartão":** quando a pessoa fala de um arquivo do cartão (o contrato, a nota, o PDF), ele está num
+  campo de anexo **ou** na colaboração (anexos dos comentários). Procure nos dois de uma vez:
+  `cange attachment list --card-id <id> --name "<o que a pessoa disse>"`. `files` traz cada arquivo com `source`
+  (`campo`, `colaboracao` ou `aba_anexos`) e `where` (`campo "Contrato"`, `colaboração (comentário de Ana em 01/10)`).
+  Um candidato: use direto (o `next` já baixa ele). Veio `ask` (mais de um candidato, ou nenhum com o nome dito):
+  pergunte à pessoa antes, com essa frase, e não escolha sozinho. A busca compara palavra inteira ou começo de palavra
+  ("contr" acha "contrato"; "trato" não), no nome do arquivo e em onde ele está (campo, colaboração, autor), sem a data.
+- **Sem `--name` é só a lista, nunca `ask`.** Automação e rotina (ninguém para responder): não pergunte; use o arquivo
+  do campo de anexo que a instrução ou o playbook cita (o mais recente, se nada indicar) e diga no comentário qual
+  arquivo usou e de onde veio.
+- **Ler:** `cange attachment list --card-id <id>` lista os campos de anexo (com `allowedTypes`, os tipos que cada
+  campo aceita) e os comentários com arquivo; cada arquivo traz o `attachmentId`. Baixe com
+  `cange attachment download --card-id <id> --attachment-id <id> --out <pasta>` (id repetível ou separado por
+  vírgula; só arquivo DESTE cartão) ou por origem com `--from campos|comentarios|todos`. O arquivo vai para
+  `<pasta>/<attachmentId>-<nome>`. Sem as duas opções, o `download` faz o de antes (campos e aba Anexos).
+- **Pôr:** sempre 2 passos.
+  1. `cange attachment upload --file <arquivo>` sobe e devolve o `attachmentId`. O arquivo ainda não aparece para
+     ninguém. Só arquivo da **pasta desta execução** (o `TMPDIR` do run; fora do runner, o tmp do sistema), com
+     caminho completo, sem `..`, sem link simbólico para fora, não vazio, até **25 MB**. Tipo pela extensão (PDF e
+     imagem com prévia na tela). `--dry-run` confere sem subir.
+  2. Num comentário: `cange comment create --card-id <id> --text "..." --attachment-id <id>` (até 10 arquivos).
+     Num campo de anexo: `cange attachment link-field --card-id <id> --field "<campo>" --attachment-id <id>`
+     (soma ao que o campo já tem; arquivo que já está lá = `noop`).
+- O passo 2 é a ação **Anexos** do agente (o back trata `POST /card-comment` com arquivo e o `PUT /form/answer` de
+  campo de anexo como `attachment`): pede a permissão Anexos e, no agente semi-autônomo ou assistido, aprovação.
+  Depois de aprovado, rode o MESMO comando (o `attachmentId` não muda; não suba de novo).
+- O passo 2 só aceita arquivo que você mesmo subiu ou que já está neste cartão (campo ou comentário). Id de outro
+  lugar da empresa = exit 2, nada gravado.
+- `link-field` confere antes (exit 2, nada gravado): campo de anexo do fluxo (título, id ou hash), formulário que o
+  cartão grava (inicial, etapa atual ou etapa por onde já passou), tipo aceito pelo campo (`filter_schema`,
+  espelho de `config/attachFieldTypes.ts` do back).
+- Campo de anexo **não** se grava por `--set` (`card update-values`, `card move`, `card create`): a lista inteira seria
+  trocada. Lista vazia (limpar) segue valendo.
+- `CANGE_FORCE_DRY_RUN`: `upload`, `link-field` e `comment create` respondem dry-run; `POST /attachment/batch` é
+  leitura. Receitas: `cange recipe anexo` (ler) e `cange recipe enviar-anexo` (pôr).
+
 ## Sinônimos e ids flexíveis (desde 05/10/2026)
 
 - Busca: `--q` e `--search` são sinônimos em toda listagem com busca (`catalog`, `register entries`, `flow query`,
@@ -244,6 +284,17 @@ O caminho padrão de toda escrita é UM comando, sem arquivo de rascunho. O `--p
   `pedido anterior` (o pedido já estava aberto e o `--then` novo não vale) ou `sem conversa` (nada fica guardado).
   Com `combinada`, diga que segue sozinho depois da aprovação; não peça ao usuário para avisar. Na cabeça, sem
   `--then` aprovar só avisa na conversa.
+
+## Rotina proposta pelo próprio agente (desde 14/10/2026, só com token de run)
+
+- `cange routine propose --name "<nome>" --frequency diaria|dias-uteis|semanal|mensal [--time HH:MM]
+  [--weekdays seg,qua] [--monthdays 1,ultimo] --instruction "<o que fazer a cada execução>" [--flow <id>] [--card <id>]`:
+  cria o PEDIDO de uma rotina para você mesmo. A rotina só passa a existir quando quem administra o agente aprova, em
+  qualquer nível de autonomia; negada, nada é criado. Não pausa a execução: não espere a decisão nem repita o comando.
+- Frequência: diária (um horário), dias úteis (sem sábado e domingo), semanal ou mensal. Mais de uma vez por dia não
+  existe. `--dry-run` mostra o pedido sem enviar.
+- Na resposta, use o `message` da saída (ele diz que a rotina depende da aprovação). Limites: até 3 propostas
+  esperando decisão e um teto de rotinas por agente; o erro diz o próximo passo.
 
 ## Sequência recomendada para mutações com values (modo avançado, `--payload`)
 

@@ -78,6 +78,9 @@ describe("CANGE_FORCE_DRY_RUN: toda escrita do kit vira dry-run", () => {
     process.env.CANGE_ACCESS_TOKEN = TOKEN;
     process.env[FORCE_DRY_RUN_ENV] = "1";
     process.env.RUNNER_CHAT_SESSION_ID = "113";
+    // Como o runner: a pasta do run vem no TMPDIR. Sem isso o teste dependia do TMPDIR da
+    // máquina (existe no macOS, não no Linux do CI) e o upload falhava fechado (M2).
+    process.env.TMPDIR = dir;
     delete process.env.CANGE_OUTPUT_PROFILE;
     stdout.length = 0;
     stderr.length = 0;

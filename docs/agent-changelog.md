@@ -2,6 +2,68 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-10-24
+
+### `attachment list`: `ask` só com `--name`; busca por palavra (onda 1i, revisão do Alex)
+
+- **Sem `--name` não vem mais `ask`.** Antes, todo cartão com 2 ou mais arquivos trazia a pergunta, e automação e rotina
+  (sem ninguém para responder) travavam. Agora sem nome é listagem; `ask` só quando a pessoa citou um arquivo e não dá
+  para saber qual é.
+- **Busca por palavra inteira ou começo de palavra:** "contr" acha "contrato", "trato" não acha mais "contrato" e "ota"
+  não acha "nota". A data do comentário saiu do texto pesquisado ("10" ou "2026" não acham mais todo arquivo da
+  colaboração); o `where` mostrado continua com a data.
+
+## 2026-10-15
+
+### "O arquivo do cartão": campo de anexo ou colaboração (onda 1b, item 6)
+
+- `attachment list` ganhou `files`: todos os arquivos do cartão numa lista só, cada um com `source` (`campo`,
+  `colaboracao` ou `aba_anexos`) e `where` em português (`campo "Contrato"`, `colaboração (comentário de Ana Souza em
+  01/10/2026 às 10:00)`). `fields`, `comments` e `cardTab` seguem iguais (aditivo).
+- `attachment list --name "<trecho>"`: procura o arquivo que a pessoa citou no nome e em onde ele está ("o contrato da
+  colaboração" separa o do comentário do do campo); sem acento, sem "arquivo", "do", "cartão". Volta `match` e, quando
+  não dá para saber qual é (mais de um candidato ou nenhum com o nome), `ask` com a pergunta pronta para a pessoa. Um
+  candidato só: sem `ask` e o `next` já baixa ele. Cartão sem arquivo: `hint`.
+
+### Revisão do Alex na integração da onda 1 (arquivos do cartão)
+
+- **Mudança de saída do `attachment upload`:** antes devolvia o envelope cru do contrato (`{ raw }`, o id em
+  `raw.id_attachment`). Agora devolve `{ ok, attachmentId, fileName, bytes, mimeType, note, next[] }` (o `--dry-run`:
+  `{ dryRun, executed: false, payload }`). Quem lia `raw.id_attachment` passa a ler `attachmentId`. O arquivo subido
+  ainda não aparece para ninguém: entra no cartão com `comment create --attachment-id` ou `attachment link-field`.
+- **Regra do `TMPDIR`:** o `attachment upload` só aceita arquivo da pasta da execução, que é o `TMPDIR` do ambiente do
+  processo (um `.env` no diretório não escolhe a pasta). Sob o runner (qualquer variável `RUNNER_*` no ambiente do
+  processo), sem o `TMPDIR` do run (ausente, relativo, vindo de `.env` ou o tmp do sistema: `/tmp`, `/private/tmp`,
+  `/var/tmp`) o comando falha fechado (exit 2) em vez de usar o `/tmp` da máquina. Fora do runner, sem `TMPDIR`, vale o
+  tmp do sistema, como antes.
+- `attachment download --out`, sob o runner, só aceita pasta dentro da pasta do run (sem `..`, sem link para fora).
+- B1: `attachment link-field` lê a lista atual do campo da resposta em que o back grava: o rascunho da etapa
+  (`GET /form/pre-answer`) ou a última passagem confirmada. Antes lia só o `GET /card/` e o arquivo anexado pela tela
+  na etapa atual sumia. `attachment list`, `download --from campos` e `--attachment-id` também enxergam o rascunho da
+  etapa atual.
+- I1: `card create` (inclusive o formulário inicial com anexo obrigatório) e `register create`/`update` aceitam id de
+  anexo no campo de anexo (`--set "Contrato=7001"` ou no `--payload`), desde que o bot tenha subido o arquivo ou ele já
+  esteja no cadastro. No `register update` o kit soma à lista da entrada. `card update-values` e `card move` seguem
+  recusando e apontam para o `attachment link-field`.
+- M4: a aba Anexos do cartão (`attachment link-card`) entra no `attachment list` (`cardTab`), no `download --from todos`
+  e na conferência de "o arquivo é do cartão". `deleted` NULL, "N" ou vazio é vivo; só "S" é excluído.
+- `register form-answer get` manda `id_form_answer` (o parâmetro que o back lê); antes não achava a entrada.
+
+## 2026-10-14
+
+### Arquivos do cartão: o agente lê e põe (C2 da onda 1)
+
+- `attachment list` (novo, leitura): arquivos dos campos de anexo e dos comentários, com `attachmentId` e os tipos
+  aceitos por campo.
+- `attachment download --attachment-id <id> | --from campos|comentarios|todos`: baixa só os do cartão.
+- `attachment upload`: arquivo só da pasta da execução (sem `..`, sem link para fora, até 25 MB), tipo pela
+  extensão, `--dry-run`. Devolve o `attachmentId` e os próximos comandos.
+- `comment create --attachment-id <id>`: comentário com arquivo (`attachment_ids`). No `--dry-run`, plano com
+  `action: "attachment"`.
+- `attachment link-field` (novo): põe o arquivo num campo de anexo somando aos que já estão; confere campo, etapa e
+  tipo aceito. Plano com `action: "attachment"`; `noop` quando já está.
+- `--set` em campo de anexo vira erro de uso com o comando certo.
+
 ## 2026-10-10
 
 ### Revisão do Alex, 2ª rodada (lote v9)

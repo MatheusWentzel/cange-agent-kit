@@ -62,9 +62,11 @@ export function createRegistersContracts(client: CangeClient): RegistersContract
         });
       }
 
+      // A rota lê `id_form_answer` (form.routes.ts, GET /answer); com `form_answer_id` ela
+      // procurava a entrada NaN e não achava nada.
       const raw = await client.get<unknown>("/form/answer/", {
         query: {
-          form_answer_id: toNumber(parsed.data.formAnswerId)
+          id_form_answer: toNumber(parsed.data.formAnswerId)
         }
       });
       return { raw };

@@ -22,8 +22,11 @@ import { registerArtifactListCommand } from "./commands/artifact-list.js";
 import { registerArtifactGetCommand } from "./commands/artifact-get.js";
 import { registerAgentHeadCommands } from "./commands/agent-head.js";
 import { registerAccessCommands, registerCatalogCommand } from "./commands/access.js";
+import { registerRoutineCommands } from "./commands/routine-propose.js";
 import { registerAttachmentDownloadCommand } from "./commands/attachment-download.js";
 import { registerAttachmentLinkCardCommand } from "./commands/attachment-link-card.js";
+import { registerAttachmentLinkFieldCommand } from "./commands/attachment-link-field.js";
+import { registerAttachmentListCommand } from "./commands/attachment-list.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
 import { registerToolCallCommand } from "./commands/tool-call.js";
 import { registerAuthCommand } from "./commands/auth.js";
@@ -158,6 +161,9 @@ export function createProgram(): Command {
   registerAttachmentUploadCommand(attachmentCommand);
   registerAttachmentLinkCardCommand(attachmentCommand);
   registerAttachmentDownloadCommand(attachmentCommand);
+  // C2 (onda 1): arquivos do cartão nos campos de anexo e nos comentários.
+  registerAttachmentListCommand(attachmentCommand);
+  registerAttachmentLinkFieldCommand(attachmentCommand);
 
   const artifactCommand = program
     .command("artifact")
@@ -177,6 +183,8 @@ export function createProgram(): Command {
   // nomes) e PEDE acesso; quem pode convidar para o recurso decide no Cange.
   registerCatalogCommand(program);
   registerAccessCommands(program);
+  // D3 (14/10): `routine propose` (pedido de rotina do próprio agente, com aprovação).
+  registerRoutineCommands(program);
 
   const toolCommand = program.command("tool").description("Ferramentas de API do agente (agent_tool type='api')");
   registerToolCallCommand(toolCommand);

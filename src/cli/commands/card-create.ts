@@ -25,10 +25,11 @@ import { createCommandAction, withExitCode } from "../context.js";
 import { exitCodeForBatch } from "../exit-codes.js";
 import { readPayloadFile } from "../helpers.js";
 import { EXIT_CODES } from "../exit-codes.js";
-import { findMissingRequired, valuesOf, type ResolverLookups } from "../../utils/valueResolver.js";
+import { findMissingRequired, valuesOf, type ResolvedValue, type ResolverLookups } from "../../utils/valueResolver.js";
 import {
   addInlineValueOptions,
   authOnce as authOnceShared,
+  checkAttachmentValues,
   createWriteLookups,
   fieldTitles,
   formattedInfo,
@@ -257,8 +258,10 @@ async function runInlineCreate(
     layers: [inline],
     forms: [init],
     outOfScope: otherStepScopes(ctx, new Set([init.formId])),
-    lookups: createWriteLookups(kit, auth)
+    lookups: createWriteLookups(kit, auth, { acceptAttachmentIds: true })
   });
+  // I1: campo de anexo do formulário inicial aceita o id do anexo que o bot subiu.
+  await checkAttachmentValues(kit, resolved, { where: "no cartão novo" });
   const values = valuesOf(resolved);
   const formatted = formattedOf(resolved);
   const allIssues =
@@ -393,6 +396,8 @@ interface DiscoveryDeps {
   fields: (flowId: string | number) => ReturnType<CangeAgentKit["contracts"]["getFieldsByFlow"]>;
   formInitId: (flowId: string | number) => Promise<number | string | undefined>;
   lookups: ResolverLookups;
+  /** I1: confere os ids de anexo do formulário inicial (o bot subiu). */
+  checkAttachments: (resolved: ResolvedValue[]) => Promise<void>;
 }
 
 /**
@@ -460,7 +465,8 @@ function createDiscoveryDeps(kit: CangeAgentKit, ensureAuth: () => Promise<unkno
       flowCache.set(key, hit);
       return hit;
     },
-    lookups: createWriteLookups(kit, ensureAuth)
+    lookups: createWriteLookups(kit, ensureAuth, { acceptAttachmentIds: true }),
+    checkAttachments: (resolved) => checkAttachmentValues(kit, resolved, { where: "no cartão novo" })
   };
 }
 
@@ -514,6 +520,7 @@ async function loadItem(
     lookups: deps.lookups,
     passthroughUnknown: !options.validateFields
   });
+  await deps.checkAttachments(resolved);
   const values = mergedValues({ resolved, passthrough });
   const allIssues = options.validateFields ? [...issues, ...findMissingRequired(scoped, values)] : issues;
   const validation = validationSummary(allIssues);

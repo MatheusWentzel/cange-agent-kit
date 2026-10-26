@@ -82,6 +82,12 @@ export interface ResolverLookups {
    * um nome como outro qualquer.
    */
   speakerUserId?: () => number | undefined;
+  /**
+   * I1 (review do Alex, onda 1): campo de anexo recebe ids de anexo. Só na criação de cartão e
+   * no cadastro, que conferem os ids depois (`checkAttachmentValues`). Sem a opção (update-values
+   * e move de cartão), o campo de anexo é recusado e o erro aponta para o `attachment link-field`.
+   */
+  acceptAttachmentIds?: boolean;
 }
 
 /** Erro de `eu` fora de conversa (rotina, automação ou terminal). */
@@ -635,6 +641,38 @@ async function resolveRegisterEntry(
   };
 }
 
+/**
+ * I1: ids de anexo para o campo de anexo (`7001`, `"7001, 7002"`, `"#7001"`, `[7001]`,
+ * `"[7001]"`), sem repetir. Os ids saem do `cange attachment upload` (ou do cadastro).
+ */
+function parseAttachmentIdList(raw: unknown): Coerced {
+  let items: unknown[];
+  if (Array.isArray(raw)) {
+    items = raw;
+  } else if (typeof raw === "string") {
+    items = parseJsonArray(raw) ?? raw.split(",");
+  } else {
+    items = [raw];
+  }
+  const ids: number[] = [];
+  for (const item of items) {
+    const text = typeof item === "number" ? String(item) : typeof item === "string" ? item.trim().replace(/^#/, "") : "";
+    if (text === "" && typeof item === "string") continue;
+    if (!/^\d+$/.test(text) || Number(text) <= 0) {
+      return {
+        ok: false,
+        error:
+          `campo de anexo recebe o número do anexo (veio ${JSON.stringify(item)}): suba o arquivo com ` +
+          "`cange attachment upload --file <arquivo>` e use o attachmentId que ele devolve"
+      };
+    }
+    const id = Number(text);
+    if (!ids.includes(id)) ids.push(id);
+  }
+  if (ids.length === 0) return { ok: false, error: "informe o número do anexo (o attachmentId do `cange attachment upload`)" };
+  return { ok: true, value: ids };
+}
+
 /** Converte o valor para o formato que o campo grava. Não lança. */
 export async function coerceFieldValue(
   field: NormalizedField,
@@ -643,6 +681,20 @@ export async function coerceFieldValue(
 ): Promise<Coerced> {
   if (isEmptyValue(raw)) return { ok: true, value: raw };
   const type = normalizeFieldType(field.type);
+
+  // C2 (onda 1): o campo de anexo guarda a LISTA de arquivos e o `PUT /form/answer` troca
+  // a lista inteira (um `--set` apagava os arquivos que já estavam lá). Arquivo em campo
+  // tem comando próprio, que soma à lista e passa pela permissão de Anexos.
+  // Lista vazia (limpar o campo) segue como antes.
+  if (type === "INPUT_ATTACH_FIELD" && !(Array.isArray(raw) && raw.length === 0)) {
+    if (lookups?.acceptAttachmentIds) return parseAttachmentIdList(raw);
+    return {
+      ok: false,
+      error:
+        "campo de anexo não é gravado por --set: suba o arquivo com `cange attachment upload --file <arquivo>` " +
+        'e ponha no campo com `cange attachment link-field --card-id <id> --field "<campo>" --attachment-id <id>`'
+    };
+  }
 
   if (NUMBER_TYPES.has(type)) {
     if (typeof raw === "number") return { ok: true, value: raw };

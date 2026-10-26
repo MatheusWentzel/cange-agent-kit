@@ -62,7 +62,8 @@ export function registerRegisterUpdateCommand(registerCommand: Command): void {
             layers: [inline],
             validate: true,
             requireRequired: false,
-            passthroughUnknown: false
+            passthroughUnknown: false,
+            entry: { formAnswerId: options.formAnswerId }
           });
           const payload = {
             idForm: Number(formId),
@@ -119,7 +120,8 @@ export function registerRegisterUpdateCommand(registerCommand: Command): void {
           layers: [payload.values, inline],
           validate,
           requireRequired: validate,
-          passthroughUnknown: !validate
+          passthroughUnknown: !validate,
+          entry: payload.formAnswerId !== undefined ? { formAnswerId: payload.formAnswerId } : {}
         });
         // v9 (h): telefone e documento já vão no payload como a tela grava.
         const formatted = formattedInfo(formattedOf(resolved));

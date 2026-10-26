@@ -21,14 +21,33 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
   anexo: {
     title: "Ler um anexo do cartão (proposta, documento, comprovante)",
     lines: [
-      `1) Baixe pelo comando (rota autenticada): \`cange attachment download --flow-id <id> --card-id <id> --out ${RUN_FOLDER}/anexos\`.`,
-      "   O anexo vive num CAMPO do cartão (tipo anexo), não na colaboração nem no relacionamento.",
-      "   NUNCA baixe com curl na URL do blob (Azure): dá 404 ou 403.",
-      "2) PDF ou DOCX: NUNCA use `Read` no arquivo binário (vira base64 e explode o contexto; 1,5 MB num run real).",
+      "1) Veja os arquivos do cartão: `cange attachment list --card-id <id> --name \"<o que a pessoa disse>\"`. Procura nos",
+      "   campos de anexo E na colaboração (comentários); `files` diz de onde vem cada um. Um candidato: use direto. Veio",
+      "   `ask` (mais de um, ou nenhum com o nome dito): pergunte à pessoa com essa frase antes de baixar.",
+      "   Sem `--name` é só a lista (nunca `ask`). Automação ou rotina (ninguém para responder): não pergunte; use o arquivo",
+      "   do campo de anexo que a instrução cita (o mais recente, se nada indicar) e diga no comentário qual usou.",
+      `2) Baixe pelo comando (rota autenticada): \`cange attachment download --card-id <id> --attachment-id <id> --out ${RUN_FOLDER}/anexos\``,
+      "   (`--from comentarios`, `--from campos` ou `--from todos` baixa por origem). NUNCA baixe com curl na URL do blob: dá 404 ou 403.",
+      "3) PDF ou DOCX: NUNCA use `Read` no arquivo binário (vira base64 e explode o contexto; 1,5 MB num run real).",
       "   Extraia o TEXTO primeiro e leia o .txt:",
       `   - docx: \`unzip -p "<arquivo>.docx" word/document.xml | perl -pe 's/<\\/w:p>/\\n/g; s/<[^>]+>//g' > ${RUN_FOLDER}/doc.txt\``,
       `   - pdf: \`pdftotext <arquivo>.pdf ${RUN_FOLDER}/doc.txt\` (sem pdftotext: \`python3 -c "import pypdf; ..."\`)`,
-      "3) Planilha (xlsx/csv): leia com python3 e imprima só o resumo que a tarefa pede, nunca o arquivo inteiro."
+      "4) Planilha (xlsx/csv): leia com python3 e imprima só o resumo que a tarefa pede, nunca o arquivo inteiro."
+    ]
+  },
+  "enviar-anexo": {
+    title: "Pôr um arquivo no cartão (comentário ou campo de anexo)",
+    lines: [
+      `1) Grave o arquivo na pasta desta execução (${RUN_FOLDER}), com caminho completo. Arquivo de fora dela, com "..",`,
+      "   ou link para fora é recusado. Limite: 25 MB.",
+      `2) Suba: \`cange attachment upload --file ${RUN_FOLDER}/<arquivo>\`. Devolve o \`attachmentId\`; o arquivo ainda não`,
+      "   aparece para ninguém.",
+      "3) Ponha no cartão, em outro comando:",
+      '   - num comentário: `cange comment create --card-id <id> --text "<texto>" --attachment-id <attachmentId>`;',
+      '   - num campo de anexo: `cange attachment link-field --card-id <id> --field "<campo>" --attachment-id <attachmentId>`',
+      "     (soma aos arquivos que o campo já tem; o campo pode aceitar só alguns tipos, veja em `attachment list`).",
+      "Este passo 3 usa a permissão Anexos e pode pedir aprovação: é o mesmo comando depois de aprovado (o attachmentId",
+      "não muda, não suba de novo). Um anexo que já está no cartão também pode ir para outro comentário ou campo dele."
     ]
   },
   comentar: {
