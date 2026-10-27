@@ -84,6 +84,15 @@ describe("buildApiToolProposalBody (especificação → corpo da rota)", () => {
     expect(() => buildApiToolProposalBody({ ...zapi, url: "https://{{secret:h}}.z-api.io/x", secret_path_params: [] })).toThrow(/host/);
   });
 
+  it("texto com cara de chave em qualquer campo recusa antes do --dry-run imprimir", () => {
+    const secret = /Valor de credencial na proposta/;
+    expect(() => buildApiToolProposalBody({ ...CEP, description: "use Bearer abcdefghijklmnopqrstuvwxyz" })).toThrow(secret);
+    expect(() => buildApiToolProposalBody({ ...CEP, reason: "a chave é sk-abcdefghijklmnopqrstuvwxyz123" })).toThrow(secret);
+    expect(() => buildApiToolProposalBody({ ...APOLLO, headers: [{ key: "X-Trace", value: "eyJhbGciOiJIUzI1Ni.eyJzdWIiOiIxMjM0NTY3.SflKxwRJSMeKKF2QT4fw" }] })).toThrow(secret);
+    expect(() => buildApiToolProposalBody({ ...APOLLO, body: { type: "json", content: "{\"k\":\"ghp_abcdefghijklmnopqrstuvwxyz12\"}" } })).toThrow(secret);
+    expect(() => buildApiToolProposalBody({ ...APOLLO, secret_headers: [{ key: "X-Api-Key", hint: "AIzaSyA1234567890abcdefghijklmnopqrstuv" }] })).toThrow(secret);
+  });
+
   it("recusa http, host com parâmetro, {param} sem declarar e campo desconhecido", () => {
     expect(() => buildApiToolProposalBody({ ...CEP, url: "http://viacep.com.br/ws/{cep}/json" })).toThrow(/https/);
     expect(() => buildApiToolProposalBody({ ...CEP, url: "https://{cep}.x.com/a" })).toThrow(/host/);
@@ -203,6 +212,23 @@ describe("cange tool propose (CLI)", () => {
     mockFetch({ status: "error", message: "Esta conversa está em \"Planejar\".", complement: { code: "PLAN_MODE_WRITE_BLOCKED" } }, 403);
     await run(["tool", "propose", "--spec", file("apollo.json")]);
     expect(stderr.join("")).toMatch(/descreva na resposta a ferramenta/);
+  });
+
+  it("--dry-run com chave na especificação: erro, nada impresso no stdout", async () => {
+    await writeFile(file("com-chave.json"), JSON.stringify({ ...APOLLO, description: "Bearer abcdefghijklmnopqrstuvwxyz" }), "utf8");
+    const fetchMock = mockFetch({});
+    await run(["tool", "propose", "--spec", file("com-chave.json"), "--dry-run"]);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(process.exitCode).toBe(2);
+    expect(stdout.join("")).not.toContain("abcdefghijklmnopqrstuvwxyz");
+    expect(stderr.join("")).not.toContain("abcdefghijklmnopqrstuvwxyz");
+  });
+
+  it("chave do ambiente desligada (403 tipado): a frase clara, sem repetir", async () => {
+    mockFetch({ status: "error", message: "Propor ferramenta de API ainda não está disponível neste ambiente.", complement: { code: "API_TOOL_PROPOSE_UNAVAILABLE" } }, 403);
+    await run(["tool", "propose", "--spec", file("apollo.json")]);
+    expect(process.exitCode).not.toBe(0);
+    expect(stderr.join("")).toMatch(/Não tente de novo; diga ao usuário que quem administra o agente pode cadastrar/);
   });
 
   it("anotado como mutação (o runner classifica pelo comando)", () => {

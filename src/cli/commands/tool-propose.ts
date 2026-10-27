@@ -23,6 +23,8 @@ interface ToolProposeOptions {
 
 /** Próximo passo por código do back (complement.code), anexado à mensagem do erro. */
 const PROPOSE_ERROR_HINTS: Record<string, string> = {
+  API_TOOL_PROPOSE_UNAVAILABLE:
+    "Propor ferramenta de API ainda não está disponível neste ambiente. Não tente de novo; diga ao usuário que quem administra o agente pode cadastrar a ferramenta na aba Ferramentas.",
   API_TOOL_PROPOSE_DISABLED:
     "Quem administra o agente desligou \"Propor ferramentas de API\" (Ferramentas). Não proponha de novo; diga ao usuário que quem administra o agente pode cadastrar a ferramenta na aba Ferramentas.",
   API_TOOL_PROPOSALS_PENDING_LIMIT:

@@ -72,6 +72,37 @@ const SECRET_FIELDS = new Set(["value", "valueenc", "value_enc", "secret", "toke
 /** Nome que É a credencial (cabeçalho, query ou parâmetro). `page_token` passa. */
 const CREDENTIAL_NAME_RE = /^(x-)?(authorization|api[-_]?key|apikey|access[-_]?token|auth[-_]?token|token|secret|client[-_]?secret|client[-_]?token|password|passwd|senha|private[-_]?key|credentials?)$/i;
 const PLACEHOLDER_RE = /\{([a-zA-Z][a-zA-Z0-9_]*)\}/g;
+
+/**
+ * Valores com cara de segredo, em QUALQUER texto da especificação (as mesmas heurísticas
+ * do Cange, `SECRET_VALUE_RES`). Conferido antes de tudo: o `--dry-run` nunca imprime uma
+ * chave (2ª revisão do Alex).
+ */
+export const SECRET_VALUE_RES: readonly RegExp[] = [
+  /AKIA[0-9A-Z]{16}/,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/,
+  /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/,
+  /\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{10,}/,
+  /\bsk-[A-Za-z0-9_-]{20,}/,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}/,
+  /xox[baprs]-[0-9A-Za-z-]{10,}/,
+  /AIza[0-9A-Za-z_-]{35}/,
+  /\bbearer\s+[A-Za-z0-9._~+/=-]{16,}/i,
+  /\bbasic\s+[A-Za-z0-9+/=]{16,}/i
+];
+
+/** Todo texto (chaves e valores) dentro da especificação, em qualquer profundidade. */
+function allStrings(value: unknown, out: string[] = []): string[] {
+  if (typeof value === "string") out.push(value);
+  else if (Array.isArray(value)) value.forEach((v) => allStrings(v, out));
+  else if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out.push(k);
+      allStrings(v, out);
+    }
+  }
+  return out;
+}
 const IDENTIFIER_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
 export const API_TOOL_SECRET_RULE =
@@ -128,6 +159,8 @@ function items(value: unknown, field: string): ApiToolProposalItem[] | undefined
  */
 export function buildApiToolProposalBody(raw: unknown): ApiToolProposalBody {
   if (!isRecord(raw)) fail("A especificação precisa ser um objeto JSON (veja `cange tool propose --help`).");
+  // Antes de qualquer outra coisa (e antes do --dry-run imprimir o corpo): valor com cara de chave.
+  if (allStrings(raw).some((t) => SECRET_VALUE_RES.some((re) => re.test(t)))) secretFail("texto com cara de chave, token ou senha");
   for (const k of Object.keys(raw)) {
     if (SECRET_FIELDS.has(k.toLowerCase())) secretFail(k);
     if (!TOP_KEYS.has(k)) fail(`Campo desconhecido na especificação: "${k}". Campos aceitos: ${[...TOP_KEYS].join(", ")}.`);
