@@ -64,6 +64,26 @@ describe("buildApiToolProposalBody (especificação → corpo da rota)", () => {
     expect(() => buildApiToolProposalBody({ ...CEP, url: "https://u:s@viacep.com.br/ws/{cep}/json" })).toThrow(secret);
   });
 
+  it("segredo no caminho (tipo Z-API): só o nome em {{secret:nome}}; fora do caminho ou valor depois de /token/ recusa", () => {
+    const zapi = {
+      name: "Z-API",
+      description: "Envia texto pelo WhatsApp.",
+      method: "POST",
+      url: "https://api.z-api.io/instances/{{secret:instancia}}/token/{{secret:token}}/send-text",
+      body: { type: "json", content: "{\"phone\":\"{telefone}\"}" },
+      params: [{ name: "telefone", required: true }],
+      secret_headers: [{ key: "Client-Token" }],
+      secret_path_params: [{ name: "instancia", hint: "ID da instância" }]
+    };
+    expect(buildApiToolProposalBody(zapi).secret_path_params).toEqual([{ name: "instancia", hint: "ID da instância" }]);
+    expect(() => buildApiToolProposalBody({ ...zapi, secret_path_params: [{ name: "token", value: "abc" }] })).toThrow(/Valor de credencial/);
+    expect(() => buildApiToolProposalBody({ ...zapi, secret_path_params: [{ name: "outro" }] })).toThrow(/não usa/);
+    expect(() => buildApiToolProposalBody({ ...zapi, url: "https://api.z-api.io/instances/{{secret:instancia}}/token/A1B2C3/send-text", secret_path_params: [] })).toThrow(/Valor de credencial/);
+    expect(() => buildApiToolProposalBody({ ...zapi, url: `${zapi.url}?x={{secret:instancia}}` })).toThrow(/só pode ficar no caminho/);
+    expect(() => buildApiToolProposalBody({ ...zapi, headers: [{ key: "X-I", value: "{{secret:instancia}}" }] })).toThrow(/só pode ficar no caminho/);
+    expect(() => buildApiToolProposalBody({ ...zapi, url: "https://{{secret:h}}.z-api.io/x", secret_path_params: [] })).toThrow(/host/);
+  });
+
   it("recusa http, host com parâmetro, {param} sem declarar e campo desconhecido", () => {
     expect(() => buildApiToolProposalBody({ ...CEP, url: "http://viacep.com.br/ws/{cep}/json" })).toThrow(/https/);
     expect(() => buildApiToolProposalBody({ ...CEP, url: "https://{cep}.x.com/a" })).toThrow(/host/);

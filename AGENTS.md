@@ -305,7 +305,9 @@ O cartão tem arquivos em dois lugares: os **campos de anexo** (formulário) e o
   docs_url?, reason? }`. A URL é https com host fixo; o que o agente preenche a cada chamada vai como `{param}` no
   caminho, na query, nos cabeçalhos ou no corpo, e cada `{param}` é declarado em `params`.
 - **A credencial nunca vai na proposta.** `secret_headers: [{ "key": "Authorization", "hint": "Bearer <chave>" }]`
-  diz só ONDE ela vai, sem valor. Valor de credencial (no cabeçalho secreto, num cabeçalho ou query de credencial, na
+  diz só ONDE ela vai, sem valor. API que leva a credencial no caminho (ex.: Z-API,
+  `/instances/{{secret:instancia}}/token/{{secret:token}}/send-text`) usa `{{secret:nome}}` só no caminho, com a dica
+  opcional em `secret_path_params: [{ "name": "token", "hint": "token da instância" }]`. Valor de credencial (no cabeçalho secreto, num cabeçalho ou query de credencial, na
   URL ou como parâmetro) é recusado pelo kit e pelo Cange. Nunca peça a credencial na conversa.
 - Em "Planejar" a proposta não é enviada (o Cange recusa): descreva a ferramenta na resposta. Ambiente que ainda não
   tem a rota responde com mensagem clara; não tente de novo.

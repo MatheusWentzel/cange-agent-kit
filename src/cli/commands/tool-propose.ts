@@ -80,7 +80,7 @@ export function registerToolProposeCommand(toolCommand: Command): void {
     )
     .requiredOption(
       "--spec <arquivo.json>",
-      "JSON { name, description, method, url (https, {param} no caminho), query?, headers?, body?, timeout?, params?, secret_headers?: [{key, hint}] (SEM valor), docs_url?, reason? }"
+      "JSON { name, description, method, url (https, {param} no caminho), query?, headers?, body?, timeout?, params?, secret_headers?: [{key, hint}] (SEM valor), secret_path_params?: [{name, hint}] (para {{secret:nome}} no caminho da url), docs_url?, reason? }"
     )
     .option("--dry-run", "Confere e mostra o pedido sem enviar")
     .action(

@@ -28,6 +28,12 @@ export interface ApiToolProposalSecretSlot {
   hint?: string;
 }
 
+/** Segredo no CAMINHO da URL (`{{secret:nome}}`, ex.: Z-API): só o nome e a dica. */
+export interface ApiToolProposalPathSlot {
+  name: string;
+  hint?: string;
+}
+
 export interface ApiToolProposalBody {
   name: string;
   description: string;
@@ -39,6 +45,7 @@ export interface ApiToolProposalBody {
   timeout?: number;
   params?: ApiToolProposalParam[];
   secret_headers?: ApiToolProposalSecretSlot[];
+  secret_path_params?: ApiToolProposalPathSlot[];
   docs_url?: string;
   reason?: string;
 }
@@ -54,8 +61,12 @@ const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE"] as const;
 const BODY_TYPES = ["json", "form-data", "x-www-form-urlencoded", "xml"] as const;
 const PARAM_TYPES = ["string", "number", "boolean"] as const;
 const TOP_KEYS = new Set([
-  "name", "description", "method", "url", "query", "headers", "body", "timeout", "params", "secret_headers", "docs_url", "reason"
+  "name", "description", "method", "url", "query", "headers", "body", "timeout", "params", "secret_headers", "secret_path_params",
+  "docs_url", "reason"
 ]);
+const SECRET_PATH_TOKEN_RE = /\{\{secret:([a-zA-Z][a-zA-Z0-9_]*)\}\}/g;
+/** Segmento do caminho que anuncia a credencial no segmento seguinte (`/token/<valor>`). */
+const CREDENTIAL_PATH_SEGMENT_RE = /^(token|key|apikey|api[-_]?key|access[-_]?token|secret|password|senha|client[-_]?token)$/i;
 /** Campo que só pode ser o VALOR de uma credencial: nunca vem do agente. */
 const SECRET_FIELDS = new Set(["value", "valueenc", "value_enc", "secret", "token", "password", "senha", "api_key", "apikey", "credential", "credentials"]);
 /** Nome que É a credencial (cabeçalho, query ou parâmetro). `page_token` passa. */
@@ -65,7 +76,8 @@ const IDENTIFIER_RE = /^[a-zA-Z][a-zA-Z0-9_]*$/;
 
 export const API_TOOL_SECRET_RULE =
   "A credencial (chave, token, senha) nunca vai na proposta: diga só o cabeçalho onde ela vai em secret_headers " +
-  "[{\"key\": \"Authorization\", \"hint\": \"Bearer <chave>\"}], sem valor. Quem administra o agente digita o valor num campo " +
+  "[{\"key\": \"Authorization\", \"hint\": \"Bearer <chave>\"}], sem valor; se a API leva a credencial no caminho da URL, escreva " +
+  "{{secret:nome}} no caminho (ex.: /token/{{secret:token}}). Quem administra o agente digita o valor num campo " +
   "seguro ao revisar. Nunca peça a credencial na conversa.";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -129,7 +141,18 @@ export function buildApiToolProposalBody(raw: unknown): ApiToolProposalBody {
   if (!/^https:\/\//i.test(url)) fail("url precisa começar com https://.");
   const authority = url.slice("https://".length).split(/[/?#]/, 1)[0] ?? "";
   if (authority.includes("@")) secretFail("url (usuário e senha na URL)");
-  if (/\{[a-zA-Z]/.test(authority)) fail("O endereço (host) da url precisa ser fixo: use {parametro} só no caminho, na query, nos cabeçalhos ou no corpo.");
+  if (/\{/.test(authority)) fail("O endereço (host) da url precisa ser fixo: use {parametro} só no caminho, na query, nos cabeçalhos ou no corpo.");
+  const afterHost = url.slice("https://".length + authority.length);
+  const pathPart = afterHost.split(/[?#]/, 1)[0] ?? "";
+  const pathSecretNames = Array.from(new Set(Array.from(pathPart.matchAll(SECRET_PATH_TOKEN_RE), (m) => m[1]!)));
+  // `/token/<valor>`: a credencial no caminho, fixa ou como parâmetro do agente.
+  const segments = pathPart.split("/");
+  segments.forEach((seg, i) => {
+    const next = segments[i + 1];
+    if (!CREDENTIAL_PATH_SEGMENT_RE.test(seg) || next === undefined || next === "") return;
+    if (/^\{\{secret:[a-zA-Z][a-zA-Z0-9_]*\}\}$/.test(next)) return;
+    secretFail(`url (caminho depois de /${seg}/)`);
+  });
 
   let params: ApiToolProposalParam[] | undefined;
   if (raw.params !== undefined) {
@@ -168,6 +191,23 @@ export function buildApiToolProposalBody(raw: unknown): ApiToolProposalBody {
     });
   }
 
+  let secretPathParams: ApiToolProposalPathSlot[] | undefined;
+  if (raw.secret_path_params !== undefined) {
+    if (!Array.isArray(raw.secret_path_params)) fail("secret_path_params precisa ser uma lista de { name, hint }.");
+    secretPathParams = raw.secret_path_params.map((s, i) => {
+      if (!isRecord(s)) fail(`secret_path_params[${i}] precisa ser { name, hint }.`);
+      for (const k of Object.keys(s)) {
+        if (k === "name" || k === "hint") continue;
+        if (SECRET_FIELDS.has(k.toLowerCase())) secretFail(`secret_path_params ${k}`);
+        fail(`secret_path_params[${i}]: campo desconhecido "${k}" (use só name e hint).`);
+      }
+      const pname = text(s.name, `secret_path_params[${i}].name`, { required: true, max: 60 })!;
+      if (!pathSecretNames.includes(pname)) fail(`secret_path_params cita "${pname}", mas o caminho da url não usa {{secret:${pname}}}.`);
+      const hint = text(s.hint, `secret_path_params[${i}].hint`, { max: 120 });
+      return hint ? { name: pname, hint } : { name: pname };
+    });
+  }
+
   const query = items(raw.query, "query");
   const headers = items(raw.headers, "headers");
   let body: ApiToolProposalBody["body"];
@@ -182,6 +222,13 @@ export function buildApiToolProposalBody(raw: unknown): ApiToolProposalBody {
   if (raw.timeout !== undefined) {
     timeout = Number(raw.timeout);
     if (!Number.isInteger(timeout) || timeout < 1 || timeout > 120) fail("timeout: segundos, de 1 a 120.");
+  }
+
+  // `{{secret:nome}}` só no CAMINHO da url (o Cange recusa na query, cabeçalho ou corpo).
+  const outsidePath = [afterHost.slice(pathPart.length), ...(query ?? []).flatMap((q) => [q.key, q.value]),
+    ...(headers ?? []).flatMap((h) => [h.key, h.value]), body?.content ?? ""];
+  if (outsidePath.some((t) => /\{\{secret:/.test(t))) {
+    fail("{{secret:nome}} só pode ficar no caminho da url. Para credencial em cabeçalho, use secret_headers (sem valor).");
   }
 
   // Todo {parametro} usado precisa estar em params (senão ninguém o preenche).
@@ -204,6 +251,7 @@ export function buildApiToolProposalBody(raw: unknown): ApiToolProposalBody {
     ...(timeout !== undefined ? { timeout } : {}),
     ...(params ? { params } : {}),
     ...(secretHeaders ? { secret_headers: secretHeaders } : {}),
+    ...(secretPathParams ? { secret_path_params: secretPathParams } : {}),
     ...(docsUrl ? { docs_url: docsUrl } : {}),
     ...(reason ? { reason } : {})
   };
