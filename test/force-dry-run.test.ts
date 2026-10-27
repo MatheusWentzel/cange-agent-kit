@@ -55,7 +55,8 @@ beforeAll(async () => {
     "step-create.json": { name: "Etapa", index: 0 },
     "field-create.json": { name: "campo", type: "TEXT_SHORT_FIELD", title: "Campo", index: 0, required: "0" },
     "step-rel.json": { flow_step_id: 1, step_available_id: 2, isActive: "1" },
-    "tool-params.json": { q: "x" }
+    "tool-params.json": { q: "x" },
+    "tool-spec.json": { name: "CEP", description: "Endereço de um CEP", method: "GET", url: "https://viacep.com.br/ws/{cep}/json", params: [{ name: "cep", required: true }] }
   };
   for (const [name, body] of Object.entries(payloads)) {
     await writeFile(file(name), JSON.stringify(body), "utf8");
@@ -154,6 +155,7 @@ describe("CANGE_FORCE_DRY_RUN: toda escrita do kit vira dry-run", () => {
     ["access request", () => ["access", "request", "--flow", "12064", "--reason", "ler"]],
     ["agent head propose", () => ["agent", "head", "propose", "--kind", "aprendizado", "--file", file("aprendizado.md"), "--reason", "pediram"]],
     ["tool call", () => ["tool", "call", "7", "--params", file("tool-params.json")]],
+    ["tool propose", () => ["tool", "propose", "--spec", file("tool-spec.json")]],
     ["flow-build flow create", () => ["flow-build", "flow", "create", "--payload", file("flow-create.json")]],
     ["flow-build step create", () => ["flow-build", "step", "create", "--id-flow", "1", "--payload", file("step-create.json")]],
     ["flow-build field create", () => ["flow-build", "field", "create", "--id-flow", "1", "--id-step", "2", "--payload", file("field-create.json")]],
@@ -177,7 +179,7 @@ describe("CANGE_FORCE_DRY_RUN: toda escrita do kit vira dry-run", () => {
     for (const required of [
       "card create", "card update", "card update-values", "card move-step-with-values", "card add-child",
       "card add-label", "comment create", "register create", "register update", "attachment upload",
-      "time-tracking create", "artifact publish", "access request", "agent head propose"
+      "time-tracking create", "artifact publish", "access request", "agent head propose", "tool propose"
     ]) {
       expect(covered.has(required), required).toBe(true);
     }

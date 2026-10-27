@@ -29,6 +29,7 @@ import { registerAttachmentLinkFieldCommand } from "./commands/attachment-link-f
 import { registerAttachmentListCommand } from "./commands/attachment-list.js";
 import { registerAttachmentUploadCommand } from "./commands/attachment-upload.js";
 import { registerToolCallCommand } from "./commands/tool-call.js";
+import { registerToolProposeCommand } from "./commands/tool-propose.js";
 import { registerAuthCommand } from "./commands/auth.js";
 import { registerCardAddChildCommand } from "./commands/card-add-child.js";
 import { registerCardAddLabelCommand } from "./commands/card-add-label.js";
@@ -188,6 +189,8 @@ export function createProgram(): Command {
 
   const toolCommand = program.command("tool").description("Ferramentas de API do agente (agent_tool type='api')");
   registerToolCallCommand(toolCommand);
+  // Onda 3 (bloco D): `tool propose` (pedido de ferramenta de API do próprio agente, com aprovação).
+  registerToolProposeCommand(toolCommand);
 
   const registerFormAnswerCommand = program
     .command("register-form-answer")
