@@ -93,6 +93,48 @@ describe("buildApiToolProposalBody (especificação → corpo da rota)", () => {
     expect(() => buildApiToolProposalBody({ ...APOLLO, secret_headers: [{ key: "X-Api-Key", hint: "AIzaSyA1234567890abcdefghijklmnopqrstuv" }] })).toThrow(secret);
   });
 
+  it("E2E run 244: {token} como parâmetro recusa ENSINANDO o formato; a spec corrigida passa", () => {
+    const lia = {
+      name: "Z-API",
+      description: "Envia texto pelo WhatsApp.",
+      method: "POST",
+      url: "https://api.z-api.io/instances/{instancia}/token/{token}/send-text",
+      headers: [{ key: "Client-Token", value: "{client_token}" }],
+      body: { type: "json", content: "{\"phone\":\"{phone}\",\"message\":\"{message}\"}" },
+      params: [{ name: "instancia" }, { name: "token" }, { name: "client_token" }, { name: "phone" }, { name: "message" }]
+    };
+    const messageOf = (spec: unknown): string => {
+      try { buildApiToolProposalBody(spec); } catch (e) { return (e as Error).message; }
+      return "";
+    };
+    const first = messageOf(lia);
+    expect(first).toContain("{{secret:token}}");
+    expect(first).toContain("secret_path_params");
+    expect(first).toContain("nunca vira parâmetro");
+    expect(first).toContain("/instances/{{secret:instancia}}/token/{{secret:token}}/send-text");
+    // todos os lugares numa resposta só (caminho, parâmetros e cabeçalho), o exemplo uma vez
+    expect(first).toContain("em 4 lugares");
+    expect(first).toContain('secret_headers: [{"key": "Client-Token"');
+    expect(first.split('Ex.: "url"').length - 1).toBe(1);
+    const header = messageOf({ ...lia, url: "https://api.z-api.io/instances/{{secret:instancia}}/token/{{secret:token}}/send-text", params: [{ name: "client_token" }, { name: "phone" }, { name: "message" }] });
+    expect(header).toContain('secret_headers: [{"key": "Client-Token"');
+    const pathOnly = messageOf({ ...lia, url: "https://api.z-api.io/instances/{{secret:instancia}}/token/{tk}/send-text", headers: [], params: [{ name: "tk" }, { name: "phone" }, { name: "message" }] });
+    expect(pathOnly).toContain("depois de /token/");
+    expect(pathOnly).toContain("{{secret:tk}}");
+    const param = messageOf({ ...lia, url: "https://api.z-api.io/send", headers: [], params: [{ name: "token" }, { name: "phone" }, { name: "message" }] });
+    expect(param).toContain('O parâmetro "token" é credencial');
+    for (const m of [first, header, param]) expect(m).not.toMatch(/[—–]/);
+    const fixed = buildApiToolProposalBody({
+      ...lia,
+      url: "https://api.z-api.io/instances/{{secret:instancia}}/token/{{secret:token}}/send-text",
+      headers: [],
+      params: [{ name: "phone", required: true }, { name: "message", required: true }],
+      secret_headers: [{ key: "Client-Token", hint: "token de segurança da conta" }],
+      secret_path_params: [{ name: "instancia", hint: "ID da instância" }, { name: "token", hint: "token da instância" }]
+    });
+    expect(fixed.secret_path_params).toHaveLength(2);
+  });
+
   it("recusa http, host com parâmetro, {param} sem declarar e campo desconhecido", () => {
     expect(() => buildApiToolProposalBody({ ...CEP, url: "http://viacep.com.br/ws/{cep}/json" })).toThrow(/https/);
     expect(() => buildApiToolProposalBody({ ...CEP, url: "https://{cep}.x.com/a" })).toThrow(/host/);

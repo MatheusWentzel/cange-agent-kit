@@ -119,10 +119,63 @@ function fail(message: string): never {
   throw new CangeValidationError(message);
 }
 
-function secretFail(where: string): never {
-  throw new CangeValidationError(`Valor de credencial na proposta (${where}). ${API_TOOL_SECRET_RULE}`, {
+function secretFail(where: string, fix?: string): never {
+  throw new CangeValidationError(`Valor de credencial na proposta (${where}). ${fix ?? API_TOOL_SECRET_RULE}`, {
     details: { code: "API_TOOL_PROPOSAL_SECRET_VALUE", where }
   });
+}
+
+/**
+ * E2E do D (run 244): `{token}` como parâmetro no caminho recebia só "valor de credencial"
+ * e o agente não sabia corrigir. Cada recusa diz o que escrever, com exemplo curto (os
+ * mesmos textos do Cange), para a 2ª tentativa dar certo sem ajuda.
+ */
+const PATH_SECRET_EXAMPLE =
+  'Ex.: "url": "https://api.z-api.io/instances/{{secret:instancia}}/token/{{secret:token}}/send-text", ' +
+  '"secret_path_params": [{"name": "instancia", "hint": "ID da instância"}, {"name": "token", "hint": "token da instância"}].';
+
+/** Credencial no CAMINHO da url (`/token/<valor ou {param}>`). */
+export function pathSecretFix(segment: string, next: string): string {
+  const name = /^\{([a-zA-Z][a-zA-Z0-9_]*)\}$/.test(next) ? next.slice(1, -1) : segment.toLowerCase().replace(/[^a-z0-9_]/g, "_");
+  return `A credencial vai no caminho da URL (depois de /${segment}/) e não pode ser valor nem {parametro}: credencial nunca vira parâmetro. ` +
+    `Escreva {{secret:${name}}} no lugar, liste em secret_path_params: [{"name": "${name}", "hint": "<onde achar>"}] e tire "${name}" de params. ` +
+    "Quem administra o agente digita o valor ao aprovar.";
+}
+
+/** Credencial em CABEÇALHO (valor fixo ou `{param}`). */
+export function headerSecretFix(key: string): string {
+  return `O cabeçalho ${key} é credencial e não pode ter valor nem {parametro}: credencial nunca vira parâmetro. ` +
+    `Tire ${key} de headers e liste em secret_headers: [{"key": "${key}", "hint": "<onde achar>"}], sem valor. ` +
+    "Quem administra o agente digita o valor ao aprovar.";
+}
+
+/** Parâmetro do agente com nome de credencial. */
+export function paramSecretFix(name: string): string {
+  return `O parâmetro "${name}" é credencial: credencial nunca vira parâmetro do agente. Tire "${name}" de params. ` +
+    `Se ela vai no caminho da URL, escreva {{secret:${name}}} no lugar e liste em secret_path_params: [{"name": "${name}", "hint": "<onde achar>"}]; ` +
+    'se vai em cabeçalho, liste em secret_headers: [{"key": "<Cabeçalho>", "hint": "<onde achar>"}], sem valor.';
+}
+
+/** Um lugar da especificação com credencial onde não pode, e o que escrever no lugar. */
+export interface SecretProblem {
+  where: string;
+  fix: string;
+  withPathExample: boolean;
+}
+
+/** Todas numa resposta só (as mesmas regras do Cange): uma = a instrução; várias = numeradas. */
+export function secretProblemsMessage(problems: SecretProblem[]): string {
+  const example = problems.some((x) => x.withPathExample) ? ` ${PATH_SECRET_EXAMPLE}` : "";
+  if (problems.length === 1) return `${problems[0]!.fix}${example}`;
+  const list = problems.map((x, i) => `${i + 1}) ${x.fix}`).join(" ");
+  return `A proposta põe credencial onde não pode em ${problems.length} lugares. Corrija todos de uma vez no mesmo arquivo: ${list}${example}`;
+}
+
+/** Credencial na QUERY (a proposta não aceita credencial na query). */
+export function querySecretFix(key: string): string {
+  return `A credencial na query (${key}) não é aceita na proposta. Se a API aceita a credencial em cabeçalho, liste em ` +
+    'secret_headers: [{"key": "<Cabeçalho>", "hint": "<onde achar>"}]; se ela vai no caminho, use {{secret:nome}} no caminho ' +
+    'e secret_path_params: [{"name": "nome", "hint": "<onde achar>"}]. Sem valor: quem administra o agente digita ao aprovar.';
 }
 
 function text(value: unknown, field: string, opts: { required?: boolean; max: number }): string | undefined {
@@ -137,7 +190,7 @@ function text(value: unknown, field: string, opts: { required?: boolean; max: nu
   return trimmed;
 }
 
-function items(value: unknown, field: string): ApiToolProposalItem[] | undefined {
+function items(value: unknown, field: string, problems: SecretProblem[]): ApiToolProposalItem[] | undefined {
   if (value === undefined || value === null) return undefined;
   if (!Array.isArray(value)) fail(`${field} precisa ser uma lista de { key, value }.`);
   if (value.length > 20) fail(`${field}: no máximo 20 itens.`);
@@ -148,7 +201,9 @@ function items(value: unknown, field: string): ApiToolProposalItem[] | undefined
     }
     const key = text(item.key, `${field}[${i}].key`, { required: true, max: 100 })!;
     const v = text(item.value ?? "", `${field}[${i}].value`, { max: 2000 }) ?? "";
-    if (CREDENTIAL_NAME_RE.test(key) && v !== "") secretFail(`${field} ${key}`);
+    if (CREDENTIAL_NAME_RE.test(key) && v !== "") {
+      problems.push({ where: `${field} ${key}`, fix: field === "headers" ? headerSecretFix(key) : querySecretFix(key), withPathExample: false });
+    }
     return { key, value: v };
   });
 }
@@ -179,12 +234,14 @@ export function buildApiToolProposalBody(raw: unknown): ApiToolProposalBody {
   const pathPart = afterHost.split(/[?#]/, 1)[0] ?? "";
   const pathSecretNames = Array.from(new Set(Array.from(pathPart.matchAll(SECRET_PATH_TOKEN_RE), (m) => m[1]!)));
   // `/token/<valor>`: a credencial no caminho, fixa ou como parâmetro do agente.
+  // Credencial fora do lugar: junta TODAS e responde numa vez só (E2E run 244).
+  const secretProblems: SecretProblem[] = [];
   const segments = pathPart.split("/");
   segments.forEach((seg, i) => {
     const next = segments[i + 1];
     if (!CREDENTIAL_PATH_SEGMENT_RE.test(seg) || next === undefined || next === "") return;
     if (/^\{\{secret:[a-zA-Z][a-zA-Z0-9_]*\}\}$/.test(next)) return;
-    secretFail(`url (caminho depois de /${seg}/)`);
+    secretProblems.push({ where: `url (caminho depois de /${seg}/)`, fix: pathSecretFix(seg, next), withPathExample: true });
   });
 
   let params: ApiToolProposalParam[] | undefined;
@@ -195,7 +252,7 @@ export function buildApiToolProposalBody(raw: unknown): ApiToolProposalBody {
       if (!isRecord(p)) fail(`params[${i}] precisa ser { name, description, type, required }.`);
       const pname = text(p.name, `params[${i}].name`, { required: true, max: 60 })!;
       if (!IDENTIFIER_RE.test(pname)) fail(`params[${i}].name: comece com letra e use só letras, números e _.`);
-      if (CREDENTIAL_NAME_RE.test(pname)) secretFail(`params ${pname}`);
+      if (CREDENTIAL_NAME_RE.test(pname)) secretProblems.push({ where: `params ${pname}`, fix: paramSecretFix(pname), withPathExample: true });
       if (seen.has(pname)) fail(`Parâmetro repetido: ${pname}.`);
       seen.add(pname);
       const type = p.type === undefined ? "string" : String(p.type);
@@ -241,8 +298,13 @@ export function buildApiToolProposalBody(raw: unknown): ApiToolProposalBody {
     });
   }
 
-  const query = items(raw.query, "query");
-  const headers = items(raw.headers, "headers");
+  const query = items(raw.query, "query", secretProblems);
+  const headers = items(raw.headers, "headers", secretProblems);
+  if (secretProblems.length > 0) {
+    throw new CangeValidationError(`Valor de credencial na proposta (${secretProblems.map((x) => x.where).join("; ")}). ${secretProblemsMessage(secretProblems)}`, {
+      details: { code: "API_TOOL_PROPOSAL_SECRET_VALUE", where: secretProblems.map((x) => x.where) }
+    });
+  }
   let body: ApiToolProposalBody["body"];
   if (raw.body !== undefined && raw.body !== null) {
     if (!isRecord(raw.body)) fail("body precisa ser { type, content }.");
