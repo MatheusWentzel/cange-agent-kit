@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CangeApiError, CangeAuthError } from "../src/client/errors.js";
 import { EXIT_CODES } from "../src/cli/exit-codes.js";
 import { createProgram } from "../src/cli/index.js";
-import { FLOW_FROM_CARD_HINT, normalizeIdOptions } from "../src/cli/resource-ref.js";
+import { cardNotVisibleMessage, normalizeIdOptions } from "../src/cli/resource-ref.js";
 import { FORCE_DRY_RUN_ENV } from "../src/utils/forceDryRun.js";
 
 /**
@@ -192,26 +192,26 @@ describe("quando o kit NÃO consulta o cartão", () => {
 });
 
 describe("back antigo ou sem acesso: mantém o erro, com a dica do link", () => {
-  it("404 do locate (rota inexistente ou sem acesso): update-values dá o erro de uso de sempre, exit 2", async () => {
+  // Onda 4 (B4): 404 do locate = o agente não enxerga o cartão (não existe ou sem acesso ao fluxo).
+  it("404 do locate (sem acesso ou inexistente): update-values diz que o agente não enxerga o cartão, exit 2", async () => {
     locateResponse = { status: 404, body: "Cannot GET /card/locate" };
     await run(["card", "update-values", "--card-id", "55", "--set", "Horas=3"]);
 
     expect(process.exitCode).toBe(EXIT_CODES.USAGE);
     expect(locateCalls()).toHaveLength(1);
     expect(writes()).toEqual([]);
-    expect(errorMessage()).toBe(FLOW_FROM_CARD_HINT);
-    expect(errorMessage()).toContain("link do cartão");
+    expect(errorMessage()).toBe(cardNotVisibleMessage("55"));
+    expect(errorMessage()).toContain("cange access request --flow <id>");
     expect(errorMessage()).not.toContain("—");
   });
 
-  it("404 no comment create: o erro do contrato pede o link, nada gravado", async () => {
+  it("404 no comment create: diz que o agente não enxerga o cartão, nada gravado", async () => {
     locateResponse = { status: 404, body: { message: "não encontrado ou sem acesso" } };
     await run(["comment", "create", "--card-id", "55", "--text", "x"]);
 
     expect(process.exitCode).not.toBe(0);
     expect(writes()).toEqual([]);
-    expect(errorMessage()).toContain("o kit descobre pelo número do cartão");
-    expect(errorMessage()).toContain("link do cartão");
+    expect(errorMessage()).toBe(cardNotVisibleMessage("55"));
   });
 
   it("5xx e 401 do locate sobem (não é o agente que errou); 4xx vira fallback", async () => {

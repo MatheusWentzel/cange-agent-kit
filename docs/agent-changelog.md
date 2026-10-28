@@ -2,6 +2,21 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-10-28
+
+### Onda 4, bloco B: nomes errados rodam, descoberta pelo cartão e fluxo criado (N5, N6, N10)
+
+- **Aliases** (`src/cli/option-aliases.ts`, só na CLI): `register entries --limit` = `--page-size`, `comment create
+  --mentions` = `--mention`, `card get --fields <ids>` = `--field-ids` (só lista de ids), `recipe --input`/`--pdf` =
+  `--file`. Rodam sem aviso; `--help` e `manifest` mostram só o nome oficial.
+- **`card relationship` sem `--flow-id`:** descobre pelo cartão de `--card-id` (`GET /card/locate`); o fluxo do
+  ambiente só vale para o cartão do run. `--flow-id` continua aceito.
+- **`recipe <nome> --file <arquivo>`** (ou caminho depois do nome): a receita sai com o caminho no lugar do exemplo.
+- **Cartão que o agente não enxerga:** o locate com 403/404 troca a dica "confira o número" por "O agente não enxerga
+  o cartão N: ele não existe ou o agente não tem acesso ao fluxo dele." + `cange access request --flow <id>`.
+- **`flow-build flow create` e `flow update`:** a saída ganhou `flow` (`state` rascunho/publicado, `visibility`
+  privado/ambiente, `link`) e `notice` para repassar a quem pediu. `raw` não mudou.
+
 ## 2026-10-24
 
 ### `attachment list`: `ask` só com `--name`; busca por palavra (onda 1i, revisão do Alex)

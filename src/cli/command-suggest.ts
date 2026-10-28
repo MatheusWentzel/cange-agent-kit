@@ -177,7 +177,7 @@ function siblingByPrefix(current: Command, word: string): string | undefined {
   return hits.length === 1 ? hits[0]!.name() : undefined;
 }
 
-function commandPath(command: Command): string {
+export function commandPath(command: Command): string {
   const names: string[] = [];
   let cursor: Command | null = command;
   while (cursor && cursor.parent) {
@@ -210,7 +210,7 @@ function findOptionUp(command: Command, token: string): Option | undefined {
   return undefined;
 }
 
-interface ArgvWalk {
+export interface ArgvWalk {
   /** argv sem `node` e o script. */
   tokens: string[];
   /** O comando final que o argv chama. */
@@ -219,14 +219,17 @@ interface ArgvWalk {
   typedName?: string;
   /** Valores sem opção, com a posição em `tokens`. */
   operands: Array<{ index: number; value: string }>;
+  /** Onda 4 (B1): posições, em `tokens`, das opções que o comando não declara (`--x` ou `--x=valor`). */
+  unknownFlags: number[];
 }
 
 /** Percorre o argv como o commander: desce nos subcomandos e separa valores de opções. */
-function walkArgv(program: Command, argv: readonly string[]): ArgvWalk {
+export function walkArgv(program: Command, argv: readonly string[]): ArgvWalk {
   const tokens = argv.slice(2);
   let current = program;
   let typedName: string | undefined;
   const operands: Array<{ index: number; value: string }> = [];
+  const unknownFlags: number[] = [];
   let literal = false;
   for (let index = 0; index < tokens.length; index += 1) {
     const token = tokens[index]!;
@@ -239,9 +242,9 @@ function walkArgv(program: Command, argv: readonly string[]): ArgvWalk {
       continue;
     }
     if (token.length > 1 && token.startsWith("-")) {
-      if (token.includes("=")) continue;
-      const option = findOptionUp(current, token);
-      if (!option) continue;
+      const option = findOptionUp(current, token.split("=")[0]!);
+      if (!option) unknownFlags.push(index);
+      if (token.includes("=") || !option) continue;
       if (option.variadic) {
         while (index + 1 < tokens.length && !tokens[index + 1]!.startsWith("-")) index += 1;
       } else if (option.required) {
@@ -261,7 +264,7 @@ function walkArgv(program: Command, argv: readonly string[]): ArgvWalk {
     }
     operands.push({ index, value: token });
   }
-  return { tokens, command: current, typedName, operands };
+  return { tokens, command: current, typedName, operands, unknownFlags };
 }
 
 function declaresLong(command: Command, long: string): boolean {

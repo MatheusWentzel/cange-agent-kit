@@ -1,6 +1,6 @@
 import { Command } from "commander";
 
-import { CangeCliUsageError } from "../client/errors.js";
+import { CangeCliUsageError, CangeValidationError } from "../client/errors.js";
 import { authenticateKit, createCangeAgentKit, type CangeAgentKit } from "../index.js";
 import { createDryRunResult } from "../utils/dryRun.js";
 import { loadEnv } from "../utils/env.js";
@@ -13,7 +13,14 @@ import { getCommandMeta } from "./command-metadata.js";
 import { EXIT_CODES, exitCodeForError, type ExitCode } from "./exit-codes.js";
 import { withNoAccessHint } from "./no-access-hint.js";
 import { resolveOutputMode } from "./output-mode.js";
-import { normalizeIdOptions, type CardLocator, type FlowResolution, type HashResolver } from "./resource-ref.js";
+import {
+  cardNotVisibleMessage,
+  FLOW_FROM_CARD_HINT,
+  normalizeIdOptions,
+  type CardLocator,
+  type FlowResolution,
+  type HashResolver
+} from "./resource-ref.js";
 
 export interface CliCommandContext {
   kit: CangeAgentKit;
@@ -59,6 +66,8 @@ export function createCommandAction<TArgs extends unknown[]>(
     const command = getCommandFromArgs(args);
     propagateGlobalFull(command, args);
     const ctx = await createContext(command);
+    // Onda 4 (B4): cartão que o locate não achou (403/404), para trocar a dica de "falta o fluxo".
+    let unlocatedCardId: string | undefined;
 
     try {
       // CANGE_FORCE_DRY_RUN: toda escrita vira dry-run, seja qual for o argv.
@@ -79,7 +88,7 @@ export function createCommandAction<TArgs extends unknown[]>(
       let resolved: FlowResolution | undefined;
       if (commandOptions && typeof commandOptions === "object") {
         const authOnDemand = createAuthOnDemand(ctx, requiresAuth);
-        ({ resolved } = await normalizeIdOptions(
+        ({ resolved, unlocatedCardId } = await normalizeIdOptions(
           commandOptions as Record<string, unknown>,
           createHashResolver(ctx, authOnDemand),
           command,
@@ -103,11 +112,30 @@ export function createCommandAction<TArgs extends unknown[]>(
     } catch (error) {
       // Bancada F2-F6 (run 444): 403/404 de "sem acesso ou não encontrado" de um
       // fluxo, cadastro ou cartão do comando ganha o `hint` com o `access request`.
-      const reported = await withNoAccessHint(error, command, args.at(-2));
+      const reported = await withNoAccessHint(
+        unlocatedCardId !== undefined && isFlowFromCardHint(error)
+          ? new CangeCliUsageError(cardNotVisibleMessage(unlocatedCardId))
+          : error,
+        command,
+        args.at(-2)
+      );
       ctx.printer.printError(reported);
       process.exitCode = exitCodeForError(reported);
     }
   };
+}
+
+/**
+ * O erro de "falta o fluxo" dos comandos de cartão: o `FLOW_FROM_CARD_HINT` da CLI e o do
+ * contrato de comentário (`flow_id ausente. Sem o fluxo, o kit descobre...`).
+ */
+const FLOW_FROM_CARD_MARK = "o kit descobre pelo número do cartão";
+
+function isFlowFromCardHint(error: unknown): boolean {
+  return (
+    (error instanceof CangeCliUsageError || error instanceof CangeValidationError) &&
+    (error.message === FLOW_FROM_CARD_HINT || error.message.includes(FLOW_FROM_CARD_MARK))
+  );
 }
 
 /**

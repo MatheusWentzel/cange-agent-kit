@@ -15,7 +15,10 @@ Use este playbook para criar/alterar fluxos, etapas, campos e relacionamentos vi
 ## Ordem recomendada de construção
 
 1. `pnpm cli flow-build flow create --payload <create-flow.json>`
-   - guardar `id_flow` e `form_init_id` do retorno.
+   - guardar `id_flow` e `form_init_id` do retorno (`raw`).
+   - o retorno traz `flow` (`state` rascunho/publicado, `visibility` privado/ambiente, `link`) e `notice`: repasse o
+     `notice` a quem pediu. Fluxo sem `name` é rascunho (some das listas); fluxo privado (padrão) só aparece para os
+     membros, e o único membro novo é quem criou.
 2. (opcional) `pnpm cli flow-build flow update --id-flow <id> --payload <update-flow.json>` para ajustar metadados.
 3. Para cada etapa: `pnpm cli flow-build step create --id-flow <id> --payload <create-step.json>`
    - guardar `id_step` e `form_id` de cada etapa.

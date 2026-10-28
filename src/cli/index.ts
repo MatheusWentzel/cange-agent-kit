@@ -16,6 +16,7 @@ import {
   type UsageExplanation
 } from "./command-suggest.js";
 import { exitCodeForError } from "./exit-codes.js";
+import { applyOptionAliases } from "./option-aliases.js";
 import { resolveOutputMode } from "./output-mode.js";
 import { registerArtifactPublishCommand } from "./commands/artifact-publish.js";
 import { registerArtifactListCommand } from "./commands/artifact-list.js";
@@ -245,9 +246,11 @@ export async function runCli(argv = process.argv): Promise<void> {
   // não herdam exitOverride/config; sem isso um comando desconhecido dentro de um
   // grupo sairia com exit 1 e mensagem crua, fora do nosso tratamento).
   applyCliErgonomics(program);
+  // Onda 4 (B1): opção com nome errado que tem um equivalente certo roda sem aviso.
+  const args = applyOptionAliases(program, argv);
 
   try {
-    await program.parseAsync(argv);
+    await program.parseAsync(args);
   } catch (error) {
     if (isCommanderHelp(error)) {
       return;
@@ -255,7 +258,7 @@ export async function runCli(argv = process.argv): Promise<void> {
 
     // Item 2/3: erro vai para stderr; stdout permanece limpo. Printer TTY-aware.
     const printer = createCliPrinter(resolveOutputMode(undefined));
-    const normalized = normalizeCliError(error, program, argv);
+    const normalized = normalizeCliError(error, program, args);
     printer.printError(normalized);
     process.exitCode = exitCodeForError(normalized);
   }

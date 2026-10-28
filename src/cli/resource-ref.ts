@@ -201,6 +201,19 @@ export const FLOW_FROM_CARD_HINT =
   "Sem o fluxo, o kit descobre pelo número do cartão (--card-id). Não deu para descobrir: confira o número, ou passe o link do cartão em --card-id ou --flow-id.";
 
 /**
+ * Onda 4 (B4, N5): o `GET /card/locate` respondeu 403/404 para o cartão. O back dá a mesma
+ * resposta para cartão que não existe e para cartão de fluxo sem acesso, e a mensagem
+ * também não distingue (não revela se o cartão existe). Antes valia a dica de "confira o
+ * número", e o agente insistia no número certo (6 vezes em produção, 06 a 28/10).
+ */
+export function cardNotVisibleMessage(cardId: string): string {
+  return (
+    `O agente não enxerga o cartão ${cardId}: ele não existe ou o agente não tem acesso ao fluxo dele. ` +
+    'Se você sabe o fluxo, peça acesso com `cange access request --flow <id> --reason "<para que precisa>"`.'
+  );
+}
+
+/**
  * Devolve o id numérico (string) do valor de uma opção: número, link ou hash.
  * Hash sem acesso, inexistente ou sem resolvedor: erro de uso acionável (exit 2).
  */
@@ -290,7 +303,7 @@ export async function normalizeIdOptions(
   resolveHash: HashResolver | undefined,
   command?: Command,
   locateCard?: CardLocator
-): Promise<{ resolved?: FlowResolution }> {
+): Promise<{ resolved?: FlowResolution; unlocatedCardId?: string }> {
   const linkFlows: string[] = [];
   const unresolvedHint = command ? UNRESOLVED_HINTS.get(command) : undefined;
 
@@ -335,6 +348,7 @@ export async function normalizeIdOptions(
     const cardId = singleCardId(options);
     if (cardId !== undefined && shouldLocate(cardId)) {
       const located = await locateFlowOfCard(cardId, locateCard);
+      if (located === HIDDEN) return { unlocatedCardId: cardId };
       if (located) {
         options.flowId = String(located.flow_id);
         return { resolved: located };
@@ -359,17 +373,25 @@ function singleCardId(options: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
+/** O back respondeu 403/404: o usuário do kit não enxerga o cartão. */
+const HIDDEN = Symbol("card-not-visible");
+
 /**
- * `undefined` quando o back não acha (404: cartão inexistente, sem acesso ou back
- * antigo sem a rota): o comando segue e dá o erro de sempre, com a dica do link.
- * 401 e 5xx/rede sobem (não é o agente que errou).
+ * `undefined` quando o back não acha por outro motivo de 4xx (ex.: 429): o comando segue
+ * e dá o erro de sempre, com a dica do link. `HIDDEN` no 403/404 (cartão inexistente ou
+ * sem acesso): o comando segue igual, e o erro de "falta o fluxo" vira o de cartão que o
+ * agente não enxerga. 401 e 5xx/rede sobem (não é o agente que errou).
  */
-async function locateFlowOfCard(cardId: string, locateCard: CardLocator): Promise<FlowResolution | undefined> {
+async function locateFlowOfCard(
+  cardId: string,
+  locateCard: CardLocator
+): Promise<FlowResolution | typeof HIDDEN | undefined> {
   let located: Awaited<ReturnType<CardLocator>>;
   try {
     located = await locateCard(cardId);
   } catch (error) {
     if (error instanceof CangeAuthError) throw error;
+    if (error instanceof CangeApiError && (error.status === 403 || error.status === 404)) return HIDDEN;
     if (error instanceof CangeApiError && error.status !== undefined && error.status >= 400 && error.status < 500 && error.status !== 401) {
       return undefined;
     }

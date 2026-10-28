@@ -228,11 +228,15 @@ O cartão tem arquivos em dois lugares: os **campos de anexo** (formulário) e o
   `cange://card/<id>`) ou o hash do link (fluxo e cadastro). O kit troca pelo id; o link do cartão também preenche o
   `--flow-id` ausente. Hash sem acesso: erro de uso com o caminho (`cange my-registers` / `cange catalog`).
 - **Sem o fluxo, o kit descobre pelo número do cartão** (desde 06/10/2026): comando de cartão (`card read`, `card get`,
-  `card move`, `card update-values`, `comment create`, `comment list`, `attachment download`) com `--card-id` numérico,
+  `card move`, `card update-values`, `card relationship`, `comment create`, `comment list`, `attachment download`) com `--card-id` numérico,
   sem `--flow-id` e sem fluxo no ambiente do run, pergunta ao back (`GET /card/locate`, mesmo acesso da leitura) e usa
   o fluxo dele. Com fluxo no ambiente, mas `--card-id` diferente do cartão do run, também consulta (se der 404, usa
   o fluxo do ambiente); `--flow-id` explícito sempre vence. A saída traz `resolved: { flow_id, flow_name, via: "card-locate" }`. Não liste fluxos para achar o
-  cartão. Se não achar (número errado, sem acesso ou back antigo), o erro pede o link do cartão ou `--flow-id`.
+  cartão. Se o back não mostra o cartão (403/404), o erro é `O agente não enxerga o cartão N: ele não existe ou o
+  agente não tem acesso ao fluxo dele.` com o `cange access request --flow <id> --reason "..."` (não diz qual dos dois:
+  o back responde igual). Sem número de cartão, o erro pede o link do cartão ou `--flow-id`.
+  No `card relationship` (onda 4) o fluxo é o do próprio cartão de `--card-id` (o cartão referenciado); o fluxo do
+  ambiente só vale quando o `--card-id` é o cartão do run.
   No `access request` o recurso é um que você NÃO acessa, então link e hash não resolvem: ache o id pelo nome
   (`cange catalog --q <nome>`) e peça com ele.
 - `register entries` e `register get` aceitam `--register` (como o `access request`). `card update` aceita
@@ -252,6 +256,26 @@ O cartão tem arquivos em dois lugares: os **campos de anexo** (formulário) e o
     get, ...` (até 4).
   - Comando inexistente também sugere o único irmão que começa igual (4 letras ou mais). `register entry` virou apelido
     de `register entries`.
+- **Nomes errados que rodam direto (onda 4, 28/10):** o kit troca e roda, sem aviso: `register entries --limit` =
+  `--page-size`; `comment create --mentions` = `--mention`; `card get --fields <ids>` = `--field-ids` (só com lista de
+  ids; título vai no `card read --fields`); `recipe --input`/`--pdf` = `--file`. O `--help` e o `manifest` mostram só
+  o nome oficial (use ele). Mapa em `src/cli/option-aliases.ts`; nome errado sem equivalente único segue com a
+  mensagem de "não tem a opção".
+- **`cange recipe <nome> --file <arquivo>`** (ou o caminho logo depois do nome): a receita sai com o caminho no lugar
+  do exemplo (`anexo`: o comando do pdf ou do docx, pelo tipo; `enviar-anexo`; `publicar-artefato` com .html), na linha
+  `ARQUIVO = ...`. Caminho relativo vira absoluto e `<PASTA_DO_RUN>` vira a pasta do run (TMPDIR).
+
+## Fluxo criado pelo agente (`flow-build flow create`, onda 4)
+
+- No Cange não existe rascunho que esconda um fluxo com nome: ele nasce ativo. O que esconde de quem pediu é:
+  - **sem `name`**: é o rascunho de verdade; as listas tiram fluxo sem nome de todos, menos de quem criou;
+  - **privado** (`isPrivate` "1", o padrão da rota): só os membros veem, em Meus fluxos e no link, e o único membro
+    novo é quem criou (o agente, como administrador do fluxo).
+- A saída do `flow create` (e do `flow update`) traz `flow: { id_flow, name, link, state: "rascunho"|"publicado",
+  visibility: "privado"|"ambiente" }` e `notice`. **Repasse o `notice` a quem pediu**: o nome, o link e onde o fluxo
+  aparece. Privado: um administrador do ambiente dá acesso em Painel do Administrador > Controle de Acesso > Fluxos >
+  Acessos; abrir para todos do ambiente (`flow update` com `{"isPrivate": "0"}`) só se a pessoa quiser.
+- O kit ainda não convida membro para um fluxo (a tela usa `POST /flow-user/bulk`): quem pediu ganha acesso pela tela.
 
 ## Acesso do agente a fluxos e cadastros (desde 02/10/2026, só com token de run)
 

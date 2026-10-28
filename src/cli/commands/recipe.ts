@@ -1,3 +1,5 @@
+import { extname, isAbsolute, resolve } from "node:path";
+
 import type { Command } from "commander";
 
 import { CangeCliUsageError } from "../../client/errors.js";
@@ -17,9 +19,28 @@ import { createCommandAction } from "../context.js";
  */
 const RUN_FOLDER = "<PASTA_DO_RUN>";
 
-export const RECIPES: Readonly<Record<string, { title: string; lines: readonly string[] }>> = Object.freeze({
+/**
+ * Onda 4 (B3): o exemplo de arquivo de uma receita. Com `--file`, o kit põe o caminho no
+ * lugar dele. `ext` limita ao tipo (o exemplo de pdf não recebe um docx).
+ */
+interface RecipeFileExample {
+  example: string;
+  ext?: string;
+}
+
+interface Recipe {
+  title: string;
+  lines: readonly string[];
+  files?: readonly RecipeFileExample[];
+}
+
+export const RECIPES: Readonly<Record<string, Recipe>> = Object.freeze({
   anexo: {
     title: "Ler um anexo do cartão (proposta, documento, comprovante)",
+    files: [
+      { example: '"<arquivo>.docx"', ext: ".docx" },
+      { example: "<arquivo>.pdf", ext: ".pdf" }
+    ],
     lines: [
       "1) Veja os arquivos do cartão: `cange attachment list --card-id <id> --name \"<o que a pessoa disse>\"`. Procura nos",
       "   campos de anexo E na colaboração (comentários); `files` diz de onde vem cada um. Um candidato: use direto. Veio",
@@ -37,6 +58,7 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
   },
   "enviar-anexo": {
     title: "Pôr um arquivo no cartão (comentário ou campo de anexo)",
+    files: [{ example: `${RUN_FOLDER}/<arquivo>` }],
     lines: [
       `1) Grave o arquivo na pasta desta execução (${RUN_FOLDER}), com caminho completo. Arquivo de fora dela, com "..",`,
       "   ou link para fora é recusado. Limite: 25 MB.",
@@ -111,6 +133,7 @@ export const RECIPES: Readonly<Record<string, { title: string; lines: readonly s
   },
   "publicar-artefato": {
     title: "Publicar um artefato (página HTML; só com \"Publicar artefato\" liberado)",
+    files: [{ example: `${RUN_FOLDER}/artefato-20260930-1432.html`, ext: ".html" }],
     lines: [
       `1) Grave o HTML num arquivo da pasta do run (ex.: \`${RUN_FOLDER}/artefato-20260930-1432.html\`).`,
       "2) Em OUTRO comando, sozinho:",
@@ -162,21 +185,58 @@ export function recipeNames(): string[] {
   return Object.keys(RECIPES);
 }
 
-/** Texto da receita (com a pasta do run na 1ª linha quando o TMPDIR existe). */
-export function renderRecipe(name: string, env: Record<string, string | undefined> = process.env): string {
+/** Caminho no shell: sem aspas quando não precisa, senão entre aspas simples. */
+function shellPath(path: string): string {
+  return /^[\w@%+=:,./-]+$/.test(path) ? path : `'${path.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * O caminho por extenso: o marcador da pasta do run vira o TMPDIR, e o relativo vira
+ * absoluto (o gate recusa caminho relativo e o marcador copiado ao pé da letra).
+ */
+function absoluteFile(file: string, scratch: string | undefined, cwd: string): string {
+  const text = file.trim();
+  if (text.startsWith(RUN_FOLDER)) return scratch ? `${scratch}${text.slice(RUN_FOLDER.length)}` : text;
+  return isAbsolute(text) ? text : resolve(cwd, text);
+}
+
+/**
+ * Texto da receita (com a pasta do run na 1ª linha quando o TMPDIR existe). Com `file`, o
+ * caminho entra no lugar do exemplo de arquivo da receita (onda 4, B3).
+ */
+export function renderRecipe(
+  name: string,
+  env: Record<string, string | undefined> = process.env,
+  file?: string,
+  cwd: string = process.cwd()
+): string {
   const recipe = RECIPES[name];
   if (!recipe) {
     throw new CangeCliUsageError(
       `Receita "${name}" não existe. Receitas: ${recipeNames().join(", ")} (ex.: \`cange recipe anexo\`).`
     );
   }
-  const scratch = env.TMPDIR?.trim();
+  const rawScratch = env.TMPDIR?.trim();
+  const scratch = rawScratch && rawScratch.startsWith("/") ? rawScratch.replace(/\/+$/, "") : undefined;
+  let lines = [...recipe.lines];
+  const header: string[] = [];
+  if (file !== undefined && file.trim() !== "") {
+    const path = absoluteFile(file, scratch, cwd);
+    const ext = extname(path).toLowerCase();
+    let placed = false;
+    for (const { example, ext: only } of recipe.files ?? []) {
+      if (only !== undefined && only !== ext) continue;
+      if (!lines.some((line) => line.includes(example))) continue;
+      lines = lines.map((line) => line.split(example).join(shellPath(path)));
+      placed = true;
+    }
+    header.push(placed ? `ARQUIVO = ${path} (já está nos comandos abaixo)` : `ARQUIVO = ${path}`);
+  }
   return [
     `# ${recipe.title}`,
-    ...(scratch && scratch.startsWith("/")
-      ? [`PASTA_DO_RUN = ${scratch.replace(/\/+$/, "")} (troque ${RUN_FOLDER} por este caminho, escrito por extenso)`]
-      : []),
-    ...recipe.lines
+    ...(scratch ? [`PASTA_DO_RUN = ${scratch} (troque ${RUN_FOLDER} por este caminho, escrito por extenso)`] : []),
+    ...header,
+    ...lines
   ].join("\n");
 }
 
@@ -185,12 +245,20 @@ export function registerRecipeCommand(program: Command): void {
     .command("recipe")
     .description(`Receita pronta de uma ação sob demanda (${recipeNames().join(", ")})`)
     .argument("[nome]", `Nome da receita: ${recipeNames().join(" | ")}`)
+    .argument("[arquivo]", "O mesmo que --file")
+    .option("--file <arquivo>", "Arquivo da tarefa: a receita sai com o caminho dele no lugar do exemplo")
     .action(
       createCommandAction(
-        async (_ctx, name: string | undefined) => {
+        async (_ctx, name: string | undefined, positional: string | undefined, options: { file?: string }) => {
+          if (options.file !== undefined && positional !== undefined && options.file !== positional) {
+            throw new CangeCliUsageError(
+              "Passe o arquivo uma vez só: `cange recipe <nome> --file <arquivo>` (ou o caminho logo depois do nome)."
+            );
+          }
+          const file = options.file ?? positional;
           const text = name
-            ? renderRecipe(name.trim().toLowerCase())
-            : `Receitas: ${recipeNames().join(", ")}. Uso: \`cange recipe <nome>\`.`;
+            ? renderRecipe(name.trim().toLowerCase(), process.env, file)
+            : `Receitas: ${recipeNames().join(", ")}. Uso: \`cange recipe <nome> [--file <arquivo>]\`.`;
           process.stdout.write(`${text}\n`);
           return undefined;
         },
@@ -201,6 +269,6 @@ export function registerRecipeCommand(program: Command): void {
   annotateCommand(command, {
     envelope: "texto cru (não JSON): a receita, com a pasta do run na 1ª linha quando o TMPDIR existe",
     fieldsLocation: "stdout inteiro é a receita",
-    example: "cange recipe anexo"
+    example: "cange recipe anexo --file anexos/proposta.pdf"
   });
 }
