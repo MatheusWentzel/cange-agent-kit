@@ -350,10 +350,11 @@ describe("4. cartão que o agente não enxerga", () => {
   it("texto: sem travessão, com o pedido de acesso certo, sem dizer se existe", () => {
     expect(expected).toBe(
       "O agente não enxerga o cartão 55: ele não existe ou o agente não tem acesso ao fluxo dele. " +
-        "Confira o número, ou passe o link do cartão em --card-id. Para pedir acesso, ache o fluxo pelo nome com " +
+        "Se você tem o link do cartão, passe-o em --card-id. Para pedir acesso, ache o fluxo pelo nome com " +
         '`cange catalog --q <nome do fluxo>` e peça com `cange access request --flow <id> --reason "<para que precisa>"`.'
     );
-    expect(expected).toContain("passe o link do cartão em --card-id");
+    expect(expected).toContain("passe-o em --card-id");
+    expect(expected).not.toContain("Confira o número");
     expect(expected).toContain("cange catalog --q <nome do fluxo>");
     expect(expected).not.toContain("—");
   });

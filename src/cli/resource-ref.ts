@@ -209,7 +209,7 @@ export const FLOW_FROM_CARD_HINT =
 export function cardNotVisibleMessage(cardId: string): string {
   return (
     `O agente não enxerga o cartão ${cardId}: ele não existe ou o agente não tem acesso ao fluxo dele. ` +
-    "Confira o número, ou passe o link do cartão em --card-id. Para pedir acesso, ache o fluxo pelo nome com " +
+    "Se você tem o link do cartão, passe-o em --card-id. Para pedir acesso, ache o fluxo pelo nome com " +
     '`cange catalog --q <nome do fluxo>` e peça com `cange access request --flow <id> --reason "<para que precisa>"`.'
   );
 }
