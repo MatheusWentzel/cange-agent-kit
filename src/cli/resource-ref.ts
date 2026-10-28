@@ -209,7 +209,8 @@ export const FLOW_FROM_CARD_HINT =
 export function cardNotVisibleMessage(cardId: string): string {
   return (
     `O agente não enxerga o cartão ${cardId}: ele não existe ou o agente não tem acesso ao fluxo dele. ` +
-    'Se você sabe o fluxo, peça acesso com `cange access request --flow <id> --reason "<para que precisa>"`.'
+    "Confira o número, ou passe o link do cartão em --card-id. Para pedir acesso, ache o fluxo pelo nome com " +
+    '`cange catalog --q <nome do fluxo>` e peça com `cange access request --flow <id> --reason "<para que precisa>"`.'
   );
 }
 
@@ -374,7 +375,7 @@ function singleCardId(options: Record<string, unknown>): string | undefined {
 }
 
 /** O back respondeu 403/404: o usuário do kit não enxerga o cartão. */
-const HIDDEN = Symbol("card-not-visible");
+export const HIDDEN: unique symbol = Symbol("card-not-visible");
 
 /**
  * `undefined` quando o back não acha por outro motivo de 4xx (ex.: 429): o comando segue
@@ -382,7 +383,7 @@ const HIDDEN = Symbol("card-not-visible");
  * sem acesso): o comando segue igual, e o erro de "falta o fluxo" vira o de cartão que o
  * agente não enxerga. 401 e 5xx/rede sobem (não é o agente que errou).
  */
-async function locateFlowOfCard(
+export async function locateFlowOfCard(
   cardId: string,
   locateCard: CardLocator
 ): Promise<FlowResolution | typeof HIDDEN | undefined> {

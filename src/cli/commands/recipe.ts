@@ -191,6 +191,18 @@ function shellPath(path: string): string {
 }
 
 /**
+ * A pasta de onde o comando foi chamado. Pelo `pnpm --dir <kit> cli`, o pnpm troca o cwd para
+ * a pasta do kit e guarda a original em INIT_CWD. Só vale quando quem roda é o script do
+ * próprio kit (`npm_package_name`): um processo pai iniciado por `npm start` (ex.: o runner
+ * em dev) também deixa INIT_CWD no ambiente, apontando para a pasta dele, não para a do run.
+ */
+export function invocationCwd(env: Record<string, string | undefined> = process.env): string {
+  const init = env.INIT_CWD?.trim();
+  if (init && isAbsolute(init) && env.npm_package_name === "cange-agent-kit") return init;
+  return process.cwd();
+}
+
+/**
  * O caminho por extenso: o marcador da pasta do run vira o TMPDIR, e o relativo vira
  * absoluto (o gate recusa caminho relativo e o marcador copiado ao pé da letra).
  */
@@ -208,7 +220,7 @@ export function renderRecipe(
   name: string,
   env: Record<string, string | undefined> = process.env,
   file?: string,
-  cwd: string = process.cwd()
+  cwd: string = invocationCwd(env)
 ): string {
   const recipe = RECIPES[name];
   if (!recipe) {

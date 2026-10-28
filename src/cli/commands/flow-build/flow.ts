@@ -50,7 +50,9 @@ export function flowPlacement(
   const idFlow = Number(record.id_flow);
   const id = Number.isInteger(idFlow) && idFlow > 0 ? idFlow : undefined;
   const rawName = "name" in record ? record.name : payload.name;
-  const name = typeof rawName === "string" ? rawName : null;
+  // Nome vazio ou só espaços conta como sem nome: o back lista, mas como linha em branco,
+  // e quem pediu não acha o fluxo pelo nome. O aviso é o mesmo do nome nulo (dê o nome).
+  const name = typeof rawName === "string" && rawName.trim() !== "" ? rawName : null;
   const rawPrivate = "isPrivate" in record ? record.isPrivate : (payload.isPrivate ?? "1");
   const isPublic = rawPrivate === null || rawPrivate === undefined || String(rawPrivate).trim() === "0";
   const hash = typeof record.hash === "string" && record.hash.trim() ? record.hash.trim() : undefined;
@@ -68,7 +70,7 @@ export function flowPlacement(
     return {
       flow,
       notice:
-        `O fluxo ${idText} está em rascunho porque não tem nome: não aparece em nenhuma lista para quem pediu. ` +
+        `O fluxo ${idText} está em rascunho porque não tem nome: quem pediu não o acha nas listas. ` +
         `Dê o nome com ${update('{"name": "<nome>"}')} e avise quem pediu.`
     };
   }
@@ -151,8 +153,11 @@ export function registerFlowBuildFlowCommands(flowBuildCommand: Command): void {
           idFlow: options.idFlow,
           payload: parsed.data
         });
-        // O PATCH devolve o fluxo inteiro: a saída confirma o estado depois de dar nome ou abrir.
-        return { ...result, ...flowPlacement(result.raw, {}, kit.config.appOrigin, false) };
+        // O PATCH devolve o fluxo inteiro: `flow` sai sempre; o `notice` (o que avisar a quem
+        // pediu) só quando o pedido mexe no nome ou na visibilidade, não em cor ou ícone.
+        const { flow, notice } = flowPlacement(result.raw, {}, kit.config.appOrigin, false);
+        const touchesPlacement = parsed.data.name !== undefined || parsed.data.isPrivate !== undefined;
+        return { ...result, flow, ...(touchesPlacement ? { notice } : {}) };
       })
     );
 }

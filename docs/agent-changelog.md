@@ -6,16 +6,28 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
 
 ### Onda 4, bloco B: nomes errados rodam, descoberta pelo cartão e fluxo criado (N5, N6, N10)
 
-- **Aliases** (`src/cli/option-aliases.ts`, só na CLI): `register entries --limit` = `--page-size`, `comment create
-  --mentions` = `--mention`, `card get --fields <ids>` = `--field-ids` (só lista de ids), `recipe --input`/`--pdf` =
-  `--file`. Rodam sem aviso; `--help` e `manifest` mostram só o nome oficial.
+- **Aliases** (`src/cli/option-aliases.ts`, só na CLI): `register entries --limit` = `--page-size`, `card get
+  --fields <ids>` = `--field-ids` (só lista de ids), `recipe --input`/`--pdf` = `--file`. Rodam sem aviso; `--help` e
+  `manifest` mostram só o nome oficial. Sem `=`, só troca quando vem valor (`--limit --dry-run` não troca).
+- **Regra (review do Alex):** alias só para opção de leitura. Alias de opção de escrita exige o mesmo alias no gate do
+  runner (`approvalGate.ts` FLAG_ALIASES/VALUE_FLAGS) antes do pin. Por isso `comment create --mentions` NÃO virou
+  alias: o gate não conhece o nome, e `--mentions --dry-run` era lido como dry-run pelo gate e executado de verdade
+  pelo kit (o commander comia o `--dry-run` como valor). Segue a mensagem "Você quis dizer ... --mention".
+- **Conferido e sem alias** (export de produção de 06 a 28/10): `card read --raw`/`--raw-full` (A202, run 161) não
+  têm equivalente no `card read`; existem só no `card get`, que é outro comando (a mensagem já aponta "Quem aceita
+  --raw: cange card get"). `--card-id` (A202, runs 175 e 176) veio de um kit antigo, com sugestão `--form-id`, e o
+  comando não ficou registrado: sem equivalente inequívoco, fica a mensagem de "não tem a opção".
 - **`card relationship` sem `--flow-id`:** descobre pelo cartão de `--card-id` (`GET /card/locate`); o fluxo do
   ambiente só vale para o cartão do run. `--flow-id` continua aceito.
 - **`recipe <nome> --file <arquivo>`** (ou caminho depois do nome): a receita sai com o caminho no lugar do exemplo.
-- **Cartão que o agente não enxerga:** o locate com 403/404 troca a dica "confira o número" por "O agente não enxerga
-  o cartão N: ele não existe ou o agente não tem acesso ao fluxo dele." + `cange access request --flow <id>`.
+- **Cartão que o agente não enxerga:** o locate com 403/404 troca a dica de "falta o fluxo" por "O agente não enxerga
+  o cartão N: ele não existe ou o agente não tem acesso ao fluxo dele.", com o link do cartão em `--card-id`, o
+  `cange catalog --q <nome do fluxo>` e o `cange access request --flow <id> --reason "..."`.
 - **`flow-build flow create` e `flow update`:** a saída ganhou `flow` (`state` rascunho/publicado, `visibility`
-  privado/ambiente, `link`) e `notice` para repassar a quem pediu. `raw` não mudou.
+  privado/ambiente, `link`) e `notice` para repassar a quem pediu (no `update`, só quando mexe em `name` ou
+  `isPrivate`). Nome vazio ou só espaços conta como sem nome. `raw` não mudou.
+- **`recipe --file` relativo:** resolve pela pasta de onde o comando foi chamado (INIT_CWD quando quem roda é o
+  script do kit, como no `pnpm --dir <kit> cli`; senão o cwd).
 
 ## 2026-10-24
 

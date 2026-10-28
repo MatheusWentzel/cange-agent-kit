@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildManifest } from "../src/cli/command-metadata.js";
 import { EXIT_CODES } from "../src/cli/exit-codes.js";
 import { flowPlacement } from "../src/cli/commands/flow-build/flow.js";
-import { renderRecipe } from "../src/cli/commands/recipe.js";
+import { invocationCwd, renderRecipe } from "../src/cli/commands/recipe.js";
 import { createProgram, runCli } from "../src/cli/index.js";
 import { applyOptionAliases } from "../src/cli/option-aliases.js";
 import { cardNotVisibleMessage, FLOW_FROM_CARD_HINT } from "../src/cli/resource-ref.js";
@@ -132,10 +132,21 @@ describe("1. alias: o nome errado com equivalente único roda", () => {
     );
   });
 
-  it("comment create --mentions vira --mention", () => {
-    expect(
-      applyOptionAliases(createProgram(), argv("comment", "create", "--card-id", "55", "--text", "x", "--mentions", "Ana"))
-    ).toEqual(argv("comment", "create", "--card-id", "55", "--text", "x", "--mention", "Ana"));
+  it("ajuste 1a: sem valor (falta ou é outra opção) não troca", () => {
+    const program = createProgram();
+    const dry = argv("register", "entries", "--register-id", "183", "--limit", "--raw");
+    expect(applyOptionAliases(program, dry)).toEqual(dry);
+    const last = argv("register", "entries", "--register-id", "183", "--limit");
+    expect(applyOptionAliases(program, last)).toEqual(last);
+    const pdf = argv("recipe", "anexo", "--pdf", "--dry-run");
+    expect(applyOptionAliases(program, pdf)).toEqual(pdf);
+  });
+
+  it("ajuste 1b: comment create --mentions NÃO é alias (opção de escrita sem o par no gate)", () => {
+    const write = argv("comment", "create", "--card-id", "1", "--text", "x", "--mentions", "--dry-run");
+    expect(applyOptionAliases(createProgram(), write)).toEqual(write);
+    const withValue = argv("comment", "create", "--card-id", "1", "--text", "x", "--mentions", "Ana");
+    expect(applyOptionAliases(createProgram(), withValue)).toEqual(withValue);
   });
 
   it("card get --fields vira --field-ids só com lista de ids; título fica com a mensagem de sempre", () => {
@@ -161,19 +172,24 @@ describe("1. alias: o nome errado com equivalente único roda", () => {
     const program = createProgram();
     const otherCommand = argv("card", "list", "--flow-id", "316", "--limit", "5");
     expect(applyOptionAliases(program, otherCommand)).toEqual(otherCommand);
-    const asValue = argv("comment", "create", "--card-id", "55", "--text", "--mentions");
+    const asValue = argv("register", "entries", "--register-id", "183", "--search", "--limit", "--page-size", "5");
     expect(applyOptionAliases(program, asValue)).toEqual(asValue);
     const read = argv("card", "read", "--card-id", "55", "--fields", "Título");
     expect(applyOptionAliases(program, read)).toEqual(read);
   });
 
-  it("runCli: comment create --mentions roda sem aviso e notifica a pessoa", async () => {
-    const out = await cli(["comment", "create", "--card-id", "55", "--flow-id", "316", "--text", "Pronto", "--mentions", "8"]);
+  it("runCli: comment create --mentions --dry-run é opção desconhecida, nada gravado, e ensina --mention", async () => {
+    await cli(["comment", "create", "--card-id", "55", "--flow-id", "316", "--text", "x", "--mentions", "--dry-run"]);
 
-    expect(process.exitCode ?? 0).toBe(0);
-    expect(stderr.join("")).toBe("");
-    expect(calls("POST", "/card-comment")[0]?.body?.mentions).toEqual([8]);
-    expect(out?.ok).toBe(true);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(calls("POST", "/card-comment")).toEqual([]);
+    expect(errorMessage()).toContain("não tem a opção --mentions");
+
+    stderr.length = 0;
+    await cli(["comment", "create", "--card-id", "55", "--flow-id", "316", "--text", "x", "--mentions", "8"]);
+    expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(calls("POST", "/card-comment")).toEqual([]);
+    expect(errorMessage()).toContain("--mention 8");
   });
 
   it("runCli: card get --fields 20 roda como --field-ids", async () => {
@@ -244,12 +260,25 @@ describe("2. card relationship sem --flow-id", () => {
     expect(calls("GET", "/card/relationship")[0]?.query.get("flow_id")).toBe("316");
   });
 
-  it("fluxo no ambiente sem cartão do run: não presume o fluxo (vínculo vazio enganaria)", async () => {
+  it("ajuste 2: fluxo no ambiente sem cartão do run: não presume o fluxo, consulta o cartão", async () => {
     process.env.RUNNER_FLOW_ID = "999";
+    const out = await cli(["card", "relationship", "--card-id", "55"]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(calls("GET", "/card/locate")).toHaveLength(1);
+    expect(calls("GET", "/card/relationship")[0]?.query.get("flow_id")).toBe("316");
+    expect(out?.resolved).toEqual({ flow_id: 316, flow_name: "CNG CRM", via: "card-locate" });
+  });
+
+  it("ajuste 2: nesse caso, locate 404 dá a mensagem do cartão que o agente não enxerga (não a de conferir)", async () => {
+    process.env.RUNNER_FLOW_ID = "999";
+    routes["GET /card/locate"] = { status: 404, body: { message: "não encontrado" } };
     await cli(["card", "relationship", "--card-id", "55"]);
 
     expect(process.exitCode).toBe(EXIT_CODES.USAGE);
+    expect(calls("GET", "/card/locate")).toHaveLength(1);
     expect(calls("GET", "/card/relationship")).toEqual([]);
+    expect(errorMessage()).toBe(cardNotVisibleMessage("55"));
   });
 });
 
@@ -275,6 +304,16 @@ describe("3. recipe com o arquivo da tarefa", () => {
     expect(renderRecipe("anexo", { TMPDIR: "/run/42/" }, "<PASTA_DO_RUN>/anexos/a.pdf")).toContain(
       "pdftotext /run/42/anexos/a.pdf "
     );
+  });
+
+  it("ajuste 6: relativo pelo INIT_CWD quando quem roda é o script do kit (pnpm --dir)", () => {
+    expect(invocationCwd({ INIT_CWD: "/run/42", npm_package_name: "cange-agent-kit" })).toBe("/run/42");
+    // INIT_CWD herdado de outro pacote (ex.: runner em dev com npm start) não vale.
+    expect(invocationCwd({ INIT_CWD: "/srv/runner", npm_package_name: "cange-agent-runner" })).toBe(process.cwd());
+    expect(invocationCwd({})).toBe(process.cwd());
+    expect(
+      renderRecipe("enviar-anexo", { INIT_CWD: "/run/42", npm_package_name: "cange-agent-kit" }, "saida/r.pdf")
+    ).toContain("cange attachment upload --file /run/42/saida/r.pdf");
   });
 
   it("receita sem exemplo de arquivo: só a linha do ARQUIVO", () => {
@@ -311,8 +350,11 @@ describe("4. cartão que o agente não enxerga", () => {
   it("texto: sem travessão, com o pedido de acesso certo, sem dizer se existe", () => {
     expect(expected).toBe(
       "O agente não enxerga o cartão 55: ele não existe ou o agente não tem acesso ao fluxo dele. " +
-        'Se você sabe o fluxo, peça acesso com `cange access request --flow <id> --reason "<para que precisa>"`.'
+        "Confira o número, ou passe o link do cartão em --card-id. Para pedir acesso, ache o fluxo pelo nome com " +
+        '`cange catalog --q <nome do fluxo>` e peça com `cange access request --flow <id> --reason "<para que precisa>"`.'
     );
+    expect(expected).toContain("passe o link do cartão em --card-id");
+    expect(expected).toContain("cange catalog --q <nome do fluxo>");
     expect(expected).not.toContain("—");
   });
 
@@ -385,6 +427,29 @@ describe("5. flow-build flow create: estado e onde aparece", () => {
     const open = flowPlacement({ id_flow: 79, hash: "h2", name: "RH", isPrivate: "0" }, {}, "https://app.cange.me");
     expect(open.flow.visibility).toBe("ambiente");
     expect(open.notice).toContain("aparece em Meus fluxos para todos do ambiente");
+  });
+
+  it("ajuste 5: nome vazio ou só espaços conta como sem nome", () => {
+    for (const name of ["", "   "]) {
+      const placed = flowPlacement({ id_flow: 80, hash: "h", name, isPrivate: "1" }, {}, "https://app.cange.me");
+      expect(placed.flow).toMatchObject({ name: null, state: "rascunho" });
+      expect(placed.notice).toContain("não tem nome");
+    }
+  });
+
+  it("ajuste 4: flow update de cor não traz notice; de nome ou isPrivate traz", async () => {
+    routes["PATCH /flow/v2/build/flows/77"] = { body: { id_flow: 77, hash: "abc123", name: "Compras", isPrivate: "1" } };
+    const color = join(dir, "cor.json");
+    await writeFile(color, JSON.stringify({ color: "#000000" }));
+    const out = await cli(["flow-build", "flow", "update", "--id-flow", "77", "--payload", color]);
+    expect(out?.flow).toMatchObject({ state: "publicado", visibility: "privado" });
+    expect(out).not.toHaveProperty("notice");
+
+    stdout.length = 0;
+    const rename = join(dir, "nome.json");
+    await writeFile(rename, JSON.stringify({ name: "Compras" }));
+    const renamed = await cli(["flow-build", "flow", "update", "--id-flow", "77", "--payload", rename]);
+    expect(renamed?.notice).toContain("é privado");
   });
 
   it("flow update devolve o mesmo estado (confirma depois de abrir o fluxo)", async () => {
