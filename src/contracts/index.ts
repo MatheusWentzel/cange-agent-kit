@@ -19,6 +19,7 @@ import { createRegisterQueryContracts } from "./registerQuery.js";
 import { createRegistersContracts } from "./registers.js";
 import { createResourceAccessContracts } from "./resourceAccess.js";
 import { createScheduleProposalContracts } from "./scheduleProposal.js";
+import { createApiToolProposalContracts } from "./apiToolProposal.js";
 import { createTimeTrackingContracts } from "./timeTracking.js";
 import { createUsersContracts } from "./users.js";
 
@@ -34,6 +35,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const agentHead = createAgentHeadContracts(params.client);
   const resourceAccess = createResourceAccessContracts(params.client);
   const scheduleProposal = createScheduleProposalContracts(params.client);
+  const apiToolProposal = createApiToolProposalContracts(params.client);
   const registers = createRegistersContracts(params.client);
   const registerQuery = createRegisterQueryContracts({ client: params.client, fields });
   const timeTracking = createTimeTrackingContracts(params.client);
@@ -147,6 +149,8 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     requestResourceAccess: resourceAccess.requestResourceAccess,
     // D3: cria o PEDIDO de uma rotina do próprio agente (quem administra o agente aprova).
     proposeSchedule: scheduleProposal.proposeSchedule,
+    // Onda 3 (bloco D): cria o PEDIDO de uma ferramenta de API (quem administra o agente revisa e aprova).
+    proposeApiTool: apiToolProposal.proposeApiTool,
     createRegister: registers.createRegister,
     updateRegister: registers.updateRegister,
     createTimeTracking: timeTracking.createTimeTracking,

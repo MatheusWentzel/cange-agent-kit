@@ -296,6 +296,22 @@ O cartão tem arquivos em dois lugares: os **campos de anexo** (formulário) e o
 - Na resposta, use o `message` da saída (ele diz que a rotina depende da aprovação). Limites: até 3 propostas
   esperando decisão e um teto de rotinas por agente; o erro diz o próximo passo.
 
+## Ferramenta de API proposta pelo próprio agente (onda 3, só com token de run)
+
+- `cange tool propose --spec <arquivo.json> [--dry-run]`: cria o PEDIDO de uma ferramenta de API para você mesmo
+  (`POST /agent-api-tool-proposal`). Ela só passa a valer quando quem administra o agente revisa, digita a credencial
+  num campo seguro, testa e aprova; recusada, nada é criado. Não pausa a execução: não espere a decisão nem repita.
+- O `--spec` tem `{ name, description, method, url, query?, headers?, body?, timeout?, params?, secret_headers?,
+  docs_url?, reason? }`. A URL é https com host fixo; o que o agente preenche a cada chamada vai como `{param}` no
+  caminho, na query, nos cabeçalhos ou no corpo, e cada `{param}` é declarado em `params`.
+- **A credencial nunca vai na proposta.** `secret_headers: [{ "key": "Authorization", "hint": "Bearer <chave>" }]`
+  diz só ONDE ela vai, sem valor. API que leva a credencial no caminho (ex.: Z-API,
+  `/instances/{{secret:instancia}}/token/{{secret:token}}/send-text`) usa `{{secret:nome}}` só no caminho, com a dica
+  opcional em `secret_path_params: [{ "name": "token", "hint": "token da instância" }]`. Valor de credencial (no cabeçalho secreto, num cabeçalho ou query de credencial, na
+  URL ou como parâmetro) é recusado pelo kit e pelo Cange. Nunca peça a credencial na conversa.
+- Em "Planejar" a proposta não é enviada (o Cange recusa): descreva a ferramenta na resposta. Ambiente que ainda não
+  tem a rota responde com mensagem clara; não tente de novo.
+
 ## Sequência recomendada para mutações com values (modo avançado, `--payload`)
 
 1. `cange my-flows`, `cange my-registers`, `cange my-tasks` e `cange notifications --is-archived N`

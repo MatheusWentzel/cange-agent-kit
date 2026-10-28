@@ -35,14 +35,35 @@ export interface RunFile {
 }
 
 /**
- * M2 (review do Alex, onda 1): o kit está numa execução do runner? Alguma variável `RUNNER_*`
- * do ambiente do PROCESSO (o runner injeta `RUNNER_CARD_ID`, `RUNNER_AGENT_ID` etc.); um `.env`
- * no diretório não conta.
+ * Onda 3 (A2): variáveis de contexto que SÓ o runner do Cange põe no ambiente do agente.
+ * Todo run tem pelo menos uma: run de cartão (`RUNNER_CARD_ID`/`RUNNER_FLOW_ID`, e
+ * `RUNNER_STEP_ID` com etapa) e conversa ou rotina (`RUNNER_CHAT_SESSION_ID`, e
+ * `RUNNER_SPEAKER_USER_ID` com uma pessoa). `RUNNER_AGENT_ID` é o agente da cabeça
+ * (`agent head`) e também passa na conferência automática do runner (`kitDryRunEnv`).
+ *
+ * Lista explícita, e não o prefixo `RUNNER_`: o GitHub Actions define `RUNNER_OS`,
+ * `RUNNER_TEMP`, `RUNNER_ARCH`, `RUNNER_NAME`, `RUNNER_TOOL_CACHE`... e o kit rodando
+ * num workflow (ou numa máquina com essas variáveis) não está numa execução do runner.
+ */
+export const RUNNER_CONTEXT_ENV_KEYS: readonly string[] = [
+  "RUNNER_CARD_ID",
+  "RUNNER_FLOW_ID",
+  "RUNNER_STEP_ID",
+  "RUNNER_CHAT_SESSION_ID",
+  "RUNNER_SPEAKER_USER_ID",
+  "RUNNER_AGENT_ID"
+];
+
+/**
+ * M2 (review do Alex, onda 1): o kit está numa execução do runner? Alguma variável de
+ * `RUNNER_CONTEXT_ENV_KEYS` preenchida no ambiente do PROCESSO; um `.env` no diretório
+ * não conta.
  */
 export function underRunner(env: NodeJS.ProcessEnv = process.env): boolean {
-  return Object.entries(env).some(
-    ([key, value]) => key.startsWith("RUNNER_") && typeof value === "string" && value.trim() !== "" && !isFromDotenv(key)
-  );
+  return RUNNER_CONTEXT_ENV_KEYS.some((key) => {
+    const value = env[key];
+    return typeof value === "string" && value.trim() !== "" && !isFromDotenv(key);
+  });
 }
 
 /** Pastas temporárias do sistema: nunca são a pasta de uma execução. */
