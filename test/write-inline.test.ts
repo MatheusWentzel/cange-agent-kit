@@ -68,6 +68,24 @@ let putFailsWith: { status: number; message: string } | undefined;
 /** Respostas do PUT /form/answer em ordem (depois disso, o padrão). */
 let putQueue: Array<{ status: number; body: unknown }> = [];
 let cardResponse: { status: number; body: unknown } | undefined;
+/** Card #1533188: rota de escrita que responde o 422 UNIQUE_VALUE_CONFLICT do back. */
+let uniqueConflictOn: string | undefined;
+const UNIQUE_CONFLICT_BODY = {
+  status: "error",
+  code: "UNIQUE_VALUE_CONFLICT",
+  message: "O valor Pedido ACME do campo Título já existe no cartão #54.",
+  conflicts: [
+    {
+      field_id: 20,
+      field_name: "h_titulo",
+      field_title: "Título",
+      value: "Pedido ACME",
+      card_id: 54,
+      form_answer_id: 690,
+      message: "O valor Pedido ACME do campo Título já existe no cartão #54."
+    }
+  ]
+};
 
 beforeEach(() => {
   process.env.CANGE_ACCESS_TOKEN = "token";
@@ -81,6 +99,7 @@ beforeEach(() => {
   putFailsWith = undefined;
   putQueue = [];
   cardResponse = undefined;
+  uniqueConflictOn = undefined;
   process.env.CANGE_BUSY_RETRY_MS = "5";
   vi.spyOn(process.stdout, "write").mockImplementation((chunk: string | Uint8Array) => {
     stdout.push(String(chunk));
@@ -95,6 +114,9 @@ beforeEach(() => {
     const method = (init?.method ?? "GET").toUpperCase();
     const body = typeof init?.body === "string" ? JSON.parse(init.body) : undefined;
     requests.push({ method, path: url.pathname, query: url.searchParams, body });
+    if (uniqueConflictOn !== undefined && method !== "GET" && url.pathname === uniqueConflictOn) {
+      return json(UNIQUE_CONFLICT_BODY, 422);
+    }
     if (method === "GET" && url.pathname === "/flow") return json(FLOW);
     if (method === "GET" && url.pathname === "/field/by-flow") return json(FIELDS);
     if (method === "GET" && url.pathname === "/card/") {
@@ -471,5 +493,41 @@ describe("contrato do back P1 no PUT /form/answer", () => {
     expect(process.exitCode).toBe(EXIT_CODES.API);
     expect(writes()).toEqual([]);
     expect(errorMessage()).toBe("Cartão excluído: não há o que processar.");
+  });
+});
+
+describe("422 UNIQUE_VALUE_CONFLICT (card #1533188, K3)", () => {
+  function errorJson(): Record<string, unknown> {
+    return JSON.parse(stderr.join("")) as Record<string, unknown>;
+  }
+
+  it("card update-values: erro legível com code e hint, exit 4, uma escrita só", async () => {
+    uniqueConflictOn = "/form/answer";
+    await run(["card", "update-values", "--card-id", "55", "--flow-id", "316", "--set", "Título=Pedido ACME"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.API);
+    expect(writes()).toHaveLength(1);
+    const error = errorJson();
+    expect(error).toMatchObject({ status: 422, code: "UNIQUE_VALUE_CONFLICT", message: UNIQUE_CONFLICT_BODY.message });
+    expect(String(error.hint)).toContain("Não repita a mesma escrita");
+    expect((error.details as typeof UNIQUE_CONFLICT_BODY).conflicts[0]).toMatchObject({ field_title: "Título", card_id: 54 });
+  });
+
+  it("card create: para no 422 (nenhum passo seguinte), exit 4", async () => {
+    uniqueConflictOn = "/form/new-answer";
+    await run(["card", "create", "--flow-id", "316", "--set", "Título=Pedido ACME"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.API);
+    expect(writes().map((w) => w.path)).toEqual(["/form/new-answer"]);
+    expect(errorJson()).toMatchObject({ code: "UNIQUE_VALUE_CONFLICT" });
+  });
+
+  it("card move com --set: para no 422, exit 4", async () => {
+    uniqueConflictOn = "/card/v2/move-step";
+    await run(["card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento", "--set", "Horas=1", "--set", "Data da ligação=2026-11-20"]);
+
+    expect(process.exitCode).toBe(EXIT_CODES.API);
+    expect(writes().filter((w) => w.path === "/card/v2/move-step")).toHaveLength(1);
+    expect(errorJson()).toMatchObject({ code: "UNIQUE_VALUE_CONFLICT" });
   });
 });

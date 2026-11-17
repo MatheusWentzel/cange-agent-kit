@@ -372,15 +372,41 @@ interface BuildApiErrorInput {
   retryAfterSeconds?: number;
 }
 
+/** 422 de "valor único" do back (card #1533188): nada foi gravado. */
+export const UNIQUE_VALUE_CONFLICT_CODE = "UNIQUE_VALUE_CONFLICT";
+
+export const UNIQUE_VALUE_CONFLICT_HINT =
+  "Valor já existe em outro registro do Cange (veja details.conflicts). Não repita a mesma escrita: informe o usuário ou use outro valor.";
+
+/** Próximo passo por código de erro do back (top-level `code` do corpo). */
+const API_ERROR_HINTS: Readonly<Record<string, string>> = {
+  [UNIQUE_VALUE_CONFLICT_CODE]: UNIQUE_VALUE_CONFLICT_HINT
+};
+
 function buildApiError(input: BuildApiErrorInput): CangeApiError {
   const message = extractErrorMessage(input.body) ?? defaultStatusMessage(input.status);
+  const code = extractErrorCode(input.body);
+  const hint = code !== undefined ? API_ERROR_HINTS[code] : undefined;
   return new CangeApiError(message, {
     status: input.status,
     method: input.method,
     endpoint: input.path,
     details: sanitizeSensitive(input.body),
+    ...(code !== undefined ? { code } : {}),
+    ...(hint !== undefined ? { hint } : {}),
     ...(input.retryAfterSeconds !== undefined ? { retryAfterSeconds: input.retryAfterSeconds } : {})
   });
+}
+
+/**
+ * `code` de primeiro nível do corpo de erro (ex.: `UNIQUE_VALUE_CONFLICT`). Códigos dentro de
+ * `complement` continuam sendo lidos por quem precisa (apiErrorComplement); aqui só o do topo,
+ * que é o contrato do erro inteiro.
+ */
+function extractErrorCode(body: unknown): string | undefined {
+  if (!body || typeof body !== "object" || Array.isArray(body)) return undefined;
+  const code = (body as Record<string, unknown>).code;
+  return typeof code === "string" && code.trim().length > 0 ? code.trim() : undefined;
 }
 
 function extractErrorMessage(body: unknown): string | undefined {
