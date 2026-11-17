@@ -88,8 +88,9 @@ const APPROVAL_BLOCK_CODES = new Set([
 /**
  * 403 de aprovação/permissão do agente.
  *
- * O código NÃO vem em `error.code` — nada no kit popula esse campo a partir do
- * corpo HTTP. O backend serializa o `complement` do `AppError` no body
+ * O código NÃO vem em `error.code`: o cliente só copia para `error.code` o `code`
+ * de PRIMEIRO nível do corpo (ex.: `UNIQUE_VALUE_CONFLICT`, card #1533188). O
+ * gate de agente serializa o código dentro do `complement` do `AppError`
  * (`{ status, message, complement: { code, action_kind } }`) e o cliente guarda
  * o body inteiro em `error.details`. É de lá que ele é lido.
  */
