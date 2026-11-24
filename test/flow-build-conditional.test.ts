@@ -48,7 +48,7 @@ const lookups: ConditionLookups = {
 };
 
 const build = (input: Parameters<typeof buildConditionItem>[1]): Promise<ConditionItem> =>
-  buildConditionItem(structure, input, 0, lookups);
+  buildConditionItem(structure, input, 0, lookups, { kind: "field" });
 
 describe("item de condição no formato da tela", () => {
   it("grava exatamente as chaves da tela, com o campo de origem inteiro", async () => {
@@ -70,7 +70,7 @@ describe("item de condição no formato da tela", () => {
 
   it("não aninha as condicionais do próprio campo de origem", async () => {
     const nested = readFlowStructure(flow([screenRule(1, 1, ATIVO)]))!;
-    const item = await buildConditionItem(nested, { field: 1, comparator: "Igual a", value: "1" }, 0, lookups);
+    const item = await buildConditionItem(nested, { field: 1, comparator: "Igual a", value: "1" }, 0, lookups, { kind: "field" });
     expect(item.selectedField.conditionals).toEqual([]);
   });
 
@@ -138,7 +138,7 @@ describe("item de condição no formato da tela", () => {
       { id_field_option: STEP_A, field_id: -4, value: "11", label: "Entrada", order: "0" },
       { id_field_option: STEP_B, field_id: -4, value: "12", label: "Análise", order: "1" }
     ]);
-    expect((await build({ field: -1, comparator: "Depois de", value: "01/01/2027" })).selectedField).toEqual({
+    expect((await build({ field: -1, comparator: "Não está em branco" })).selectedField).toEqual({
       id_field: -1,
       name: "-1",
       type: "DATE_PICKER_FIELD",
@@ -172,7 +172,7 @@ describe("item de condição no formato da tela", () => {
       form_init: { id_form: 200, fields: [{ ...PEDIDO, flow_id: null }] }
     })!;
     await expect(
-      buildConditionItem(broken, { field: 9, comparator: "Igual a", value: 800 }, 0, lookups)
+      buildConditionItem(broken, { field: 9, comparator: "Igual a", value: 800 }, 0, lookups, { kind: "field" })
     ).rejects.toThrow(/sem flow_id/);
   });
 

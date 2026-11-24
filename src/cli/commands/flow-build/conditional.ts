@@ -97,7 +97,7 @@ export function registerFlowBuildConditionalCommands(flowBuildCommand: Command):
   const list = command
     .command("list")
     .description(
-      "Lista as condicionais do fluxo, de um campo ou de uma etapa, e diz se o editor da tela consegue abrir cada uma"
+      "Lista as condicionais do fluxo, de um campo ou de uma etapa, e diz se o editor da tela abre cada uma e se a tela a executa como está escrita"
     )
     .requiredOption("--id-flow <id>", "ID do flow")
     .option("--id-field <id>", "Só as do campo alvo (GET /conditional/by-field)")
@@ -110,9 +110,9 @@ export function registerFlowBuildConditionalCommands(flowBuildCommand: Command):
       })
     );
   annotateCommand(list, {
-    envelope: "{ idFlow, conditionals[], total, notOpenable }",
+    envelope: "{ idFlow, conditionals[], total, notOpenable, misexecuted }",
     fieldsLocation:
-      "conditionals[]: idConditional, type, target, action, actionLabel, opensInEditor, editorIssues[], conditions[]",
+      "conditionals[]: idConditional, type, target, action, actionLabel, opensInEditor, editorIssues[], runsAsConfigured, executionIssues[], executionWarnings[], conditions[]",
     example: "flow-build conditional list --id-flow 123 --id-field 456"
   });
 
@@ -152,7 +152,7 @@ export function registerFlowBuildConditionalCommands(flowBuildCommand: Command):
     );
   annotateCommand(create, {
     mutates: true,
-    envelope: "{ idConditional, name, target, actionLabel, conditions[], verified }",
+    envelope: "{ idConditional, name, target, actionLabel, conditions[], executionWarnings?, verified }",
     fieldsLocation: "verified = relida depois de gravar; --dry-run devolve payload.body (o corpo exato do POST)",
     example: `flow-build conditional create --id-flow 123 --id-field 456 --action exibir ${WHEN_EXAMPLE}`
   });
@@ -191,7 +191,7 @@ export function registerFlowBuildConditionalCommands(flowBuildCommand: Command):
     );
   annotateCommand(update, {
     mutates: true,
-    envelope: "{ idConditional, name, target, actionLabel, conditions[], verified }",
+    envelope: "{ idConditional, name, target, actionLabel, conditions[], executionWarnings?, verified }",
     example: "flow-build conditional update --id-flow 123 --id-conditional 789 --rehydrate --dry-run"
   });
 }

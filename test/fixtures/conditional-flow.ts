@@ -106,13 +106,42 @@ export const SECAO = field(13, "TITLE_FIELD", "Seção");
 export const REPETIDO_A = field(14, "TEXT_SHORT_FIELD", "Repetido");
 export const REPETIDO_B = field(15, "TEXT_SHORT_FIELD", "Repetido", { form_id: 201 });
 export const TAXA = field(16, "FORMULA_FIELD", "Taxa");
+export const MARCAS = field(17, "CHECK_BOX_FIELD", "Marcas", { options: options(17, [["1", "Um"], ["2", "Dois"]]) });
+export const NOTAS = field(18, "INPUT_RICH_TEXT_FIELD", "Notas");
+export const VENCIMENTO = field(19, "DUE_DATE_FIELD", "Vencimento do pedido");
+export const FONE = field(20, "PHONE_FIELD", "Fone");
+
+/** Regra com três condições (texto, data e opção), ação 2 e `key` diferente do alvo. */
+export function threeConditionRule(idConditional: number, target: number, overrides: Rec = {}): Rec {
+  const item = (index: number, source: Rec, comparator: string, component: string, value: string, codes: string[]): Rec => ({
+    index,
+    fields: [],
+    comparators: [],
+    selectedField: source,
+    selectedComparator: comparator,
+    value,
+    nameComponent: component,
+    valueOptions: codes
+  });
+  return screenRule(idConditional, target, TIPO, {
+    action: "2",
+    key: 777,
+    conditions_items: JSON.stringify([
+      item(0, DETALHE, "Contém", "TEXT_FILTER", "abc def", []),
+      item(1, PRAZO, "Antes de", "DATE_FILTER", "", ["31/12/2026"]),
+      item(2, TIPO, "É uma das", "OPTION_FILTER", "", ["1", "2"])
+    ]),
+    ...overrides
+  });
+}
 
 /** Regra enxuta, como um script que monta `conditions_items` à mão grava: o editor não abre. */
 export const LEAN_RULE = screenRule(900, 2, { id_field: 1, name: "hash1", title: "Tipo", type: "COMBO_BOX_FIELD" });
 
 export function flow(rules: Rec[] = [], stepRules: Rec[] = []): Rec {
   const initFields = [
-    TIPO, DETALHE, VALOR, PRAZO, ATIVO, SEM_OPCOES, DONO, FORNECEDOR, PEDIDO, COR, SECAO, REPETIDO_A, TAXA
+    TIPO, DETALHE, VALOR, PRAZO, ATIVO, SEM_OPCOES, DONO, FORNECEDOR, PEDIDO, COR, SECAO, REPETIDO_A, TAXA,
+    MARCAS, NOTAS, VENCIMENTO, FONE
   ];
   const withRules = (item: Rec): Rec => ({ ...item, conditionals: rules.filter((rule) => rule.field_id === item.id_field) });
   const step = (id: number, name: string, fields: Rec[]): Rec => ({

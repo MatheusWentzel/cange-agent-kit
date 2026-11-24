@@ -1,6 +1,7 @@
 import { CangeValidationError } from "../client/errors.js";
 import type { ConditionInput, ConditionValueInput } from "../schemas/conditionals.js";
 
+import { inspectExecution, type ConditionExecution, type ConditionalKind } from "./conditionalExecution.js";
 import { normalizeText } from "./valueResolver.js";
 
 /**
@@ -18,7 +19,7 @@ import { normalizeText } from "./valueResolver.js";
 
 export type RawRecord = Record<string, unknown>;
 
-export type ConditionalKind = "field" | "step";
+export type { ConditionalKind } from "./conditionalExecution.js";
 
 export type FilterComponentName = "TEXT_FILTER" | "OPTION_FILTER" | "DATE_FILTER";
 
@@ -518,11 +519,37 @@ function hydrateSelectedField(field: RawRecord): RawRecord {
   return id !== undefined && id < 0 ? { ...field } : { ...field, conditionals: [] };
 }
 
+/** O que o avaliador da tela faz com um item (novo ou já gravado), quando difere do que ele diz. */
+export function itemExecution(kind: ConditionalKind, item: unknown): ConditionExecution {
+  const selected = isRecord(item) && isRecord(item.selectedField) ? item.selectedField : undefined;
+  if (!isRecord(item) || !selected) return { issues: [], warnings: [] };
+  const id = fieldIdOf(selected);
+  return inspectExecution(kind, {
+    ...(id !== undefined ? { idField: id } : {}),
+    type: asText(selected.type),
+    title: asText(selected.title) || asText(selected.name),
+    comparator: asText(item.selectedComparator).replace(/\s+/g, " ").trim(),
+    value: asText(item.value),
+    valueOptions: Array.isArray(item.valueOptions) ? item.valueOptions.map(asText) : []
+  });
+}
+
+export interface BuildConditionOptions {
+  /** O avaliador de campo e o de etapa erram em casos diferentes. */
+  kind: ConditionalKind;
+  /**
+   * Só para regravar uma regra que já existe SEM mudar o que ela faz (`--rehydrate`): não
+   * recusa a condição que a tela executa errado, porque a recusa não a consertaria.
+   */
+  keepMisexecuted?: boolean;
+}
+
 export async function buildConditionItem(
   structure: FlowStructure,
   input: ConditionInput,
   index: number,
-  lookups: ConditionLookups
+  lookups: ConditionLookups,
+  options: BuildConditionOptions
 ): Promise<ConditionItem> {
   const field = resolveSourceField(structure, input.field);
   const { component } = sourceRule(field);
@@ -555,7 +582,7 @@ export async function buildConditionItem(
     }
   }
 
-  return {
+  const item: ConditionItem = {
     index,
     fields: [],
     comparators: [],
@@ -565,6 +592,12 @@ export async function buildConditionItem(
     nameComponent: component,
     valueOptions
   };
+
+  const { issues } = itemExecution(options.kind, item);
+  if (issues.length > 0 && !options.keepMisexecuted) {
+    fail(`A tela aceita esta regra mas a executa errado, então o kit não grava. ${issues.join(" ")}`, { executionIssues: issues });
+  }
+  return item;
 }
 
 /** Item já gravado → entrada do kit, para regravar (`update`) com o campo de origem hidratado. */

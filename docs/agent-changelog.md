@@ -10,10 +10,11 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   valida e monta `conditions_items` no formato da tela; nenhum agente monta esse JSON à mão.
 - **Por quê:** regra gravada com `selectedField` enxuto (id, nome, título e tipo) é avaliada certo no cartão, mas o editor
   da tela abre com a lista de valores carregando para sempre.
-- `list` marca `opensInEditor` / `editorIssues`; `update` altera no lugar e `update --rehydrate` conserta a regra que o
+- `list` marca `opensInEditor` / `editorIssues` e `runsAsConfigured` / `executionIssues`; `update` altera no lugar e `update --rehydrate` conserta a regra que o
   editor não abre, sem trocar o id.
 - Recusa local (exit 2, nada gravado): valor fora das opções, campo de opção sem opções, comparador de outro tipo, campo
-  de origem fora do fluxo. Depois de gravar, o kit relê e responde `verified`.
+  de origem fora do fluxo, e regra que a tela aceita mas executa errado (nunca casa, sempre casa ou invertida), com o
+  comparador que funciona na mensagem. Erro parcial da tela vira `executionWarnings`. Depois de gravar, o kit relê e responde `verified`.
 - O `--dry-run` destes comandos **lê a API** (precisa de credencial): a validação depende do fluxo.
 - Como biblioteca: `listFlowBuildConditionals`, `prepareFlowBuildConditionalCreate|Update` (só leem) e
   `createFlowBuildConditional` / `updateFlowBuildConditional`. Nada muda nos contratos que já existiam.

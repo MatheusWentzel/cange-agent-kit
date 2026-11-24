@@ -19,6 +19,7 @@ import {
   fieldIdOf,
   findFlowField,
   findFlowStep,
+  itemExecution,
   parseConditionItems,
   readFlowStructure,
   resolveAction,
@@ -56,6 +57,10 @@ export interface PreparedConditional {
   target: { type: ConditionalKind; description: string };
   actionLabel?: string;
   conditions: ConditionSummary[];
+  /** Só em `--rehydrate`: a regra já existente que a tela executa errado (o formato foi regravado, o erro fica). */
+  executionIssues?: string[];
+  /** Situações em que a tela erra parte das vezes. */
+  executionWarnings?: string[];
   body: ConditionalBody;
 }
 
@@ -65,6 +70,8 @@ export interface SavedConditional {
   target: { type: ConditionalKind; description: string };
   actionLabel?: string;
   conditions: ConditionSummary[];
+  executionIssues?: string[];
+  executionWarnings?: string[];
   /** Relida depois de gravar e igual ao que foi enviado (`false`: gravou, mas a releitura falhou). */
   verified: boolean;
   note?: string;
@@ -81,6 +88,12 @@ export interface ConditionalSummary {
   /** O editor da tela consegue abrir a regra (opções e valores presentes em `selectedField`). */
   opensInEditor: boolean;
   editorIssues: string[];
+  /** A tela executa a regra como ela diz (nenhum `executionIssues`). */
+  runsAsConfigured: boolean;
+  /** Condições que nunca casam, sempre casam ou saem invertidas. */
+  executionIssues: string[];
+  /** Condições que erram só em parte das situações. */
+  executionWarnings: string[];
   conditions: ConditionSummary[];
 }
 
@@ -90,6 +103,8 @@ export interface ConditionalList {
   total: number;
   /** Quantas o editor da tela NÃO consegue abrir. */
   notOpenable: number;
+  /** Quantas a tela executa errado. */
+  misexecuted: number;
 }
 
 type Id = number | string;
@@ -248,6 +263,7 @@ export function createConditionalsContracts(params: {
     conditions: ConditionInput[];
     idConditional?: number;
     key?: number;
+    keepMisexecuted?: boolean;
   }): Promise<PreparedConditional> {
     const { structure, target } = input;
     const description = describeTarget(structure, target);
@@ -261,14 +277,24 @@ export function createConditionalsContracts(params: {
       if (!parsed.success) {
         throw new CangeValidationError(`Condição ${index + 1} inválida.`, { details: parsed.error.format() });
       }
-      items.push(await buildConditionItem(structure, parsed.data, index, lookups));
+      items.push(
+        await buildConditionItem(structure, parsed.data, index, lookups, {
+          kind: target.type,
+          keepMisexecuted: input.keepMisexecuted === true
+        })
+      );
     }
     const label = actionLabel(target.type, input.action);
+    const execution = items.map((item) => itemExecution(target.type, item));
+    const issues = execution.flatMap((entry) => entry.issues);
+    const warnings = execution.flatMap((entry) => entry.warnings);
     return {
       request: "POST /conditional",
       target: { type: target.type, description },
       ...(label ? { actionLabel: label } : {}),
       conditions: items.map(summarizeCondition),
+      ...(issues.length > 0 ? { executionIssues: issues } : {}),
+      ...(warnings.length > 0 ? { executionWarnings: warnings } : {}),
       body: {
         ...(input.idConditional !== undefined ? { id_conditional: input.idConditional } : {}),
         flow_id: structure.idFlow,
@@ -313,7 +339,9 @@ export function createConditionalsContracts(params: {
       name: body.name,
       target: prepared.target,
       ...(prepared.actionLabel ? { actionLabel: prepared.actionLabel } : {}),
-      conditions: prepared.conditions
+      conditions: prepared.conditions,
+      ...(prepared.executionIssues ? { executionIssues: prepared.executionIssues } : {}),
+      ...(prepared.executionWarnings ? { executionWarnings: prepared.executionWarnings } : {})
     };
 
     // O back responde 200 no update mesmo sem achar a linha: só a releitura prova a gravação.
@@ -361,6 +389,9 @@ export function createConditionalsContracts(params: {
     const target = targetOf(current);
     const action = resolveAction(target.type, input.action ?? String(current.action));
     let conditions = input.conditions;
+    // Regravar sem mudar nada (`--rehydrate`) não piora a regra; trocar a ação de uma regra que a
+    // tela executa errado muda o efeito sem o agente ver. Por isso só o primeiro passa.
+    const keepMisexecuted = input.conditions === undefined && input.action === undefined;
     if (conditions === undefined) {
       const items = parseConditionItems(current.conditions_items);
       if (!items || items.length === 0) {
@@ -368,9 +399,16 @@ export function createConditionalsContracts(params: {
           `A condicional ${idConditional} não tem condições legíveis: informe as condições com --when.`
         );
       }
+      const issues = items.flatMap((item) => itemExecution(target.type, item).issues);
+      if (issues.length > 0 && !keepMisexecuted) {
+        throw new CangeValidationError(
+          `A condicional ${idConditional} tem condição que a tela executa errado, então trocar só a ação não dá o efeito esperado. Nada foi gravado. Reescreva as condições com --when. ${issues.join(" ")}`,
+          { details: { executionIssues: issues } }
+        );
+      }
       conditions = items.map(conditionInputFromItem);
     }
-    return prepare({ structure, target, action, conditions, idConditional, key: id(current.key) });
+    return prepare({ structure, target, action, conditions, idConditional, key: id(current.key), keepMisexecuted });
   }
 
   return {
@@ -385,7 +423,8 @@ export function createConditionalsContracts(params: {
         idFlow,
         conditionals,
         total: conditionals.length,
-        notOpenable: conditionals.filter((rule) => !rule.opensInEditor).length
+        notOpenable: conditionals.filter((rule) => !rule.opensInEditor).length,
+        misexecuted: conditionals.filter((rule) => !rule.runsAsConfigured).length
       };
     },
 
@@ -419,6 +458,8 @@ function summarizeConditional(structure: FlowStructure, rule: RawRecord): Condit
     : items.length === 0
       ? ["conditions_items sem condições"]
       : items.flatMap(editorIssues);
+  const execution = (items ?? []).map((item) => itemExecution(kind, item));
+  const executionIssues = execution.flatMap((entry) => entry.issues);
   const idField = id(rule.field_id);
   const idStep = id(rule.flow_step_id);
   const idStepFrom = id(rule.flow_step_parent_id);
@@ -447,6 +488,9 @@ function summarizeConditional(structure: FlowStructure, rule: RawRecord): Condit
     ...(typeof rule.index === "number" ? { index: rule.index } : {}),
     opensInEditor: issues.length === 0,
     editorIssues: issues,
+    runsAsConfigured: executionIssues.length === 0,
+    executionIssues,
+    executionWarnings: execution.flatMap((entry) => entry.warnings),
     conditions: (items ?? []).map(summarizeCondition)
   };
 }

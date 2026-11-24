@@ -171,7 +171,41 @@ Depois de gravar, o kit relê a regra e responde `verified`. `verified: false` =
 
 Ler o efeito no formulário: `show_on_form: "S"` significa **escondido**. Com ação `exibir`, o campo fica escondido até a condição valer. A primeira regra verdadeira, na ordem da tela, vence.
 
-Limites do avaliador da tela que o kit não corrige (a tela também deixa criar): data com `Não é igual a` é sempre verdadeira, e `Está em branco` em `-1` e `-2` não casa com data vazia. Evite os dois.
+#### Regra que a tela aceita e executa errado
+
+A tela deixa salvar condições que o avaliador dela nunca casa, sempre casa ou inverte. Quem cria pela tela testa e vê; um agente não. O kit **recusa** (exit 2, nada gravado) e a mensagem traz a saída que funciona.
+
+| Alvo | Condição recusada | O que a tela faz | Use no lugar |
+|------|-------------------|------------------|--------------|
+| Etapa | `Não é igual a` em texto (curto, longo, rico, e-mail, telefone, documento, link, id) e em fórmula | Sai invertida | `Igual a` com a ação inversa |
+| Etapa | Fórmula com `50%`, `0,4` ou outro valor que não é número com ponto | Nunca casa | `0.5`, `0.4` |
+| Etapa | Fórmula `Igual a` com `0.50` | Nunca casa (compara texto) | `0.5` |
+| Os dois | `-1` e `-2` com `Igual a`, `Antes de`, `Depois de`, `Igual a ou depois`, `Igual a ou antes` | Nunca casa | Campo de data ou de vencimento do formulário |
+| Os dois | `-1` e `-2` com `Não é igual a` | Casa com qualquer data preenchida | `Não está em branco`, se era essa a intenção |
+| Os dois | `-1` e `-2` com `Está em branco` | Nunca casa | `Não está em branco` com a ação inversa |
+| Os dois | Data com `Não é igual a` | Sempre casa | `Igual a` com a ação inversa |
+| Campo | Data com `Não está em branco` | Casa também com a data vazia (apagada, ou de outro formulário do cartão) | `Está em branco` com a ação inversa |
+| Os dois | Texto rico `Igual a` / `Não é igual a` com texto puro | Nunca / sempre casa (compara o HTML) | `Contém` / `Não contém` |
+| Os dois | Data de Conclusão (`-9`) e atalho de data (hoje, esta semana) | Ignora / nunca casa | Campo de data com `dd/MM/yyyy` |
+
+"Ação inversa" dá o mesmo efeito numa regra de **uma** condição: permitir quando não é igual = bloquear quando é igual; exibir quando está preenchido = esconder quando está em branco.
+
+Erros só de parte das situações passam, com `executionWarnings` na resposta (leia antes de concluir):
+
+- **Campo, data** com `Igual a`, `Antes de`, `Depois de` etc.: casa também com a data vazia (apagada, ou de outro formulário do cartão).
+- **Etapa, resposta em lista** (checkbox, lista de itens, cadastro, cartão): com o campo no formulário aberto, `É uma das` nunca casa, e `Não é igual a` e `Não é uma das` sempre casam. Só acertam com a resposta já gravada em outro formulário. `Igual a` erra com mais de um item.
+- **Etapa, usuário e solicitante**: com o campo no formulário aberto, `É uma das` nunca casa, `Não é igual a` e `Não é uma das` sempre casam. `Igual a` funciona.
+- **Campo, resposta em lista**: `Não é igual a` e `Não é uma das` erram com mais de um item; em cadastro e cartão, `Igual a` e `É uma das` também.
+- **Etapa, fórmula** com `Igual a`: compara texto (`10` não casa com `10.00`).
+- **Texto rico** com HTML no valor: compara o HTML inteiro.
+
+Regra que **já existe** nesses casos:
+
+- `list` sinaliza em cada regra `runsAsConfigured`, `executionIssues`, `executionWarnings`, e no total `misexecuted`. Não altera nada.
+- `update --rehydrate` regrava o formato, mantém a lógica e devolve `executionIssues` (o erro de execução continua).
+- `update --action` sem condições novas é **recusado** quando alguma condição é executada errado: trocar só a ação não daria o efeito esperado e o agente não veria. A saída é reescrever as condições com `--when`.
+
+Casos conferidos rodando os avaliadores da tela offline, por tipo, comparador e alvo. Se a tela for corrigida, eles saem de `src/utils/conditionalExecution.ts` e desta lista.
 
 ## Erros frequentes da API
 
