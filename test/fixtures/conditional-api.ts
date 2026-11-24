@@ -22,6 +22,8 @@ export class FakeConditionalApi {
   /** Falha por rota (`"POST /conditional"`): status HTTP, ou `network` para a conexão cair. */
   public failures: Record<string, number | "network"> = {};
   public newId: unknown = 555;
+  /** Id que o back devolve no update (o da linha, por padrão). */
+  public updateResponseId: unknown;
 
   public posts(): ApiCall[] {
     return this.calls.filter((call) => call.method !== "GET");
@@ -83,7 +85,7 @@ export class FakeConditionalApi {
         list[at] = { ...list[at], action: stored.action, conditions_items: stored.conditions_items, name: stored.name };
       }
       // Como o back: no update responde 200 com o objeto enviado, mesmo sem achar a linha.
-      return this.json(body);
+      return this.json(this.updateResponseId === undefined ? body : { ...body, id_conditional: this.updateResponseId });
     }
     const row = { id_conditional: this.newId, index: null, ...(stored ?? body) };
     if (stored) list.push(row);

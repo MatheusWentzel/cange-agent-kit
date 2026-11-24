@@ -264,6 +264,7 @@ export function createConditionalsContracts(params: {
     idConditional?: number;
     key?: number;
     keepMisexecuted?: boolean;
+    preserveValues?: boolean;
   }): Promise<PreparedConditional> {
     const { structure, target } = input;
     const description = describeTarget(structure, target);
@@ -280,7 +281,8 @@ export function createConditionalsContracts(params: {
       items.push(
         await buildConditionItem(structure, parsed.data, index, lookups, {
           kind: target.type,
-          keepMisexecuted: input.keepMisexecuted === true
+          keepMisexecuted: input.keepMisexecuted === true,
+          preserveValues: input.preserveValues === true
         })
       );
     }
@@ -408,7 +410,7 @@ export function createConditionalsContracts(params: {
       }
       conditions = items.map(conditionInputFromItem);
     }
-    return prepare({ structure, target, action, conditions, idConditional, key: id(current.key), keepMisexecuted });
+    return prepare({ structure, target, action, conditions, idConditional, key: id(current.key), keepMisexecuted, preserveValues: input.conditions === undefined });
   }
 
   return {

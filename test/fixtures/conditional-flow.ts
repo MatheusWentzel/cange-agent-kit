@@ -111,6 +111,12 @@ export const NOTAS = field(18, "INPUT_RICH_TEXT_FIELD", "Notas");
 export const VENCIMENTO = field(19, "DUE_DATE_FIELD", "Vencimento do pedido");
 export const FONE = field(20, "PHONE_FIELD", "Fone");
 
+export const PERCENTUAL = field(21, "NUMBER_FIELD", "Percentual", { variation: "2" });
+export const CPF = field(22, "DOC_FIELD", "CPF", { variation: "1" });
+export const CNPJ = field(23, "DOC_FIELD", "CNPJ", { variation: "2" });
+export const CAIXA = field(24, "CHECK_BOX_ONE_FIELD", "Caixa", { options: options(24, [["1", "Sim"]]) });
+export const ITENS = field(25, "INPUT_LIST_FIELD", "Itens", { options: options(25, [["1", "Um"]]) });
+
 /** Regra com três condições (texto, data e opção), ação 2 e `key` diferente do alvo. */
 export function threeConditionRule(idConditional: number, target: number, overrides: Rec = {}): Rec {
   const item = (index: number, source: Rec, comparator: string, component: string, value: string, codes: string[]): Rec => ({
@@ -141,7 +147,7 @@ export const LEAN_RULE = screenRule(900, 2, { id_field: 1, name: "hash1", title:
 export function flow(rules: Rec[] = [], stepRules: Rec[] = []): Rec {
   const initFields = [
     TIPO, DETALHE, VALOR, PRAZO, ATIVO, SEM_OPCOES, DONO, FORNECEDOR, PEDIDO, COR, SECAO, REPETIDO_A, TAXA,
-    MARCAS, NOTAS, VENCIMENTO, FONE
+    MARCAS, NOTAS, VENCIMENTO, FONE, PERCENTUAL, CPF, CNPJ, CAIXA, ITENS
   ];
   const withRules = (item: Rec): Rec => ({ ...item, conditionals: rules.filter((rule) => rule.field_id === item.id_field) });
   const step = (id: number, name: string, fields: Rec[]): Rec => ({

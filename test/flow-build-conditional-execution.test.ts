@@ -67,9 +67,16 @@ describe("tabela da tela (componente e comparadores por tipo)", () => {
 describe("regra que a tela executa errado é recusada", () => {
   const D = "10/06/2026";
   it.each<[ConditionalKind, Parameters<typeof buildConditionItem>[1], RegExp]>([
-    ["step", { field: 2, comparator: "Não é igual a", value: "x" }, /invertido.*"Igual a" com a ação inversa \(permitir/],
+    ["step", { field: 2, comparator: "Não é igual a", value: "x" }, /invertido.*"Igual a" com a ação inversa \(permitir.*primeiro uma regra só/],
     ["step", { field: 20, comparator: "Não é igual a", value: "x" }, /invertido/],
-    ["step", { field: 18, comparator: "Não é igual a", value: "x" }, /invertido/],
+    ["step", { field: 18, comparator: "Não é igual a", value: "x" }, /HTML.*nunca casa.*"Não contém"/],
+    ["step", { field: 18, comparator: "Não é igual a", value: "<p>x</p>" }, /invertido.*"Igual a" com a ação inversa/],
+    ["field", { field: 24, comparator: "Igual a", value: "Sim" }, /verdadeiro ou falso.*nunca casa/],
+    ["step", { field: 24, comparator: "Não está em branco" }, /sempre casa/],
+    ["field", { field: 25, comparator: "Igual a", value: "Um" }, /textos livres.*nunca casa/],
+    ["step", { field: 25, comparator: "Não é uma das", values: ["Um"] }, /sempre casa/],
+    ["field", { field: 21, comparator: "Igual a", value: "15" }, /15 vira 1\.500%\. Para 15% mande "15%" ou 0\.15/],
+    ["step", { field: 21, comparator: "Maior que", value: -15 }, /percentual/],
     ["step", { field: 16, comparator: "Não é igual a", value: "0.5" }, /invertido/],
     ["step", { field: 16, comparator: "Igual a", value: "50%" }, /ponto decimal.*50% é 0\.5/],
     ["step", { field: 16, comparator: "Maior que", value: "0,4" }, /ponto decimal/],
@@ -83,7 +90,7 @@ describe("regra que a tela executa errado é recusada", () => {
     ["step", { field: -2, comparator: "Não é igual a", value: D }, /ignora o valor/],
     ["field", { field: -1, comparator: "Está em branco" }, /nunca casa.*"Não está em branco" com a ação inversa/],
     ["step", { field: -2, comparator: "Está em branco" }, /nunca casa/],
-    ["field", { field: 4, comparator: "Não é igual a", value: D }, /sempre casa.*"Igual a" com a ação inversa \(exibir/],
+    ["field", { field: 4, comparator: "Não é igual a", value: D }, /sempre casa.*"Igual a" com a ação inversa \(exibir.*data vazia/],
     ["step", { field: 19, comparator: "Não é igual a", value: D }, /sempre casa/],
     ["field", { field: 4, comparator: "Não está em branco" }, /data vazia.*"Está em branco" com a ação inversa/],
     ["field", { field: 18, comparator: "Igual a", value: "texto" }, /HTML.*nunca casa.*"Contém"/],

@@ -437,7 +437,10 @@ function optionLabels(field: NormalizedField): string {
   return labels.slice(0, 12).join(" | ") + (labels.length > 12 ? " | ..." : "");
 }
 
-function isPercentField(field: NormalizedField): boolean {
+/** O que basta de um campo para saber se ele é percentual. */
+export type PercentFieldLike = { type: string; variation?: string; raw?: Record<string, unknown> };
+
+export function isPercentField(field: PercentFieldLike): boolean {
   const variation = field.variation ?? (typeof field.raw?.variation === "string" ? field.raw.variation : undefined);
   return normalizeFieldType(field.type) === "NUMBER_FIELD" && variation === "2";
 }
@@ -1002,14 +1005,22 @@ export function screenMaskOf(field: NormalizedField, value: unknown): { value: u
   return masked !== value && masked.trim() !== "" ? { value: masked, from: text } : { value };
 }
 
+/** Percentual guarda fração: acima disto (1000%) é quase certo que o número veio como percentual. */
+export const PERCENT_FRACTION_LIMIT = 10;
+
+/** "15 vira 1.500%. Para 15% mande "15%" ou 0.15" */
+export function percentSuspectText(value: number): string {
+  return `${value} vira ${(value * 100).toLocaleString("pt-BR")}%. Para ${value}% mande "${value}%" ou ${value / 100}`;
+}
+
 /** Guarda final pelo tipo (mesmas regras do validate-fields de sempre). */
 function checkCoercedValue(field: NormalizedField, value: unknown): ValueIssue | undefined {
   if (isEmptyValue(value)) return undefined;
-  if (isPercentField(field) && typeof value === "number" && Math.abs(value) > 10) {
+  if (isPercentField(field) && typeof value === "number" && Math.abs(value) > PERCENT_FRACTION_LIMIT) {
     return {
       kind: "invalid_value",
       blocking: true,
-      text: `${fieldLabel(field)} (percentual): ${value} vira ${(value * 100).toLocaleString("pt-BR")}%. Para ${value}% mande "${value}%" ou ${value / 100}`
+      text: `${fieldLabel(field)} (percentual): ${percentSuspectText(value)}`
     };
   }
   const check = validateValueByFieldType(field.type, value, field.options, field.variation ?? field.raw?.variation);

@@ -2,7 +2,8 @@ import { CangeValidationError } from "../client/errors.js";
 import type { ConditionInput, ConditionValueInput } from "../schemas/conditionals.js";
 
 import { inspectExecution, type ConditionExecution, type ConditionalKind } from "./conditionalExecution.js";
-import { normalizeText } from "./valueResolver.js";
+import { screenFormattedValue, typedFormatError } from "./screenFormat.js";
+import { isPercentField, normalizeText, parseLocaleNumber } from "./valueResolver.js";
 
 /**
  * Condicional de campo e de etapa, no formato EXATO que a tela grava.
@@ -435,15 +436,36 @@ function isFormulaNumber(text: string): boolean {
   return normalized !== "" && Number.isFinite(Number(normalized));
 }
 
-function textValue(field: RawRecord, input: ConditionValueInput): string {
+/**
+ * "10%" num campo percentual → a fração, com a MESMA conta da tela (`InputNumber`:
+ * `Number(texto) / 100`). Sem arredondar de propósito: 1.1% na tela vira 0.011000000000000001, e o
+ * avaliador compara com `===`; o 0.011 "bonito" nunca casaria com o que a pessoa digitou.
+ */
+function percentFraction(field: RawRecord, text: string): string {
+  const parsed = parseLocaleNumber(text.slice(0, -1));
+  if (!parsed.ok) {
+    return fail(`O campo ${describeField(field)} é percentual: use "10%" ou a fração 0.1; recebi "${text}".`);
+  }
+  return String(parsed.value / 100);
+}
+
+/** `preserve`: valor de regra já gravada, que é conferido mas nunca convertido. */
+function textValue(field: RawRecord, input: ConditionValueInput, preserve: boolean): string {
   const text = plainText(field, input);
   if (text === "") fail(`A condição do campo ${describeField(field)} pede um valor não vazio.`);
   const type = asText(field.type);
+  const percent = isPercentField({ type, variation: asText(field.variation) });
+  if (percent && !preserve && text.endsWith("%")) return percentFraction(field, text);
   if (NUMERIC_TYPES.has(type) && !Number.isFinite(Number(text))) {
-    fail(`O campo ${describeField(field)} pede um número com ponto decimal (ex.: 1500.5); recebi "${text}".`);
+    const expected = percent ? 'um percentual ("10%") ou a fração (0.1)' : "um número com ponto decimal (ex.: 1500.5)";
+    fail(`O campo ${describeField(field)} pede ${expected}; recebi "${text}".`);
   }
   if (type === "FORMULA_FIELD" && !isFormulaNumber(text)) {
     fail(`O campo ${describeField(field)} pede um número (ex.: 0,5 ou 50%); recebi "${text}".`);
+  }
+  // Documento e telefone completos: a resposta é sempre mascarada, então o valor também é.
+  if (!preserve && typedFormatError(type, field.variation, text) === undefined) {
+    return screenFormattedValue(type, field.variation, text);
   }
   return text;
 }
@@ -527,6 +549,7 @@ export function itemExecution(kind: ConditionalKind, item: unknown): ConditionEx
   return inspectExecution(kind, {
     ...(id !== undefined ? { idField: id } : {}),
     type: asText(selected.type),
+    variation: asText(selected.variation),
     title: asText(selected.title) || asText(selected.name),
     comparator: asText(item.selectedComparator).replace(/\s+/g, " ").trim(),
     value: asText(item.value),
@@ -542,6 +565,8 @@ export interface BuildConditionOptions {
    * recusa a condição que a tela executa errado, porque a recusa não a consertaria.
    */
   keepMisexecuted?: boolean;
+  /** Valores vindos de regra já gravada: conferidos, nunca convertidos (percentual, máscara). */
+  preserveValues?: boolean;
 }
 
 export async function buildConditionItem(
@@ -572,7 +597,7 @@ export async function buildConditionItem(
     const multi = component === "OPTION_FILTER" ? ' Para vários valores use "É uma das" ou "Não é uma das".' : "";
     fail(`O comparador "${comparator}" aceita um valor só; recebi ${inputs.length} (campo ${describeField(field)}).${multi}`);
   } else if (component === "TEXT_FILTER") {
-    value = textValue(field, inputs[0]!);
+    value = textValue(field, inputs[0]!, options.preserveValues === true);
   } else if (component === "DATE_FILTER") {
     valueOptions = [dateValue(field, inputs[0]!)];
   } else {

@@ -10,8 +10,10 @@ Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, 
   valida e monta `conditions_items` no formato da tela; nenhum agente monta esse JSON à mão.
 - **Por quê:** regra gravada com `selectedField` enxuto (id, nome, título e tipo) é avaliada certo no cartão, mas o editor
   da tela abre com a lista de valores carregando para sempre.
-- `list` marca `opensInEditor` / `editorIssues` e `runsAsConfigured` / `executionIssues`; `update` altera no lugar e `update --rehydrate` conserta a regra que o
-  editor não abre, sem trocar o id.
+- `list` marca `opensInEditor` / `editorIssues` e `runsAsConfigured` / `executionIssues`; `update` altera no lugar.
+  `update --rehydrate` regrava o formato sem trocar o id, a lógica nem os valores, quando a condição ainda pode ser
+  remontada (senão recusa com exit 2 e pede `--when`).
+- Percentual aceita `"10%"` e grava a fração; CPF, CNPJ e telefone completos são gravados com a máscara da tela.
 - Recusa local (exit 2, nada gravado): valor fora das opções, campo de opção sem opções, comparador de outro tipo, campo
   de origem fora do fluxo, e regra que a tela aceita mas executa errado (nunca casa, sempre casa ou invertida), com o
   comparador que funciona na mensagem. Erro parcial da tela vira `executionWarnings`. Depois de gravar, o kit relê e responde `verified`.
