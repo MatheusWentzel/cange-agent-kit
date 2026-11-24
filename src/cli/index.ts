@@ -52,6 +52,7 @@ import { registerTemplateFlowCreateCommand } from "./commands/field-template-flo
 import { registerTemplateRegisterCreateCommand } from "./commands/field-template-register.js";
 import { registerTemplateStepMoveCommand } from "./commands/field-template-step-move.js";
 import { registerFlowBuildFieldCommands } from "./commands/flow-build/field.js";
+import { registerFlowBuildConditionalCommands } from "./commands/flow-build/conditional.js";
 import { registerFlowBuildFieldTypesCommand } from "./commands/flow-build/field-types.js";
 import { registerFlowBuildFlowCommands } from "./commands/flow-build/flow.js";
 import { registerFlowBuildPingCommand } from "./commands/flow-build/ping.js";
@@ -205,7 +206,7 @@ export function createProgram(): Command {
   const flowBuildCommand = program
     .command("flow-build")
     .description(
-      "Construção de fluxos via Flow V2 Build API (/flow/v2/build): fluxo, etapas, campos e relacionamentos"
+      "Construção de fluxos via Flow V2 Build API (/flow/v2/build): fluxo, etapas, campos, relacionamentos e condicionais"
     );
   registerFlowBuildPingCommand(flowBuildCommand);
   registerFlowBuildFieldTypesCommand(flowBuildCommand);
@@ -213,6 +214,7 @@ export function createProgram(): Command {
   registerFlowBuildStepCommands(flowBuildCommand);
   registerFlowBuildFieldCommands(flowBuildCommand);
   registerFlowBuildStepRelationshipCommands(flowBuildCommand);
+  registerFlowBuildConditionalCommands(flowBuildCommand);
 
   registerManifestCommand(program);
   registerGuideCommand(program);

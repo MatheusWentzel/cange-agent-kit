@@ -2,6 +2,22 @@
 
 Este changelog é focado em quem mantém playbooks/agentes (Codex, Claude Code, etc.).
 
+## 2026-11-24
+
+### `flow-build conditional` (create, list, update)
+
+- Condicional de campo (exibir/esconder) e de etapa (permitir/bloquear mover) pelo kit. O kit busca o campo de origem,
+  valida e monta `conditions_items` no formato da tela; nenhum agente monta esse JSON à mão.
+- **Por quê:** regra gravada com `selectedField` enxuto (id, nome, título e tipo) é avaliada certo no cartão, mas o editor
+  da tela abre com a lista de valores carregando para sempre.
+- `list` marca `opensInEditor` / `editorIssues`; `update` altera no lugar e `update --rehydrate` conserta a regra que o
+  editor não abre, sem trocar o id.
+- Recusa local (exit 2, nada gravado): valor fora das opções, campo de opção sem opções, comparador de outro tipo, campo
+  de origem fora do fluxo. Depois de gravar, o kit relê e responde `verified`.
+- O `--dry-run` destes comandos **lê a API** (precisa de credencial): a validação depende do fluxo.
+- Como biblioteca: `listFlowBuildConditionals`, `prepareFlowBuildConditionalCreate|Update` (só leem) e
+  `createFlowBuildConditional` / `updateFlowBuildConditional`. Nada muda nos contratos que já existiam.
+
 ## 2026-10-24
 
 ### `attachment list`: `ask` só com `--name`; busca por palavra (onda 1i, revisão do Alex)
