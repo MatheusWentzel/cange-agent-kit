@@ -42,10 +42,14 @@ export function registerCardGetCommand(cardCommand: Command): void {
         if (!options.flowId) {
           throw new CangeCliUsageError(FLOW_FROM_CARD_HINT);
         }
+        // O summary (default) só usa value/valueString: leitura leve. --raw e --raw-full
+        // seguem com a resposta completa de sempre (são os únicos que expõem os objetos
+        // aninhados dos vínculos).
         const result = await kit.contracts.getCard({
           flowId: options.flowId,
           cardId: options.cardId,
-          companyId: options.companyId
+          companyId: options.companyId,
+          ...(options.raw || options.rawFull ? {} : { withRelationObjects: false })
         });
 
         const requestedFieldIds = parseFieldIds(options.fieldIds);

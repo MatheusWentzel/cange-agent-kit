@@ -91,7 +91,8 @@ export async function detectDataLoss(input: DetectDataLossInput): Promise<DataLo
       input.card ??
       (await kit.contracts.getCard({
         flowId: payload.flowId,
-        cardId: payload.cardId
+        cardId: payload.cardId,
+        withRelationObjects: false
       }));
 
     const filled = extractFilledFields(card.raw, idForm, fieldById);

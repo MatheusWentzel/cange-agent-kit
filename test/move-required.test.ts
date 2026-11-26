@@ -690,3 +690,19 @@ describe("dica do comando", () => {
     expect(skipsRequiredOnBackwardMove({ skipRequiredOnBackwardMove: "S" }, { index: 1 }, { index: 3 })).toBe(false);
   });
 });
+
+describe("card move lê o cartão em leitura leve (withRelationObjects=false)", () => {
+  it("todo GET /card/ do mover pede a leitura leve (cartão com muitos vínculos passava de 15 s)", async () => {
+    await run([
+      "card", "move", "--card-id", "55", "--flow-id", "316", "--to", "Agendamento",
+      "--set", "Horas=3,5", "--set", "Qualificado=Sim"
+    ]);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    const cardReads = requests.filter((request) => request.method === "GET" && request.path === "/card/");
+    expect(cardReads.length).toBeGreaterThan(0);
+    for (const read of cardReads) {
+      expect(read.query.get("withRelationObjects")).toBe("false");
+    }
+  });
+});

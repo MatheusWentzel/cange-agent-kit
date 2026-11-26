@@ -149,7 +149,7 @@ export function registerCardReadCommand(cardCommand: Command): void {
                 };
               }
               try {
-                const result = await kit.contracts.getCard({ flowId, cardId });
+                const result = await kit.contracts.getCard({ flowId, cardId, withRelationObjects: false });
                 return buildLeanRead(result, request, profile);
               } catch (error) {
                 // Um card com erro não derruba o lote — vira entrada de erro
@@ -195,7 +195,8 @@ export function registerCardReadCommand(cardCommand: Command): void {
 
         const result = await kit.contracts.getCard({
           flowId: options.flowId,
-          cardId: options.cardId
+          cardId: options.cardId,
+          withRelationObjects: false
         });
         const read = buildLeanRead(result, request, profile);
         return profile === "lean" ? dropEmpty(read) : read;

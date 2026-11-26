@@ -731,6 +731,7 @@ export async function checkPayloadMove(
     kit.contracts.getCard({
       flowId: payload.flowId,
       cardId: payload.cardId,
+      withRelationObjects: false,
       ...(payload.isTestMode === true ? { isTestMode: true } : {})
     })
   ]);
