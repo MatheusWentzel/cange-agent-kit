@@ -6,6 +6,7 @@ import { createArtifactsContracts } from "./artifacts.js";
 import { createAttachmentsContracts } from "./attachments.js";
 import { createCardsContracts } from "./cards.js";
 import { createCommentsContracts } from "./comments.js";
+import { createConditionalsContracts } from "./conditionals.js";
 import { createDiscoveryContracts } from "./discovery.js";
 import { createFieldsContracts } from "./fields.js";
 import { createFlowCardsContracts } from "./flowCards.js";
@@ -41,6 +42,7 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
   const timeTracking = createTimeTrackingContracts(params.client);
   const users = createUsersContracts(params.client);
   const flowV2Build = createFlowV2BuildContracts(params.client);
+  const conditionals = createConditionalsContracts({ client: params.client, users, registerQuery, cards });
   const flowQuery = createFlowQueryContracts(params.client);
   const flowViews = createFlowViewsContracts(params.client);
   const flowCards = createFlowCardsContracts({ cards, flows, flowQuery });
@@ -125,7 +127,11 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     listFlowBuildFieldTypes: flowV2Build.listFieldTypes,
     getFlowBuildFieldTypeDescriptor: flowV2Build.getFieldTypeDescriptor,
     listFlowBuildStepRelationshipsByFlow: flowV2Build.listStepRelationshipsByFlow,
-    listFlowBuildStepRelationshipsFromStep: flowV2Build.listStepRelationshipsFromStep
+    listFlowBuildStepRelationshipsFromStep: flowV2Build.listStepRelationshipsFromStep,
+    // Condicionais: `prepare*` só lê e valida (é o dry-run); quem grava está em `mutations`.
+    listFlowBuildConditionals: conditionals.listConditionals,
+    prepareFlowBuildConditionalCreate: conditionals.prepareConditionalCreate,
+    prepareFlowBuildConditionalUpdate: conditionals.prepareConditionalUpdate
   };
 
   const mutations = {
@@ -166,7 +172,9 @@ export function createContracts(params: { client: CangeClient; config: CangeReso
     patchFlowBuildFieldByForm: flowV2Build.patchFieldByForm,
     deleteFlowBuildFieldByFlow: flowV2Build.deleteFieldByFlow,
     deleteFlowBuildFieldByStep: flowV2Build.deleteFieldByStep,
-    upsertFlowBuildStepRelationship: flowV2Build.upsertStepRelationship
+    upsertFlowBuildStepRelationship: flowV2Build.upsertStepRelationship,
+    createFlowBuildConditional: conditionals.createConditional,
+    updateFlowBuildConditional: conditionals.updateConditional
   };
 
   return {

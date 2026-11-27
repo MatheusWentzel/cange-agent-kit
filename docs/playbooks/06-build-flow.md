@@ -1,10 +1,10 @@
 # Playbook 06: Construir fluxo do zero (Flow V2 Build API)
 
-Use este playbook para criar/alterar fluxos, etapas, campos e relacionamentos via a Flow V2 Build API (prefixo `/flow/v2/build`). Todos os comandos abaixo estão expostos sob `cange flow-build ...`.
+Use este playbook para criar/alterar fluxos, etapas, campos e relacionamentos via a Flow V2 Build API (prefixo `/flow/v2/build`). Todos os comandos abaixo estão expostos sob `cange flow-build ...`. As condicionais (`flow-build conditional`) usam a rota da tela, `/conditional`, e não a Build API.
 
 ## Princípios obrigatórios
 
-- Use **somente** `pnpm cli flow-build ...` (nunca `curl` direto).
+- Use **somente** `pnpm cli flow-build ...` (nunca `curl` direto). Vale em especial para condicional: regra montada à mão é avaliada certo no cartão e mesmo assim não abre no editor da tela.
 - Bodies são **strict**: chaves extras causam `VALIDATION_FAILED`. Envie apenas o que o schema aceita.
 - Para **qualquer** rota com `:id_flow`, o token precisa ser **administrador** daquele fluxo (`flow_user.type = 'A'`). 404 com `FLOW_NOT_FOUND` significa “sem permissão ou fluxo inexistente” — não exponha dados.
 - Quem cria o fluxo (`flow create`) é registrado automaticamente como admin `'A'`.
@@ -25,7 +25,8 @@ Use este playbook para criar/alterar fluxos, etapas, campos e relacionamentos vi
    - No formulário inicial: `pnpm cli flow-build field create --id-flow <id> --form-id <form_init_id> --payload <field.json>`.
    - Em um form de etapa: `pnpm cli flow-build field create --id-flow <id> --id-step <id_step> --payload <field.json>` (server resolve o form da etapa).
 7. Verificar o grafo: `pnpm cli flow-build step-relationship list --id-flow <id>` (todas as etapas com `relationship_steps` + `conditionals`).
-8. Para inspecionar um nó específico: `pnpm cli flow-build step-relationship from --id-flow <id> --id-step <parent>`.
+8. Condicionais, **depois** de todos os campos e opções existirem: `pnpm cli flow-build conditional create ...` e conferir com `pnpm cli flow-build conditional list --id-flow <id>` (`notOpenable` precisa ser 0).
+9. Para inspecionar um nó específico: `pnpm cli flow-build step-relationship from --id-flow <id> --id-step <parent>`.
 
 ## Descoberta antes de criar campos
 
@@ -120,6 +121,110 @@ Base comum (criação):
 - `list --id-flow <id>` → array de `FlowStep` ordenado por `index` com `relationship_steps[]` (aresta partindo da etapa) e `conditionals[]`.
 - `from --id-flow <id> --id-step <parent>` → todas as etapas; cada uma traz `step_relationship` (join como destino a partir do pai) e `conditionals` filtrados. Quando não existe linha persistida, o servidor sintetiza `{ id_step_relationship: 0, isActive: '1' }`.
 
+### `flow-build conditional` (campo e etapa)
+
+O kit busca o campo de origem, valida e monta `conditions_items` no formato exato da tela. Ninguém monta esse JSON à mão: o editor lê a lista de valores de `selectedField.options`, e uma regra gravada só com id, nome e tipo abre com a lista carregando para sempre.
+
+```bash
+# Ler (não grava): do fluxo, de um campo ou de um par de etapas
+pnpm cli flow-build conditional list --id-flow 123
+pnpm cli flow-build conditional list --id-flow 123 --id-field 456
+pnpm cli flow-build conditional list --id-flow 123 --id-step 22 --id-step-from 11
+
+# Criar em campo: exibir o campo 456 quando Tipo for Externo (sempre --dry-run antes)
+pnpm cli flow-build conditional create --id-flow 123 --id-field 456 --action exibir \
+  --when '{"field":"Tipo","comparator":"Igual a","value":"Externo"}' --dry-run
+
+# Criar em etapa: impedir mover de 11 para 22
+pnpm cli flow-build conditional create --id-flow 123 --id-step 22 --id-step-from 11 --action bloquear \
+  --when '{"field":"Valor","comparator":"Maior que","value":1000}'
+
+# Alterar no lugar (mesmo id): só a ação, ou todas as condições, ou só consertar o formato
+pnpm cli flow-build conditional update --id-flow 123 --id-conditional 789 --action esconder
+pnpm cli flow-build conditional update --id-flow 123 --id-conditional 789 --rehydrate
+```
+
+| Parâmetro | Regra |
+|-----------|-------|
+| `--action` | Campo: `exibir` (1) ou `esconder` (2). Etapa: `permitir` (1) ou `bloquear` (2) |
+| `--when <json>` | Uma condição; repita para várias (todas precisam valer). `{ field, comparator, value }` ou `{ field, comparator, values }` |
+| `--payload <path>` | No lugar de `--action` e `--when`: `{ action, conditions[] }` (`examples/flow-build-conditional.example.json`) |
+| `field` | Id, hash ou título. Padrão: `-1` vencimento, `-2` criação, `-3` responsável, `-4` etapa |
+| `value` de opção | Rótulo ou código. Se o texto é código de uma opção e rótulo de outra, use `{"code":"2"}` ou `{"label":"2"}` |
+| `value` de usuário | Id, nome, e-mail, ou `-1` (usuário logado) |
+| `value` de cadastro e de cartão | Id da entrada ou do cartão, conferido contra o vínculo do campo |
+| `value` de percentual (número com `variation` `"2"`) | `"10%"` ou a fração `0.1`. O kit grava a fração, com a conta da tela e sem arredondar (`1.1%` vira `0.011000000000000001`, que é o que a resposta digitada vira). Acima de 10 sem `%` é recusado; entre 1 e 10, aviso |
+| `value` de CPF, CNPJ e telefone | Completo e válido: o kit grava com a máscara da tela. Incompleto: grava como veio, com aviso |
+| `value` de data | `dd/MM/yyyy` ou `yyyy-MM-dd`. Atalho relativo (hoje, esta semana) é recusado: o avaliador não o calcula |
+
+Comparadores por tipo:
+
+- **Opção** (seleção, rádio, checkbox, usuário, solicitante, cadastro, cartão, lista): `Igual a`, `Não é igual a`, `É uma das`, `Não é uma das`, `Está em branco`, `Não está em branco`. Só `É uma das` e `Não é uma das` aceitam mais de um valor.
+- **Texto** (curto, longo, rico, e-mail, telefone, documento, link, id): `Contém`, `Não contém`, `Igual a`, `Não é igual a`, `Está em branco`, `Não está em branco`.
+- **Número** (número, percentual, moeda, fórmula): `Igual a`, `Menor que`, `Maior que`, `Igual a ou maior que`, `Igual a ou menor que`, `Não é igual a`, `Está em branco`, `Não está em branco`. Número e moeda com ponto decimal.
+- **Data** (data, vencimento, `-1`, `-2`): `Igual a`, `Antes de`, `Depois de`, `Igual a ou depois`, `Igual a ou antes`, `Não é igual a`, `Está em branco`, `Não está em branco`.
+- **Switch**: só `Igual a`, com `true` ou `false`.
+
+Recusado antes de gravar (exit 2): valor fora das opções; campo de opção sem opções (ou sem o vínculo, nos tipos de lista dinâmica); comparador de outro tipo; campo de origem, campo alvo ou etapa fora do fluxo; título repetido (informe o id); tipo sem filtro na tela (cor, ícone, anexo, título); Data de Conclusão (`-9`), que a tela não oferece e o avaliador ignora.
+
+Depois de gravar, o kit relê a regra e responde `verified`. `verified: false` = gravou, mas a releitura falhou: confira com `list`. Se a API não responder, **não repita o `create`** sem antes rodar `list` (a regra pode ter sido gravada).
+
+`list` marca cada regra com `opensInEditor`; quando `false`, `editorIssues` diz o motivo e `update --rehydrate` conserta no lugar, quando a condição ainda pode ser remontada (ver abaixo). Nos tipos de lista dinâmica (usuário, cadastro, cartão) o `list` confere o vínculo, não o valor.
+
+Ler o efeito no formulário: `show_on_form: "S"` significa **escondido**. Com ação `exibir`, o campo fica escondido até a condição valer. A primeira regra verdadeira, na ordem da tela, vence.
+
+#### Regra que a tela aceita e executa errado
+
+A tela deixa salvar condições que o avaliador dela nunca casa, sempre casa ou inverte. Quem cria pela tela testa e vê; um agente não. O kit **recusa** (exit 2, nada gravado) e a mensagem traz a saída, quando há uma.
+
+| Alvo | Condição recusada | O que a tela faz | Use no lugar |
+|------|-------------------|------------------|--------------|
+| Etapa | `Não é igual a` em texto (curto, longo, e-mail, telefone, documento, link, id) e em fórmula | Sai invertida | `Igual a` com a ação inversa (*) |
+| Etapa | Fórmula com `50%`, `0,4` ou outro valor que não é número com ponto | Nunca casa | `0.5`, `0.4` |
+| Etapa | Fórmula `Igual a` com `0.50` | Nunca casa (compara texto) | `0.5` |
+| Os dois | `-1` e `-2` com `Igual a`, `Antes de`, `Depois de`, `Igual a ou depois`, `Igual a ou antes` | Nunca casa | Campo de data ou de vencimento do formulário |
+| Os dois | `-1` e `-2` com `Não é igual a` | Casa com qualquer data preenchida | `Não está em branco`, se era essa a intenção |
+| Os dois | `-1` e `-2` com `Está em branco` | Nunca casa | `Não está em branco` com a ação inversa (*) |
+| Os dois | Data com `Não é igual a` | Sempre casa | `Igual a` com a ação inversa (*). Em campo, data vazia muda o efeito (**) |
+| Campo | Data com `Não está em branco` | Casa também com a data vazia (apagada, ou de outro formulário do cartão) | `Está em branco` com a ação inversa (*) |
+| Os dois | Texto rico `Igual a` / `Não é igual a` com texto puro | Compara o HTML: nunca casa (em campo, `Não é igual a` sempre casa) | `Contém` / `Não contém` (com aviso) |
+| Etapa | Texto rico `Não é igual a` com HTML no valor | Sai invertida | `Igual a` com a ação inversa (*) |
+| Os dois | Percentual ou fórmula percentual com número acima de 10 sem `%` | Compara com a fração: nunca (ou sempre) casa | `"15%"` ou `0.15` |
+| Os dois | CPF, CNPJ ou telefone completo sem a máscara (regra já gravada; no `create` o kit põe a máscara) | Nunca (ou sempre) casa | O valor com máscara, que vem na mensagem |
+| Os dois | Caixa única (`CHECK_BOX_ONE_FIELD`), qualquer comparador | A resposta é verdadeiro/falso, nunca o código | Campo Switch |
+| Os dois | Lista de itens (`INPUT_LIST_FIELD`) com valor | A resposta é texto livre, nunca o código | Só `Está em branco` / `Não está em branco` |
+| Os dois | Data de Conclusão (`-9`) e atalho de data (hoje, esta semana) | Ignora / nunca casa | Campo de data com `dd/MM/yyyy` |
+
+(*) **Ação inversa** (permitir no lugar de bloquear, exibir no lugar de esconder) só dá o mesmo efeito na **última** regra do alvo: a regra que casa encerra a avaliação, a que não casa passa a vez. Regra com outras condições vira **duas**, nesta ordem e no fim da lista:
+
+1. só a condição trocada, com a ação inversa;
+2. as demais condições, com a ação original.
+
+Exemplo, "permitir mover se Tipo não é X e Valor > 100": primeiro `bloquear` quando Tipo `Igual a` X; depois `permitir` quando Valor `Maior que` 100. Confira a ordem em `list` (`index`): se alguém já reordenou as regras na tela, a nova pode não ficar por último.
+
+(**) Em campo, com a data vazia, a tela trata `Igual a` como verdadeiro. Em regra de uma condição só, ponha antes uma regra com `Está em branco` e a ação original.
+
+Erros só de parte das situações passam, com `executionWarnings` na resposta (leia antes de concluir):
+
+- **Número, moeda e fórmula em branco contam como 0** quando a resposta está em outro formulário do cartão: `Menor que 1000`, `Igual a 0`, `Igual a ou menor que 10` casam sem resposta, e `Não é igual a 0` não casa. Numa regra que **libera etapa**, o cartão passa sem o número. Some `Não está em branco` no mesmo campo (resolve, menos no `Não é igual a 0`).
+- **Campo, data** com `Igual a`, `Antes de`, `Depois de` etc.: casa também com a data vazia (apagada, ou de outro formulário do cartão).
+- **Etapa, resposta em lista** (checkbox, cadastro, cartão): com o campo no formulário aberto, `É uma das` nunca casa, e `Não é igual a` e `Não é uma das` sempre casam. Só acertam com a resposta já gravada em outro formulário. `Igual a` erra com mais de um item.
+- **Etapa, usuário e solicitante**: com o campo no formulário aberto, `É uma das` nunca casa, `Não é igual a` e `Não é uma das` sempre casam. `Igual a` funciona.
+- **Campo, resposta em lista**: `Não é igual a` e `Não é uma das` erram com mais de um item; em cadastro e cartão, `Igual a` e `É uma das` também.
+- **Texto rico** com `Contém` / `Não contém`: procura no HTML. Negrito no meio, `&`, espaço especial e nome de marca (`p`, `strong`) mudam o resultado. Com HTML no valor, `Igual a` compara o HTML inteiro.
+- **CPF, CNPJ e telefone** com valor incompleto ou inválido: a resposta vem com máscara, e um trecho sem a pontuação pode não ser achado.
+- **ID**: com o campo no formulário aberto a resposta é sempre `#`; só acerta com o ID já gravado.
+- **Percentual** entre 1 e 10: confira se não era para ser percentual.
+- **Etapa, fórmula** com `Igual a`: compara texto (`10` não casa com `10.00`).
+
+Regra que **já existe** nesses casos:
+
+- `list` sinaliza em cada regra `runsAsConfigured`, `executionIssues`, `executionWarnings`, e no total `misexecuted`. Não altera nada.
+- `update --rehydrate` regrava o formato e mantém a lógica e os valores como estão (sem pôr máscara nem converter percentual), devolvendo `executionIssues`: o erro de execução continua. **Nem toda regra passa:** sai com exit 2, sem gravar, quando a condição não pode ser remontada (Data de Conclusão, atalho de data, número com vírgula ou com `%` gravado como texto, condição sem valor, valor que saiu das opções). A saída é reescrever com `--when`.
+- `update --action` sem condições novas é **recusado** quando alguma condição é executada errado: trocar só a ação não daria o efeito esperado e o agente não veria. Reescreva as condições com `--when`.
+
+Casos conferidos rodando os avaliadores da tela offline, por tipo, comparador e alvo. Se a tela for corrigida, eles saem de `src/utils/conditionalExecution.ts` e desta lista.
+
 ## Erros frequentes da API
 
 - `VALIDATION_FAILED` — body inválido ou chaves extras. Releia o schema do recurso.
@@ -138,3 +243,5 @@ Base comum (criação):
 - Criar campo `COMBO_BOX_FIELD` / `RADIO_BOX_FIELD` / `CHECK_BOX_FIELD` com `options` vazio.
 - Misturar `--id-step` e `--form-id` no mesmo `field create` (use um único alvo).
 - Repetir `flow_id` no body de `step-relationship set` (já vem da URL).
+- Montar `conditions_items` / `selectedField` à mão ou chamar `POST /conditional` direto (use `flow-build conditional`).
+- Apagar e recriar condicional que o editor não abre (use `update --rehydrate`, que mantém o id e a ordem).

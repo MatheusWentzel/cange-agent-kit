@@ -174,6 +174,7 @@ Read-only:
 - `pnpm cli flow-build field-types get --type <TIPO>`
 - `pnpm cli flow-build step-relationship list --id-flow <id>`
 - `pnpm cli flow-build step-relationship from --id-flow <id> --id-step <parent>`
+- `pnpm cli flow-build conditional list --id-flow <id> [--id-field <id> | --id-step <destino> --id-step-from <origem>]` (marca o que o editor da tela não abre)
 
 Mutações:
 
@@ -185,6 +186,8 @@ Mutações:
 - `pnpm cli flow-build field create --id-flow <id> (--id-step <id> | --form-id <id>) --payload <path-to-json> [--dry-run]`
 - `pnpm cli flow-build field update --id-flow <id> [--id-step <id> | --form-id <id>] --id-field <id> --payload <path-to-json> [--dry-run]`
 - `pnpm cli flow-build step-relationship set --id-flow <id> --payload <path-to-json> [--dry-run]`
+- `pnpm cli flow-build conditional create --id-flow <id> (--id-field <id> | --id-step <destino> --id-step-from <origem>) --action <acao> --when <json>... [--dry-run]`
+- `pnpm cli flow-build conditional update --id-flow <id> --id-conditional <id> [--action <acao>] [--when <json>...] [--rehydrate] [--dry-run]`
 
 Ordem recomendada de construção:
 
@@ -194,7 +197,8 @@ Ordem recomendada de construção:
 4. (opcional) `step reorder` para ajustar índices.
 5. `step-relationship set` por aresta (`isActive: '1'` permite; `'0'` bloqueia).
 6. `field create` em cada `form_init_id` ou em cada `step` (use somente um entre `--form-id` e `--id-step`).
-7. Verificar com `step-relationship list --id-flow <id>`.
+7. `conditional create` depois que todos os campos e opções existem (nunca montar `conditions_items` à mão).
+8. Verificar com `step-relationship list --id-flow <id>` e `conditional list --id-flow <id>` (`notOpenable` 0).
 
 Regras especiais:
 
@@ -226,6 +230,7 @@ Exemplos prontos no repositório:
 - `examples/flow-build-create-field-title.example.json`
 - `examples/flow-build-update-field.example.json`
 - `examples/flow-build-step-relationship.example.json`
+- `examples/flow-build-conditional.example.json`
 
 `comment create`:
 

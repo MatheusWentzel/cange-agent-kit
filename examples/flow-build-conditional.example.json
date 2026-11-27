@@ -1,0 +1,7 @@
+{
+  "action": "exibir",
+  "conditions": [
+    { "field": "Tipo", "comparator": "É uma das", "values": ["Interno", "Externo"] },
+    { "field": "Valor", "comparator": "Maior que", "value": 1000 }
+  ]
+}
