@@ -229,7 +229,7 @@ async function runInlineMode(
   }
 
   await auth();
-  const card = await kit.contracts.getCard({ flowId, cardId });
+  const card = await kit.contracts.getCard({ flowId, cardId, withRelationObjects: false });
   const state = cardStateOf(card.raw);
 
   let responsible: { id: number; name?: string } | null | undefined;

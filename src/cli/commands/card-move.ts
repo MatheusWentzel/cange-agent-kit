@@ -121,7 +121,7 @@ export async function runInlineMove(
   const auth = authOnce(kit, ensureAuth);
   await auth();
 
-  const [ctx, card] = await Promise.all([loadFlowContext(kit, flowId), kit.contracts.getCard({ flowId, cardId })]);
+  const [ctx, card] = await Promise.all([loadFlowContext(kit, flowId), kit.contracts.getCard({ flowId, cardId, withRelationObjects: false })]);
 
   const fromStep = ctx.steps.find((step) => String(step.id) === String(card.summary.currentStepId));
   if (!fromStep) {

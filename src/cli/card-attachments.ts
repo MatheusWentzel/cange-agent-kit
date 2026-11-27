@@ -252,7 +252,7 @@ export async function collectCardAttachments(
   input: { flowId: number; cardId: number; draftFormIds?: string[] }
 ): Promise<CardAttachments> {
   const [card, fieldSet, comments, tab] = await Promise.all([
-    kit.contracts.getCard({ flowId: input.flowId, cardId: input.cardId }),
+    kit.contracts.getCard({ flowId: input.flowId, cardId: input.cardId, withRelationObjects: false }),
     kit.contracts.getFieldsByFlow({ flowId: input.flowId }),
     kit.contracts.listCommentsByCard({ flowId: input.flowId, cardId: input.cardId }),
     kit.contracts.getCardTabAttachments({ flowId: input.flowId, cardId: input.cardId })

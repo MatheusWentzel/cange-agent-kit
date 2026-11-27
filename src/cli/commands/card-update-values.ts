@@ -99,7 +99,7 @@ async function runInlineMode(
 
   const [ctx, card] = await Promise.all([
     loadFlowContext(kit, flowId),
-    kit.contracts.getCard({ flowId, cardId })
+    kit.contracts.getCard({ flowId, cardId, withRelationObjects: false })
   ]);
   const currentStepId = card.summary.currentStepId;
   const currentStep = ctx.steps.find((step) => String(step.id) === String(currentStepId));

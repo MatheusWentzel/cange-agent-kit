@@ -74,6 +74,13 @@ export interface CardsContracts {
     companyId?: number | string;
     /** Cartão de modo teste (deleted 'T'): o GET /card só acha com isTestMode=true. */
     isTestMode?: boolean;
+    /**
+     * `false` = leitura leve (opt-in): os vínculos vêm só com value, valueString e
+     * relatedId, sem o cartão ou a entrada apontada inteira (valueCardFlow/valueRegister,
+     * carregados em cascata e que passavam de 15 s em cartão com muitos vínculos).
+     * Omitido = resposta completa de sempre.
+     */
+    withRelationObjects?: boolean;
   }) => Promise<{
     raw: unknown;
     summary: CardSummary;
@@ -325,7 +332,8 @@ export function createCardsContracts(client: CangeClient): CardsContracts {
           id_card: toNumber(parsed.data.cardId),
           flow_id: toNumber(parsed.data.flowId),
           company_id: parsed.data.companyId !== undefined ? toNumber(parsed.data.companyId) : undefined,
-          isTestMode: parsed.data.isTestMode === true ? true : undefined
+          isTestMode: parsed.data.isTestMode === true ? true : undefined,
+          withRelationObjects: parsed.data.withRelationObjects === false ? false : undefined
         }
       });
 

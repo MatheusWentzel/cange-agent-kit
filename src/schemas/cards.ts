@@ -101,7 +101,12 @@ export const getCardParamsSchema = z.object({
   cardId: idLikeSchema,
   flowId: idLikeSchema,
   companyId: idLikeSchema.optional(),
-  isTestMode: z.boolean().optional()
+  isTestMode: z.boolean().optional(),
+  // Leitura leve, opt-in: `false` manda `withRelationObjects=false` e o back devolve os
+  // vínculos (fluxo/cadastro) só com value, valueString e relatedId, sem o objeto
+  // apontado inteiro (valueCardFlow/valueRegister, carregado em cascata). Omitido = o
+  // GET /card/ de sempre. Back antigo ignora o parâmetro (mesma resposta de antes).
+  withRelationObjects: z.boolean().optional()
 });
 
 export const listCardsByFlowParamsSchema = z.object({
